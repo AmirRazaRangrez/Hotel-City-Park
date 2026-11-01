@@ -357,8 +357,22 @@ async function startServerAndNavigate() {
         USE_APPDATA: '1',
         PORT: String(PORT)
       },
-      stdio: startupFd ? ['ignore', startupFd, startupFd] : 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true
+    });
+
+    let recentStderr = '';
+    serverProcess.stdout.on('data', (d) => {
+      const msg = d.toString();
+      console.log(`[Server] ${msg.trim()}`);
+      if (startupFd) { try { fs.writeSync(startupFd, msg); } catch (_) {} }
+    });
+
+    serverProcess.stderr.on('data', (d) => {
+      const msg = d.toString();
+      console.error(`[Server Error] ${msg.trim()}`);
+      recentStderr += msg;
+      if (startupFd) { try { fs.writeSync(startupFd, msg); } catch (_) {} }
     });
 
     serverProcess.on('error', (err) => {
@@ -366,12 +380,21 @@ async function startServerAndNavigate() {
       if (startupFd) {
         try { fs.writeSync(startupFd, `[Spawn Error] ${err.message}\n`); } catch (_) {}
       }
+      dialog.showErrorBox('Hotel City Park CRM - Server Error', `Failed to start server:\n${err.message}`);
     });
 
     serverProcess.on('exit', (code, signal) => {
       console.warn(`[Electron] Server process exited with code ${code}, signal ${signal}`);
       if (startupFd) {
         try { fs.writeSync(startupFd, `[Server Exited] Code: ${code}, Signal: ${signal}\n`); } catch (_) {}
+      }
+      if (code !== 0 && code !== null) {
+        const detail = recentStderr.trim() || `Server process exited unexpectedly with code ${code}. Check %APPDATA%\\HotelCityPark\\server_startup.log for details.`;
+        console.error(`[Electron] FATAL SERVER CRASH:\n${detail}`);
+        dialog.showErrorBox(
+          'Hotel City Park CRM - Server Crash',
+          `The backend server stopped unexpectedly (code: ${code}).\n\nError details:\n${detail.slice(0, 800)}`
+        );
       }
     });
   } catch (err) {

@@ -247,6 +247,22 @@ if (fs.existsSync(electronAppDir)) {
       console.log('  ✓ Cleaned src directory from release-electron package for ultra-fast startup');
     } catch (e) {}
   }
+
+  // Sync Clean_Start.bat
+  const cleanStartSrc = path.join(releaseDir, 'Clean_Start.bat');
+  if (fs.existsSync(cleanStartSrc)) {
+    fs.copyFileSync(cleanStartSrc, path.join(electronRootDir, 'Clean_Start.bat'));
+    console.log('  ✓ release-electron/Clean_Start.bat synchronized.');
+  }
+
+  // Bundle Visual C++ Redistributable DLLs
+  try {
+    require('./copy_vc_dlls');
+    console.log('  ✓ Visual C++ Redistributable DLLs bundled.');
+  } catch (err) {
+    console.warn('  ⚠️ Could not bundle VC++ DLLs:', err.message);
+  }
+
   console.log('  ✓ release-electron desktop bundle updated.');
 }
 
