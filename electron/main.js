@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog } = require('electron');
 const path = require('path');
 const net = require('net');
 const { spawn } = require('child_process');
@@ -291,6 +291,16 @@ async function startServerAndNavigate() {
   const serverScript = path.join(rootDir, 'server.js');
   const nodeBin = findNodeBinary();
 
+  const appDataDir = path.join(process.env.APPDATA || '', 'HotelCityPark');
+  if (!fs.existsSync(appDataDir)) {
+    try { fs.mkdirSync(appDataDir, { recursive: true }); } catch (_) {}
+  }
+  const startupLogPath = path.join(appDataDir, 'server_startup.log');
+  let startupFd = null;
+  try {
+    startupFd = fs.openSync(startupLogPath, 'w');
+  } catch (_) {}
+
   console.log(`[Electron] Spawning backend server: ${nodeBin} -> ${serverScript}`);
   try {
     serverProcess = spawn(nodeBin, [serverScript], {
@@ -301,12 +311,22 @@ async function startServerAndNavigate() {
         USE_APPDATA: '1',
         PORT: String(PORT)
       },
-      stdio: 'ignore',
+      stdio: startupFd ? ['ignore', startupFd, startupFd] : 'ignore',
       windowsHide: true
     });
 
     serverProcess.on('error', (err) => {
       console.error('[Electron] Failed to start backend server:', err);
+      if (startupFd) {
+        try { fs.writeSync(startupFd, `[Spawn Error] ${err.message}\n`); } catch (_) {}
+      }
+    });
+
+    serverProcess.on('exit', (code, signal) => {
+      console.warn(`[Electron] Server process exited with code ${code}, signal ${signal}`);
+      if (startupFd) {
+        try { fs.writeSync(startupFd, `[Server Exited] Code: ${code}, Signal: ${signal}\n`); } catch (_) {}
+      }
     });
   } catch (err) {
     console.error('[Electron] Exception launching server process:', err);
@@ -370,14 +390,21 @@ function createMainWindow() {
   }
 
   // Gracefully handle any transient connection glitch during server boot
+  let failLoadRetries = 0;
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
     if (validatedURL && validatedURL.includes(`localhost:${PORT}`)) {
-      console.warn(`[Electron] did-fail-load: ${errorCode} (${errorDescription}). Retrying in 200ms...`);
+      failLoadRetries++;
+      if (failLoadRetries > 20) {
+        console.error(`[Electron] Max retries reached for ${validatedURL}: ${errorCode} (${errorDescription})`);
+        const detailMsg = "The local hotel server on port " + PORT + " did not respond.\n\nPlease check:\n1. If running from a USB Pen Drive, copy the entire 'Hotel City Park CRM-win32-x64' folder to your computer's C:\\ or D:\\ drive first.\n2. Ensure no other software is using port " + PORT + ".";
+        dialog.showErrorBox('Hotel City Park CRM - Server Connection Failed', detailMsg);
+        return;
+      }
       setTimeout(() => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.loadURL(`http://localhost:${PORT}/hospitality`);
         }
-      }, 200);
+      }, 350);
     }
   });
 

@@ -447,3 +447,4 @@ export default function CFormModal({ isOpen, onClose, initialData = {}, onSave }
     </div>
   );
 }
+
