@@ -263,6 +263,13 @@ if (fs.existsSync(electronAppDir)) {
     console.warn('  ⚠️ Could not bundle VC++ DLLs:', err.message);
   }
 
+  // Ensure all runtime node_modules dependencies are synced
+  try {
+    require('./sync_production_modules');
+  } catch (err) {
+    console.warn('  ⚠️ Could not sync production node_modules:', err.message);
+  }
+
   console.log('  ✓ release-electron desktop bundle updated.');
 }
 
