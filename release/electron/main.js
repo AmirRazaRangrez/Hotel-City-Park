@@ -76,6 +76,46 @@ function isPortActive(port) {
   });
 }
 
+/**
+ * Check if server on port is responding to /api/health
+ */
+function checkServerHealth(port) {
+  return new Promise((resolve) => {
+    const http = require('http');
+    const req = http.get(`http://127.0.0.1:${port}/api/health`, { timeout: 350 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          resolve(parsed && parsed.status === 'ok');
+        } catch (_) {
+          resolve(false);
+        }
+      });
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
+
+/**
+ * Terminate any stale zombie process holding port 3000 on Windows
+ */
+function killZombiePort(port) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve();
+    try {
+      const { exec } = require('child_process');
+      exec(`for /f "tokens=5" %a in ('netstat -aon ^| findstr ":${port}" ^| findstr "LISTENING"') do taskkill /F /PID %a`, () => {
+        setTimeout(resolve, 250);
+      });
+    } catch (_) {
+      resolve();
+    }
+  });
+}
+
 function getAppConfig() {
   const appDataDir = path.join(process.env.APPDATA || '', 'HotelCityPark');
   const configFile = path.join(appDataDir, 'network_config.json');
@@ -276,14 +316,20 @@ async function startServerAndNavigate() {
   }
 
   // In Master Mode:
-  // 1. If server is already active, navigate instantly!
+  // 1. If port is already bound, check if it's a healthy instance of our server
   if (await isPortActive(PORT)) {
-    console.log(`[Electron] Backend server already active on port ${PORT}. Connecting immediately.`);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.loadURL(targetUrl, { extraHeaders: 'pragma: no-cache\ncache-control: no-cache\n' });
+    const isHealthy = await checkServerHealth(PORT);
+    if (isHealthy) {
+      console.log(`[Electron] Backend server already active and healthy on port ${PORT}. Connecting immediately.`);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.loadURL(targetUrl, { extraHeaders: 'pragma: no-cache\ncache-control: no-cache\n' });
+      }
+      setupMenu();
+      return;
+    } else {
+      console.warn(`[Electron] Port ${PORT} is occupied by an unresponsive or outdated process. Terminating stale process...`);
+      await killZombiePort(PORT);
     }
-    setupMenu();
-    return;
   }
 
   // 2. Spawn backend server
@@ -379,6 +425,7 @@ function createMainWindow() {
   // Clear HTTP/session cache on startup so new bundle versions are always loaded freshly on any machine
   try {
     mainWindow.webContents.session.clearCache();
+    mainWindow.webContents.session.clearStorageData({ storages: ['serviceworkers', 'cachestorage'] });
   } catch (e) {
     console.warn('[Electron] Could not clear cache:', e.message);
   }
