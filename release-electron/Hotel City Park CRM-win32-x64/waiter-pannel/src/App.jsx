@@ -629,27 +629,7 @@ export default function App() {
   };
 
   const handleSelectTable = (table) => {
-    const isManagerOrCaptain = 
-      currentUser?.role === 'manager' || 
-      currentUser?.role === 'admin' || 
-      currentUser?.role === 'restaurant' ||
-      String(currentUser?.username || '').toLowerCase().includes('cap') ||
-      String(currentUser?.username || '').toLowerCase().includes('admin');
-
-    const isMine =
-      (table.waiter_id && table.waiter_id === currentUser?.id) ||
-      (table.waiter_name && (
-        String(table.waiter_name).toLowerCase() === String(currentUser?.full_name || '').toLowerCase() ||
-        String(table.waiter_name).toLowerCase() === String(currentUser?.username || '').toLowerCase()
-      ));
-
-    const isOccupied = table.status === 'occupied' || (table.cart && table.cart.length > 0) || table.status === 'running';
-
-    if (isOccupied && !isMine && !isManagerOrCaptain) {
-      showToast(`🔒 Table ${table.table_number || table.id} is attended by ${table.waiter_name || 'another waiter'}. You cannot take orders.`);
-      return;
-    }
-
+    // Multi-waiter: Any waiter can attend, add items, or view running tables
     const numStr = String(table.table_number || table.name || '');
     const isRS = table.table_type === 'room_service' || numStr.startsWith('RS-');
     const isP = table.table_type === 'parcel' || numStr.startsWith('P-');
@@ -668,27 +648,7 @@ export default function App() {
   };
 
   const handleSelectDestinationForMore = (dest) => {
-    const isManagerOrCaptain = 
-      currentUser?.role === 'manager' || 
-      currentUser?.role === 'admin' || 
-      currentUser?.role === 'restaurant' ||
-      String(currentUser?.username || '').toLowerCase().includes('cap') ||
-      String(currentUser?.username || '').toLowerCase().includes('admin');
-
-    const targetWaiter = dest.rawTable?.waiter_name || dest.rawOrder?.waiter_name || dest.waiter_name;
-    const targetWaiterId = dest.rawTable?.waiter_id || dest.rawOrder?.waiter_id || dest.waiter_id;
-    const isMine =
-      (targetWaiterId && targetWaiterId === currentUser?.id) ||
-      (targetWaiter && (
-        String(targetWaiter).toLowerCase() === String(currentUser?.full_name || '').toLowerCase() ||
-        String(targetWaiter).toLowerCase() === String(currentUser?.username || '').toLowerCase()
-      ));
-
-    if (targetWaiter && !isMine && !isManagerOrCaptain) {
-      showToast(`🔒 Order is attended by ${targetWaiter}. You cannot add items.`);
-      return;
-    }
-
+    // Multi-waiter: Any waiter can add more items to running orders
     let type = dest.type || 'table';
     const label = dest.label || dest.table_number || `Table ${dest.id}`;
     if (label.startsWith('RS-') || type === 'room') {
@@ -744,36 +704,7 @@ export default function App() {
   const handlePunchOrder = async ({ notes, customerName, customerPhone }) => {
     if (!destination || cart.length === 0) return;
 
-    // Instant collision check for Dine-In tables
-    if (destination.type === 'table') {
-      const freshTable = tables.find((t) => String(t.id) === String(destination.id));
-      if (freshTable) {
-        const isManagerOrCaptain = 
-          currentUser?.role === 'manager' || 
-          currentUser?.role === 'admin' || 
-          currentUser?.role === 'restaurant' ||
-          String(currentUser?.username || '').toLowerCase().includes('cap') ||
-          String(currentUser?.username || '').toLowerCase().includes('admin');
-
-        const isMine =
-          !freshTable.waiter_name ||
-          (freshTable.waiter_id && freshTable.waiter_id === currentUser?.id) ||
-          (freshTable.waiter_name && (
-            String(freshTable.waiter_name).toLowerCase() === String(currentUser?.full_name || '').toLowerCase() ||
-            String(freshTable.waiter_name).toLowerCase() === String(currentUser?.username || '').toLowerCase()
-          ));
-
-        const isTakenByOther = (freshTable.status === 'occupied' || (freshTable.cart && freshTable.cart.length > 0)) && !isMine && !isManagerOrCaptain;
-        if (isTakenByOther) {
-          setIsPunching(false);
-          setCart([]);
-          setDestination(null);
-          showToast(`⚠️ Collision Alert: Table ${destination.label} was just taken by ${freshTable.waiter_name}! Your cart has been reset.`, 5000);
-          return;
-        }
-      }
-    }
-
+    // Multi-waiter: Allow any waiter to punch additional items on running tables
     setIsPunching(true);
 
     const resolvedCustName = customerName || destination.customerName || (destination.type === 'parcel' ? destination.label : '');

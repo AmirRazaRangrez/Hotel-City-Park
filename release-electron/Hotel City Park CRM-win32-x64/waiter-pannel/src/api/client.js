@@ -590,48 +590,47 @@ export const api = {
 
   // Room Service - Occupied Rooms with Guest Info
   getOccupiedRooms: async () => {
+    const normalizeRooms = (rawList) => {
+      if (!Array.isArray(rawList)) return [];
+      const map = new Map();
+      for (const r of rawList) {
+        const rNum = String(r.room_number || r.id || '').replace(/^RS-/i, '').replace(/^Rooms*/i, '').replace(/•.*$/, '').trim();
+        if (!rNum || map.has(rNum)) continue;
+        const phone = r.guest_phone || r.guest_mobile || r.mobile || '';
+        map.set(rNum, {
+          ...r,
+          id: r.id || r.room_id || rNum,
+          room_number: rNum,
+          room_type: r.room_type || 'Standard Room',
+          floor: r.floor || 'Floor',
+          guest_name: (r.guest_name && r.guest_name.trim()) ? r.guest_name.trim() : 'In-House Guest',
+          guest_phone: (phone && phone !== '—') ? phone : '—',
+          guest_mobile: (phone && phone !== '—') ? phone : '—',
+          booking_id: r.booking_id || r.current_booking_id,
+          stay_nights: 1
+        });
+      }
+      return Array.from(map.values()).sort((a, b) => (parseInt(a.room_number) || 0) - (parseInt(b.room_number) || 0));
+    };
+
     try {
       // First try /restaurant/occupied-rooms which returns active occupied rooms with linked guests
       const occRes = await request('/restaurant/occupied-rooms', { timeout: 3000 });
       const occList = Array.isArray(occRes) ? occRes : (occRes?.rooms || []);
       if (occList.length > 0) {
-        return occList.map(r => ({
-          ...r,
-          id: r.id || r.room_id || r.room_number,
-          room_number: String(r.room_number),
-          guest_name: r.guest_name || 'In-House Guest',
-          guest_phone: r.guest_mobile || r.mobile || r.guest_phone || '—',
-          guest_mobile: r.guest_mobile || r.mobile || r.guest_phone || '—',
-          booking_id: r.booking_id || r.current_booking_id,
-          stay_nights: 1
-        }));
+        return normalizeRooms(occList);
       }
 
       const res = await request('/rooms', { timeout: 3000 });
       const rooms = res && res.rooms ? res.rooms : (Array.isArray(res) ? res : []);
       const occupied = rooms.filter(r => r.status === 'occupied' || r.current_booking_id);
       if (occupied.length > 0) {
-        return occupied.map(r => ({
-          ...r,
-          id: r.id || r.room_id || r.room_number,
-          room_number: String(r.room_number),
-          guest_name: r.guest_name || 'In-House Guest',
-          guest_phone: r.guest_mobile || r.mobile || r.guest_phone || '—',
-          guest_mobile: r.guest_mobile || r.mobile || r.guest_phone || '—',
-          booking_id: r.booking_id || r.current_booking_id,
-          checkin_date: r.checkin_time || '—',
-          stay_nights: 1
-        }));
+        return normalizeRooms(occupied);
       }
     } catch (_) {}
 
     const pkg = await fetchCloudWaiterPackage();
-    return (pkg?.occupiedRooms || []).map(r => ({
-      ...r,
-      guest_name: r.guest_name || 'In-House Guest',
-      guest_phone: r.guest_phone || r.guest_mobile || '—',
-      stay_nights: 1
-    }));
+    return normalizeRooms(pkg?.occupiedRooms || []);
   },
 
   // Order Placement (Tables, Rooms, Parcels)

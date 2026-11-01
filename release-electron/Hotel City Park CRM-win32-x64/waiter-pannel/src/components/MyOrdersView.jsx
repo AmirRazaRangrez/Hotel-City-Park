@@ -1577,18 +1577,65 @@ export default function MyOrdersView({
               const settleGrand = Math.round(Number(settleModalTable.total_amount || (settleSubtotal + settleGst)) || (settleSubtotal + settleGst));
 
               if (isRS) {
+                const matchedRoom = activeOccupiedRooms.find(r => 
+                  String(r.room_number) === String(rawRoomNum) || 
+                  String(r.id) === String(settleModalTable.room_id)
+                );
+
                 return (
                   <div>
-                    <h3 style={{ fontSize: '1.10rem', fontWeight: 900, color: 'var(--text-primary)', margin: '0 0 2px' }}>
-                      🛎️ Room Service - Room {rawRoomNum}
-                    </h3>
+                    {/* Fixed Room Service Target Card (Unable to change room) */}
+                    <div style={{
+                      background: 'rgba(59, 130, 246, 0.10)',
+                      border: '1.5px solid var(--apple-blue)',
+                      borderRadius: 'var(--radius-sm, 10px)',
+                      padding: '12px',
+                      marginBottom: '12px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{
+                            background: 'var(--apple-blue)',
+                            color: '#ffffff',
+                            fontWeight: 900,
+                            fontSize: '0.90rem',
+                            padding: '3px 8px',
+                            borderRadius: '6px'
+                          }}>
+                            ROOM {rawRoomNum}
+                          </span>
+                          <span style={{ fontSize: '0.90rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                            Room Service Order
+                          </span>
+                        </div>
+                        <span style={{
+                          fontSize: '0.64rem',
+                          fontWeight: 850,
+                          background: 'rgba(59, 130, 246, 0.20)',
+                          color: 'var(--apple-blue)',
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          border: '1px solid var(--apple-blue)'
+                        }}>
+                          🔒 Room Locked
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.84rem', fontWeight: 850, color: 'var(--text-primary)' }}>
+                        👤 {matchedRoom?.guest_name || settleModalTable.customer_name || 'In-House Guest'}
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--apple-blue)', fontWeight: 750, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span>📞</span>
+                        <span>{matchedRoom?.guest_phone || matchedRoom?.guest_mobile || settleModalTable.customer_phone || 'Mobile Not Stored'}</span>
+                      </div>
+                    </div>
+
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '4px 0 12px', padding: '6px 10px', background: 'var(--bg-surface-secondary)', borderRadius: 'var(--radius-xs)' }}>
                       <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>Amount to Settle:</span>
                       <span style={{ fontSize: '1.05rem', fontWeight: 900, color: 'var(--apple-blue)' }}>₹{settleGrand.toLocaleString('en-IN')}</span>
                     </div>
 
                     <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', margin: '0 0 10px' }}>
-                      Choose how this room service bill should be settled:
+                      Choose how Room {rawRoomNum} bill should be settled:
                     </p>
 
                     {/* 2 Clear Options Requested by User */}
@@ -1740,60 +1787,81 @@ export default function MyOrdersView({
                     ))}
                   </div>
 
-                  {/* Room Folio Sub-options for Dine-in Table */}
+                  {/* Room Folio Sub-options for Dine-in Table: Visual Square Room Grid */}
                   {paymentMode === 'room_folio' && (() => {
                     const selectedRoomObj = activeOccupiedRooms.find(r => 
                       String(r.room_number) === String(selectedRoomId) || 
                       String(r.id) === String(selectedRoomId)
                     );
+
+                    const q = (roomCardSearch || '').trim().toLowerCase();
+                    const filteredOccRooms = activeOccupiedRooms.filter(r => {
+                      if (!q) return true;
+                      const num = String(r.room_number || '').toLowerCase();
+                      const name = String(r.guest_name || '').toLowerCase();
+                      const ph = String(r.guest_phone || r.guest_mobile || '').toLowerCase();
+                      return num.includes(q) || name.includes(q) || ph.includes(q);
+                    });
+
                     return (
                       <div style={{ background: 'var(--bg-surface-secondary)', padding: '12px', borderRadius: 'var(--radius-sm)', marginBottom: '14px', border: '1px solid var(--border-medium)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                          <label style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--text-secondary)' }}>
-                            Select In-House Room:
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <label style={{ fontSize: '0.76rem', fontWeight: 850, color: 'var(--text-primary)' }}>
+                            🏨 Select Occupied Room ({activeOccupiedRooms.length}):
                           </label>
-                          <span style={{ fontSize: '0.70rem', color: 'var(--apple-blue)', fontWeight: 800 }}>
-                            {activeOccupiedRooms.length} Occupied Room{activeOccupiedRooms.length === 1 ? '' : 's'}
+                          <span style={{ fontSize: '0.68rem', color: selectedRoomId ? 'var(--apple-blue)' : 'var(--apple-orange)', fontWeight: 800 }}>
+                            {selectedRoomId ? `Room ${selectedRoomId} Selected` : 'Tap Room to Select'}
                           </span>
                         </div>
 
-                        {/* High-Contrast Dropdown - Never White on White */}
-                        <select
-                          value={selectedRoomId}
-                          onChange={(e) => setSelectedRoomId(e.target.value)}
-                          style={{
-                            width: '100%',
-                            padding: '10px 12px',
-                            borderRadius: 'var(--radius-xs, 8px)',
-                            border: '2px solid var(--apple-blue)',
-                            backgroundColor: '#ffffff',
-                            color: '#0f172a',
-                            fontSize: '0.88rem',
-                            fontWeight: 800,
-                            marginBottom: '8px',
-                            outline: 'none',
-                            WebkitAppearance: 'menulist',
-                            appearance: 'menulist'
-                          }}
-                        >
-                          <option value="" style={{ backgroundColor: '#ffffff', color: '#64748b' }}>
-                            -- Choose Occupied Room ({activeOccupiedRooms.length} available) --
-                          </option>
-                          {activeOccupiedRooms.map((r) => (
-                            <option
-                              key={r.room_number || r.id}
-                              value={String(r.room_number)}
-                              style={{ backgroundColor: '#ffffff', color: '#0f172a', fontWeight: 700 }}
-                            >
-                              Room {r.room_number} {r.guest_name ? `• ${r.guest_name}` : ''}
-                            </option>
-                          ))}
-                        </select>
+                        {/* Search Input for Occupied Rooms */}
+                        <div style={{ position: 'relative', marginBottom: '8px' }}>
+                          <input
+                            type="text"
+                            value={roomCardSearch}
+                            onChange={(e) => setRoomCardSearch(e.target.value)}
+                            placeholder="🔍 Filter room #, guest name, mobile..."
+                            style={{
+                              width: '100%',
+                              height: '34px',
+                              padding: '0 10px',
+                              background: 'var(--bg-surface)',
+                              border: '1px solid var(--border-medium)',
+                              borderRadius: 'var(--radius-xs, 6px)',
+                              color: 'var(--text-primary)',
+                              fontSize: '0.78rem',
+                              fontWeight: 650,
+                              outline: 'none',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                        </div>
 
-                        {/* Quick-Select Tap Chips for instant room selection */}
-                        {activeOccupiedRooms.length > 0 && (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
-                            {activeOccupiedRooms.map((r) => {
+                        {/* Square Room Cards Grid */}
+                        {filteredOccRooms.length === 0 ? (
+                          <div style={{
+                            padding: '16px 12px',
+                            textAlign: 'center',
+                            background: 'var(--bg-surface)',
+                            borderRadius: '8px',
+                            border: '1px dashed var(--border-medium)',
+                            color: 'var(--text-secondary)',
+                            fontSize: '0.76rem',
+                            marginBottom: '10px'
+                          }}>
+                            {activeOccupiedRooms.length === 0 ? '⚠️ No occupied rooms currently active' : '🔍 No occupied rooms match search'}
+                          </div>
+                        ) : (
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(2, 1fr)',
+                            gap: '8px',
+                            maxHeight: '210px',
+                            overflowY: 'auto',
+                            padding: '2px',
+                            marginBottom: '10px'
+                          }}>
+                            {filteredOccRooms.map((r) => {
                               const isSel = String(selectedRoomId) === String(r.room_number);
                               return (
                                 <button
@@ -1801,71 +1869,80 @@ export default function MyOrdersView({
                                   type="button"
                                   onClick={() => setSelectedRoomId(String(r.room_number))}
                                   style={{
-                                    padding: '6px 10px',
-                                    borderRadius: '6px',
+                                    background: isSel ? 'rgba(59, 130, 246, 0.16)' : 'var(--bg-surface)',
                                     border: isSel ? '2px solid var(--apple-blue)' : '1px solid var(--border-medium)',
-                                    background: isSel ? 'var(--apple-blue)' : 'var(--bg-surface)',
-                                    color: isSel ? '#ffffff' : 'var(--text-primary)',
-                                    fontSize: '0.78rem',
-                                    fontWeight: 800,
+                                    borderRadius: 'var(--radius-sm, 10px)',
+                                    padding: '10px 8px',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'flex-start',
+                                    justifyContent: 'space-between',
+                                    textAlign: 'left',
                                     cursor: 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '4px'
+                                    position: 'relative',
+                                    minHeight: '80px',
+                                    boxShadow: isSel ? '0 0 0 1px var(--apple-blue)' : 'var(--shadow-subtle)',
+                                    transition: 'all 0.15s ease'
                                   }}
                                 >
-                                  <span>🏨 Room {r.room_number}</span>
-                                  {r.guest_name && (
-                                    <span style={{ fontSize: '0.68rem', opacity: isSel ? 0.95 : 0.75 }}>
-                                      ({r.guest_name.split(' ')[0]})
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '4px' }}>
+                                    <span style={{
+                                      fontSize: '1.05rem',
+                                      fontWeight: 900,
+                                      color: isSel ? 'var(--apple-blue)' : 'var(--text-primary)',
+                                      letterSpacing: '-0.02em'
+                                    }}>
+                                      {r.room_number}
                                     </span>
-                                  )}
+                                    {isSel && (
+                                      <span style={{
+                                        fontSize: '0.60rem',
+                                        fontWeight: 850,
+                                        background: 'var(--apple-blue)',
+                                        color: '#ffffff',
+                                        padding: '2px 5px',
+                                        borderRadius: '4px'
+                                      }}>
+                                        ✓ SELECTED
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div style={{
+                                    fontSize: '0.80rem',
+                                    fontWeight: 850,
+                                    color: 'var(--text-primary)',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    maxWidth: '100%',
+                                    marginBottom: '2px'
+                                  }}>
+                                    {r.guest_name || 'In-House Guest'}
+                                  </div>
+
+                                  <div style={{
+                                    fontSize: '0.68rem',
+                                    fontWeight: 700,
+                                    color: isSel ? 'var(--apple-blue)' : 'var(--text-secondary)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    maxWidth: '100%'
+                                  }}>
+                                    <span>📞</span>
+                                    <span>{r.guest_phone || r.guest_mobile || 'No mobile'}</span>
+                                  </div>
                                 </button>
                               );
                             })}
                           </div>
                         )}
 
-                        {/* Notice if no occupied rooms loaded with direct fetch button */}
-                        {activeOccupiedRooms.length === 0 && (
-                          <div style={{
-                            padding: '10px 12px',
-                            background: '#fef3c7',
-                            borderRadius: '8px',
-                            border: '1px solid #f59e0b',
-                            color: '#92400e',
-                            fontSize: '0.76rem',
-                            marginBottom: '10px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center'
-                          }}>
-                            <span>⚠️ No occupied rooms currently loaded</span>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  const r = await api.getOccupiedRooms();
-                                  if (r && r.length > 0) setLocalOccupiedRooms(r);
-                                } catch (_) {}
-                              }}
-                              style={{
-                                padding: '5px 10px',
-                                background: '#8c5d77',
-                                color: '#fff',
-                                border: 'none',
-                                borderRadius: '5px',
-                                fontSize: '0.72rem',
-                                fontWeight: 800,
-                                cursor: 'pointer'
-                              }}
-                            >
-                              🔄 Fetch Rooms
-                            </button>
-                          </div>
-                        )}
-
-                        {/* Prominent Selected Room Confirmation Card */}
+                        {/* Selected Room Confirmation Card */}
                         {selectedRoomObj && (
                           <div style={{
                             background: 'rgba(59, 130, 246, 0.12)',
@@ -1903,43 +1980,87 @@ export default function MyOrdersView({
                         <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '6px' }}>
                           Billing Status in Room Folio:
                         </label>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-                        <button
-                          type="button"
-                          onClick={() => setIsPaidAtRoom(false)}
-                          style={{
-                            padding: '8px 6px',
-                            borderRadius: 'var(--radius-xs)',
-                            border: !isPaidAtRoom ? '1.5px solid var(--apple-red)' : '1px solid var(--border-medium)',
-                            background: !isPaidAtRoom ? 'rgba(220, 38, 38, 0.10)' : 'var(--bg-surface)',
-                            color: !isPaidAtRoom ? 'var(--apple-red)' : 'var(--text-secondary)',
-                            fontSize: '0.72rem',
-                            fontWeight: 800,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          ⏳ Pending (Red)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsPaidAtRoom(true)}
-                          style={{
-                            padding: '8px 6px',
-                            borderRadius: 'var(--radius-xs)',
-                            border: isPaidAtRoom ? '1.5px solid #16a34a' : '1px solid var(--border-medium)',
-                            background: isPaidAtRoom ? 'rgba(22, 163, 74, 0.12)' : 'var(--bg-surface)',
-                            color: isPaidAtRoom ? '#16a34a' : 'var(--text-secondary)',
-                            fontSize: '0.72rem',
-                            fontWeight: 800,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          ✓ Paid (Green)
-                        </button>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: isPaidAtRoom ? '10px' : '0' }}>
+                          <button
+                            type="button"
+                            onClick={() => setIsPaidAtRoom(false)}
+                            style={{
+                              padding: '10px 6px',
+                              borderRadius: 'var(--radius-xs)',
+                              border: !isPaidAtRoom ? '2px solid #dc2626' : '1px solid var(--border-medium)',
+                              background: !isPaidAtRoom ? 'rgba(220, 38, 38, 0.12)' : 'var(--bg-surface)',
+                              color: !isPaidAtRoom ? '#dc2626' : 'var(--text-secondary)',
+                              fontSize: '0.76rem',
+                              fontWeight: 900,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: '2px'
+                            }}
+                          >
+                            <span>⏳ Pending on Room</span>
+                            <span style={{ fontSize: '0.62rem', fontWeight: 700, opacity: 0.85 }}>Added to Checkout Balance</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsPaidAtRoom(true)}
+                            style={{
+                              padding: '10px 6px',
+                              borderRadius: 'var(--radius-xs)',
+                              border: isPaidAtRoom ? '2px solid #16a34a' : '1px solid var(--border-medium)',
+                              background: isPaidAtRoom ? 'rgba(22, 163, 74, 0.14)' : 'var(--bg-surface)',
+                              color: isPaidAtRoom ? '#16a34a' : 'var(--text-secondary)',
+                              fontSize: '0.76rem',
+                              fontWeight: 900,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: '2px'
+                            }}
+                          >
+                            <span>✓ Paid at Room</span>
+                            <span style={{ fontSize: '0.62rem', fontWeight: 700, opacity: 0.85 }}>Collected Now (Green)</span>
+                          </button>
+                        </div>
+
+                        {/* If Paid at Room is selected, allow choosing payment method */}
+                        {isPaidAtRoom && (
+                          <div style={{ marginTop: '8px', background: 'var(--bg-surface)', padding: '8px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border-medium)' }}>
+                            <label style={{ display: 'block', fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '5px' }}>
+                              Payment Method Collected:
+                            </label>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                              {[
+                                { id: 'cash', label: '💵 Cash' },
+                                { id: 'upi', label: '📱 UPI' },
+                                { id: 'card', label: '💳 Card' }
+                              ].map((m) => (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  onClick={() => setTableRsPayMethod(m.id)}
+                                  style={{
+                                    padding: '7px 4px',
+                                    borderRadius: 'var(--radius-xs)',
+                                    background: tableRsPayMethod === m.id ? 'var(--apple-blue-subtle)' : 'var(--bg-surface-secondary)',
+                                    border: tableRsPayMethod === m.id ? '1.5px solid var(--apple-blue)' : '1px solid var(--border-medium)',
+                                    color: tableRsPayMethod === m.id ? 'var(--apple-blue)' : 'var(--text-primary)',
+                                    fontSize: '0.74rem',
+                                    fontWeight: 800,
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  {m.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  );
-                })()}
+                    );
+                  })()}
 
                   {/* Owner Account Sub-options */}
                   {paymentMode === 'owner' && (

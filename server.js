@@ -7108,18 +7108,21 @@ app.get('/api/restaurant/occupied-rooms', async (req, res) => {
         r.room_number,
         r.room_type,
         r.status,
+        r.floor,
         r.price,
         b.id as booking_id,
         b.guest_id,
         b.checkin_time,
-        g.name as guest_name,
-        g.mobile as guest_mobile,
+        COALESCE(g.name, 'In-House Guest') as guest_name,
+        COALESCE(g.mobile, '—') as guest_mobile,
+        COALESCE(g.mobile, '—') as guest_phone,
         g.address as guest_address,
         g.doc_type as guest_doc_type
       FROM rooms r
       JOIN bookings b ON (r.current_booking_id = b.id OR b.room_id = r.id) AND b.status = 'active'
       JOIN guests g ON b.guest_id = g.id
-      WHERE r.status = 'occupied'
+      WHERE r.status = 'occupied' OR b.status = 'active'
+      GROUP BY r.id
       ORDER BY CAST(r.room_number AS INTEGER) ASC, r.room_number ASC
     `).all();
 

@@ -64,7 +64,7 @@ export default function TablesView({
             <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--apple-orange)' }} /> Mine
           </span>
           <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#94a3b8' }} /> Locked 🔒
+            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--apple-blue)' }} /> Attended
           </span>
         </div>
       </div>
@@ -110,8 +110,9 @@ export default function TablesView({
               ))
             );
 
-            const isLockedByOther = isOccupied && !isMyTable && !isManagerOrCaptain;
-            const isCaptainAssist = isOccupied && !isMyTable && isManagerOrCaptain;
+            // Multi-waiter: 2 or more waiters can attend any table
+            const isLockedByOther = false;
+            const isAttendedByOther = isOccupied && !isMyTable;
 
             let cardBg = 'var(--bg-surface)';
             let borderColor = 'var(--border-medium)';
@@ -134,24 +135,10 @@ export default function TablesView({
               badgeBg = isBar ? 'var(--apple-purple-subtle)' : 'var(--apple-orange-subtle)';
               badgeColor = isBar ? 'var(--apple-purple)' : 'var(--apple-orange)';
               badgeBorder = isBar ? 'var(--apple-purple)' : 'var(--apple-orange)';
-            } else if (isLockedByOther) {
-              cardBg = 'rgba(148, 163, 184, 0.12)';
-              borderColor = 'rgba(148, 163, 184, 0.45)';
-              statusText = `🔒 ${t.waiter_name || 'LOCKED'}`;
-              badgeBg = 'rgba(148, 163, 184, 0.25)';
-              badgeColor = '#475569';
-              badgeBorder = '#94a3b8';
-            } else if (isCaptainAssist) {
-              cardBg = 'var(--apple-blue-subtle)';
-              borderColor = 'var(--apple-blue)';
-              statusText = `🛡️ ${t.waiter_name || 'ASSIST'}`;
-              badgeBg = 'var(--apple-blue-subtle)';
-              badgeColor = 'var(--apple-blue)';
-              badgeBorder = 'var(--apple-blue)';
             } else if (isOccupied) {
               cardBg = 'var(--apple-blue-subtle)';
               borderColor = 'var(--apple-blue)';
-              statusText = t.waiter_name ? t.waiter_name : 'OCCUPIED';
+              statusText = t.waiter_name ? t.waiter_name : 'RUNNING';
               badgeBg = 'var(--apple-blue-subtle)';
               badgeColor = 'var(--apple-blue)';
               badgeBorder = 'var(--apple-blue)';
@@ -164,14 +151,6 @@ export default function TablesView({
             const billTotal = t.total_amount || t.cart_total || (Array.isArray(parsedItems) ? parsedItems.reduce((s, it) => s + ((Number(it.price) || 0) * (Number(it.qty || it.quantity) || 1)), 0) : 0);
 
             const handleCardClick = () => {
-              if (isLockedByOther) {
-                const label = t.table_number || `Table ${t.id}`;
-                const toastMsg = `🔒 ${label} is attended by ${t.waiter_name || 'another waiter'}. You cannot take orders or modify it.`;
-                if (typeof showToast === 'function') {
-                  showToast(toastMsg, 4000);
-                }
-                return;
-              }
               onSelectTable(t);
             };
 
@@ -192,8 +171,8 @@ export default function TablesView({
                   justifyContent: 'center',
                   textAlign: 'center',
                   boxShadow: 'var(--shadow-subtle)',
-                  cursor: isLockedByOther ? 'not-allowed' : 'pointer',
-                  opacity: isLockedByOther ? 0.82 : 1,
+                  cursor: 'pointer',
+                  opacity: 1,
                   position: 'relative',
                   minHeight: '124px',
                   overflow: 'hidden',
