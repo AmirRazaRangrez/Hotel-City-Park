@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 
 // Helper to extract initials/acronym from dish name (e.g., "Chicken Dum Biryani" -> "cdb")
-export const getDishAcronym = (name) => {
+const getDishAcronym = (name) => {
   if (!name) return '';
   // Clean parenthetical text e.g. (Full), (Half), (4 Pcs)
   const clean = name.replace(/\([^)]*\)/g, ' ').replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
@@ -10,7 +10,7 @@ export const getDishAcronym = (name) => {
 };
 
 // Returns a match score from 0 to 100 for smart sorting
-export const getDishSearchScore = (item, query) => {
+const getDishSearchScore = (item, query) => {
   if (!query || !query.trim()) return 1;
   const q = query.trim().toLowerCase();
   const name = (item.name || '').trim().toLowerCase();
@@ -303,7 +303,7 @@ export default function MenuView({
       >
         <button
           type="button"
-          onClick={() => setSelectedCat('all')}
+          onClick={() => { setSearchTerm(''); setSelectedCat('all'); }}
           style={{
             padding: '6px 14px',
             borderRadius: 'var(--radius-xl)',
@@ -330,7 +330,7 @@ export default function MenuView({
             <button
               key={cat.id || catName || cat}
               type="button"
-              onClick={() => setSelectedCat(catName || catId)}
+              onClick={() => { setSearchTerm(''); setSelectedCat(catName || catId); }}
               style={{
                 padding: '6px 14px',
                 borderRadius: 'var(--radius-xl)',

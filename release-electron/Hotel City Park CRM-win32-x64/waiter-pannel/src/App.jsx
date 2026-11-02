@@ -425,6 +425,16 @@ export default function App() {
         cats = (catRes && catRes.categories) || (catRes && catRes.data) || (Array.isArray(catRes) ? catRes : []);
       }
 
+      // Merge all active categories from dishes
+      const itemCatNames = Array.from(new Set(items.map((d) => (d.category || '').trim()).filter(Boolean)));
+      const combinedCats = [...cats];
+      for (const catName of itemCatNames) {
+        if (!combinedCats.some((c) => String(c.name || c || '').trim().toLowerCase() === catName.toLowerCase())) {
+          combinedCats.push({ id: `custom_${catName}`, name: catName, sort_order: 999 });
+        }
+      }
+      cats = combinedCats;
+
       const menuHash = JSON.stringify({ items, cats });
       if (menuHash !== menuHashRef.current) {
         menuHashRef.current = menuHash;
