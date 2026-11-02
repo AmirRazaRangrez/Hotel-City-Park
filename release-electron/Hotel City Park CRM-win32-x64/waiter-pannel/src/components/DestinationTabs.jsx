@@ -43,7 +43,8 @@ export default function DestinationTabs({
             aria-label={tab.label}
             style={{
               flex: 1,
-              padding: '9px 8px',
+              height: '46px',
+              padding: '4px',
               borderRadius: 'var(--radius-sm, 12px)',
               background: isActive ? activeBg : 'var(--bg-surface-secondary)',
               border: isActive ? `1.5px solid ${activeAccent}` : '1px solid var(--border-light)',
@@ -60,8 +61,8 @@ export default function DestinationTabs({
               src={`./icons/${tab.iconFile}`}
               alt={tab.label}
               style={{
-                width: '26px',
-                height: '26px',
+                width: tab.id === 'tables' ? '32px' : '26px',
+                height: tab.id === 'tables' ? '32px' : '26px',
                 objectFit: 'contain',
                 flexShrink: 0
               }}
