@@ -254,14 +254,20 @@ export function printKOTSlip(kot, tableNumber, waiterName, notes) {
     : `Table: ${tStr}`;
 
   const rows = items
-    .map(
-      (it) => `
+    .map((it) => {
+      const itemNote = (it.notes || it.note || it.special_instructions || it.instruction || '').trim();
+      return `
     <tr>
-      <td style="width: 25px;">${it.quantity || it.qty || 1}x</td>
-      <td><strong>${escapeHtml(it.name)}</strong>${it.is_parcel ? ' <small>[PARCEL]</small>' : ''}</td>
+      <td style="padding: 3px 4px 3px 0; vertical-align: top; text-align: left;">
+        <strong style="font-size: 12px;">${escapeHtml(it.name)}</strong>${it.is_parcel ? ' <small style="font-weight: bold;">[PARCEL]</small>' : ''}
+        ${itemNote ? `<div style="font-size: 10.5px; font-weight: bold; font-style: italic; color: #111; margin-top: 1px;">(Note: ${escapeHtml(itemNote)})</div>` : ''}
+      </td>
+      <td style="padding: 3px 0 3px 4px; vertical-align: top; text-align: right; font-weight: bold; font-size: 13px; width: 45px; white-space: nowrap;">
+        ${it.quantity || it.qty || 1}x
+      </td>
     </tr>
-  `
-    )
+  `;
+    })
     .join('');
 
   const html = `
@@ -283,8 +289,8 @@ export function printKOTSlip(kot, tableNumber, waiterName, notes) {
     <table class="items-table">
       <thead>
         <tr>
-          <th>QTY</th>
-          <th>ITEM DESCRIPTION</th>
+          <th style="text-align: left;">ITEM DESCRIPTION</th>
+          <th style="text-align: right; width: 45px;">QTY</th>
         </tr>
       </thead>
       <tbody>
@@ -322,14 +328,20 @@ export function printBOTSlip(bot, tableNumber, waiterName, notes) {
     : `Table: ${tStr}`;
 
   const rows = items
-    .map(
-      (it) => `
+    .map((it) => {
+      const itemNote = (it.notes || it.note || it.special_instructions || it.instruction || '').trim();
+      return `
     <tr>
-      <td style="width: 25px;">${it.quantity || it.qty || 1}x</td>
-      <td><strong>${escapeHtml(it.name)}</strong></td>
+      <td style="padding: 3px 4px 3px 0; vertical-align: top; text-align: left;">
+        <strong style="font-size: 12px;">${escapeHtml(it.name)}</strong>
+        ${itemNote ? `<div style="font-size: 10.5px; font-weight: bold; font-style: italic; color: #111; margin-top: 1px;">(Note: ${escapeHtml(itemNote)})</div>` : ''}
+      </td>
+      <td style="padding: 3px 0 3px 4px; vertical-align: top; text-align: right; font-weight: bold; font-size: 13px; width: 45px; white-space: nowrap;">
+        ${it.quantity || it.qty || 1}x
+      </td>
     </tr>
-  `
-    )
+  `;
+    })
     .join('');
 
   const html = `
@@ -351,8 +363,8 @@ export function printBOTSlip(bot, tableNumber, waiterName, notes) {
     <table class="items-table">
       <thead>
         <tr>
-          <th>QTY</th>
-          <th>ITEM DESCRIPTION</th>
+          <th style="text-align: left;">ITEM DESCRIPTION</th>
+          <th style="text-align: right; width: 45px;">QTY</th>
         </tr>
       </thead>
       <tbody>
