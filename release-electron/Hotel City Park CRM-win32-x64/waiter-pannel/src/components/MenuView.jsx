@@ -81,30 +81,70 @@ export default function MenuView({
   const accentColor = isBar ? 'var(--apple-purple)' : 'var(--apple-orange)';
   const accentBg = isBar ? 'var(--apple-purple-subtle)' : 'var(--apple-orange-subtle)';
 
+  // Available menu items excluding hidden dishes
+  const activeItems = useMemo(() => {
+    return (menuItems || []).filter((item) => item.is_available !== 0 && item.is_available !== false);
+  }, [menuItems]);
+
   // Filter and sort items with smart shortcode & acronym support (e.g. cdb -> Chicken Dum Biryani)
   const filtered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
 
+    // Robust category matching by category name or ID
+    const isItemInSelectedCat = (item) => {
+      if (selectedCat === 'all') return true;
+
+      const sel = String(selectedCat).trim().toLowerCase();
+      const itemCat = String(item.category || item.category_name || '').trim().toLowerCase();
+      const itemCatId = item.category_id !== undefined ? String(item.category_id) : '';
+
+      // Direct string match on category name
+      if (itemCat && itemCat === sel) return true;
+
+      // Direct match on category ID
+      if (itemCatId && itemCatId === sel) return true;
+
+      // Lookup category object in categories list
+      const matchedCatObj = (categories || []).find((c) => {
+        if (!c) return false;
+        if (typeof c === 'string') return c.trim().toLowerCase() === sel;
+        return String(c.id) === sel || String(c.name || '').trim().toLowerCase() === sel;
+      });
+
+      if (matchedCatObj) {
+        const catObjName = String(matchedCatObj.name || '').trim().toLowerCase();
+        const catObjId = matchedCatObj.id !== undefined ? String(matchedCatObj.id) : '';
+        if (catObjName && itemCat === catObjName) return true;
+        if (catObjId && (itemCatId === catObjId || itemCat === catObjId)) return true;
+      }
+
+      return false;
+    };
+
     const matched = [];
-    for (const item of menuItems) {
-      if (item.is_available === 0 || item.is_available === false) continue;
-      const matchesCat = selectedCat === 'all' || String(item.category_id) === String(selectedCat) || String(item.category) === String(selectedCat);
+    for (const item of activeItems) {
+      const matchesCat = isItemInSelectedCat(item);
       if (!matchesCat && !q) continue;
 
-      const score = getDishSearchScore(item, q);
-      if (score > 0) {
-        // If searching with a query, match high scores across menu or within the selected category
-        if (matchesCat || score >= 85) {
-          matched.push({
-            ...item,
-            _score: score,
-            _acronym: getDishAcronym(item.name || '')
-          });
+      if (!q) {
+        // Pure category browsing: include all dishes in category
+        matched.push(item);
+      } else {
+        // Search query mode: score relevance
+        const score = getDishSearchScore(item, q);
+        if (score > 0) {
+          if (matchesCat || score >= 85) {
+            matched.push({
+              ...item,
+              _score: score,
+              _acronym: getDishAcronym(item.name || '')
+            });
+          }
         }
       }
     }
 
-    // Sort by search relevance score descending
+    // Sort by search relevance score descending when searching
     if (q) {
       matched.sort((a, b) => {
         if (b._score !== a._score) return b._score - a._score;
@@ -113,7 +153,7 @@ export default function MenuView({
     }
 
     return matched;
-  }, [menuItems, selectedCat, searchTerm]);
+  }, [activeItems, categories, selectedCat, searchTerm]);
 
   const cartTotalItems = cart.reduce((sum, it) => sum + it.quantity, 0);
   const cartSubtotal = cart.reduce((sum, it) => sum + (parseFloat(it.price) * it.quantity), 0);
@@ -277,15 +317,20 @@ export default function MenuView({
             boxShadow: selectedCat === 'all' ? '0 2px 6px rgba(140, 93, 119, 0.35)' : '0 1px 3px rgba(0, 0, 0, 0.08)'
           }}
         >
-          All Items ({menuItems.length})
+          All Items ({activeItems.length})
         </button>
-        {categories.map((cat) => {
-          const isSelected = String(selectedCat) === String(cat.id);
+        {(categories || []).map((cat) => {
+          const catName = (typeof cat === 'string' ? cat : (cat.name || '')).trim();
+          const catId = typeof cat === 'object' && cat.id !== undefined ? String(cat.id) : '';
+          const isSelected = selectedCat !== 'all' && (
+            String(selectedCat).toLowerCase() === catName.toLowerCase() ||
+            (catId && String(selectedCat) === catId)
+          );
           return (
             <button
-              key={cat.id}
+              key={cat.id || catName || cat}
               type="button"
-              onClick={() => setSelectedCat(cat.id)}
+              onClick={() => setSelectedCat(catName || catId)}
               style={{
                 padding: '6px 14px',
                 borderRadius: 'var(--radius-xl)',
@@ -299,7 +344,7 @@ export default function MenuView({
                 boxShadow: isSelected ? '0 2px 6px rgba(140, 93, 119, 0.35)' : '0 1px 3px rgba(0, 0, 0, 0.08)'
               }}
             >
-              {cat.name}
+              {catName || cat}
             </button>
           );
         })}
