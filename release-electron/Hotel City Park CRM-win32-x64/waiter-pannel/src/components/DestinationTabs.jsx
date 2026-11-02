@@ -11,10 +11,10 @@ export default function DestinationTabs({
   const activeBg = isBar ? 'var(--apple-purple-subtle)' : 'var(--apple-orange-subtle)';
 
   const tabs = [
-    { id: 'orders', label: 'My Orders', icon: '📋', count: myOrdersCount },
-    { id: 'tables', label: isBar ? 'Bar Tables' : 'Tables', icon: isBar ? '🍸' : '🍽️' },
-    { id: 'rooms', label: 'Room Service', icon: '🛏️' },
-    { id: 'parcels', label: 'Parcels', icon: '📦' }
+    { id: 'orders', label: 'My Orders', iconFile: 'my-orders.png', fallbackEmoji: '📋', count: myOrdersCount },
+    { id: 'tables', label: isBar ? 'Bar Tables' : 'Tables', iconFile: 'tables.png', fallbackEmoji: isBar ? '🍸' : '🍽️' },
+    { id: 'rooms', label: 'Room Service', iconFile: 'room-service.png', fallbackEmoji: '🛏️' },
+    { id: 'parcels', label: 'Parcels', iconFile: 'parcels.png', fallbackEmoji: '📦' }
   ];
 
   return (
@@ -60,7 +60,23 @@ export default function DestinationTabs({
               cursor: 'pointer'
             }}
           >
-            <span style={{ fontSize: '0.95rem' }}>{tab.icon}</span>
+            <img
+              src={`./icons/${tab.iconFile}`}
+              alt=""
+              style={{
+                width: '20px',
+                height: '20px',
+                objectFit: 'contain',
+                flexShrink: 0
+              }}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                if (e.currentTarget.nextSibling) {
+                  e.currentTarget.nextSibling.style.display = 'inline';
+                }
+              }}
+            />
+            <span style={{ fontSize: '0.95rem', display: 'none' }}>{tab.fallbackEmoji}</span>
             <span>{tab.label}</span>
             {tab.count !== undefined && tab.count > 0 && (
               <span

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 
 export default function TablesView({
   tables,
@@ -8,7 +8,6 @@ export default function TablesView({
   isLoading,
   showToast
 }) {
-  const [searchTerm, setSearchTerm] = useState('');
   const isBar = department === 'bar';
 
   const isRoomService = (t) => {
@@ -20,51 +19,21 @@ export default function TablesView({
     return t.table_type === 'parcel' || num.startsWith('P-');
   };
 
-  const filtered = tables.filter(t => {
-    // Room Service and Parcels belong in their respective tabs / My Orders, not the Tables grid
-    if (isRoomService(t) || isParcel(t)) return false;
-    const num = (t.table_number || t.name || '').toLowerCase();
-    return num.includes(searchTerm.toLowerCase());
-  });
+  const filtered = tables.filter(t => !isRoomService(t) && !isParcel(t));
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '12px', background: 'var(--bg-app)' }}>
-      {/* Search & Status Summary Bar */}
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
-        <div style={{ position: 'relative', flex: 1 }}>
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder={`Search ${isBar ? 'bar tables...' : 'restaurant tables...'}`}
-            style={{
-              width: '100%',
-              height: '40px',
-              padding: '0 12px 0 34px',
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-medium)',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--text-primary)',
-              fontSize: '0.86rem',
-              outline: 'none',
-              boxShadow: 'var(--shadow-subtle)'
-            }}
-          />
-          <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, fontSize: '0.9rem' }}>
-            🔍
+      {/* Status Legend */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '10px' }}>
+        <div style={{ display: 'flex', gap: '10px', fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', flexShrink: 0 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--apple-green)' }} /> Vacant
           </span>
-        </div>
-
-        {/* Legend */}
-        <div style={{ display: 'flex', gap: '6px', fontSize: '0.70rem', fontWeight: 800, color: 'var(--text-secondary)', flexShrink: 0 }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--apple-green)' }} /> Vacant
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--apple-orange)' }} /> Mine
           </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--apple-orange)' }} /> Mine
-          </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--apple-blue)' }} /> Attended
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--apple-blue)' }} /> Attended
           </span>
         </div>
       </div>

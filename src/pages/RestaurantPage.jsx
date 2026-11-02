@@ -606,7 +606,7 @@ export default function RestaurantPage({ onPrintKOTSlip, onPrintBillSlip }) {
               onSettleBill={(session) => setSettleSession(session)}
               onPrintKOT={(kotData) => {
                 if (onPrintKOTSlip) onPrintKOTSlip(kotData);
-                else printKOTSlip(kotData?.kot || kotData, kotData?.tableNumber, kotData?.waiterName);
+                else printKOTSlip(kotData?.kot || kotData, kotData?.tableNumber, kotData?.waiterName, kotData?.notes || kotData?.special_notes || kotData?.kot?.notes);
               }}
               onPrintPrebill={(prebillData) => {
                 printPreBillSlip(prebillData.table, prebillData.cart || prebillData.items, prebillData.waiterName, 'restaurant');

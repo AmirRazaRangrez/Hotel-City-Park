@@ -482,7 +482,7 @@ export default function BarPage({ onPrintBOTSlip, onPrintBillSlip }) {
               onSettleBill={(session) => setSettleSession(session)}
               onPrintKOT={(botData) => {
                 if (onPrintBOTSlip) onPrintBOTSlip(botData);
-                else printBOTSlip(botData?.bot || botData, botData?.tableNumber, botData?.waiterName);
+                else printBOTSlip(botData?.bot || botData, botData?.tableNumber, botData?.waiterName, botData?.notes || botData?.special_notes || botData?.bot?.notes);
               }}
               onPrintPrebill={(prebillData) => {
                 printPreBillSlip(prebillData.table, prebillData.cart || prebillData.items, prebillData.waiterName, 'bar');

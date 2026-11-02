@@ -243,8 +243,9 @@ export function getRoomServicePrefixInfo(tableNumber, obj = {}) {
  */
 export function printKOTSlip(kot, tableNumber, waiterName, notes) {
   const items = (kot && Array.isArray(kot.items)) ? kot.items : (Array.isArray(kot) ? kot : []);
+  const resolvedNotes = notes || kot?.notes || kot?.special_notes || kot?.kot?.notes || kot?.kot?.special_notes || '';
   const tStr = String(tableNumber || kot?.tableNumber || kot?.table_number || '');
-  const rsInfo = getRoomServicePrefixInfo(tStr, { ...(typeof kot === 'object' ? kot : {}), notes, waiterName });
+  const rsInfo = getRoomServicePrefixInfo(tStr, { ...(typeof kot === 'object' ? kot : {}), notes: resolvedNotes, waiterName });
   const isParcel = tStr.startsWith('P-');
   const displayLoc = rsInfo.isRoomService
     ? `Room: ${rsInfo.roomNumber} [${rsInfo.prefix}]`
@@ -291,10 +292,10 @@ export function printKOTSlip(kot, tableNumber, waiterName, notes) {
       </tbody>
     </table>
     ${
-      notes
+      resolvedNotes
         ? `
       <div class="divider"></div>
-      <div style="font-size: 11px;"><strong>NOTE:</strong> ${escapeHtml(notes)}</div>
+      <div style="font-size: 11px; font-weight: bold; padding: 2px 0;"><strong>NOTE:</strong> ${escapeHtml(resolvedNotes)}</div>
     `
         : ''
     }
@@ -310,8 +311,9 @@ export function printKOTSlip(kot, tableNumber, waiterName, notes) {
  */
 export function printBOTSlip(bot, tableNumber, waiterName, notes) {
   const items = (bot && Array.isArray(bot.items)) ? bot.items : (Array.isArray(bot) ? bot : []);
+  const resolvedNotes = notes || bot?.notes || bot?.special_notes || bot?.bot?.notes || bot?.bot?.special_notes || '';
   const tStr = String(tableNumber || bot?.tableNumber || bot?.table_number || '');
-  const rsInfo = getRoomServicePrefixInfo(tStr, { ...(typeof bot === 'object' ? bot : {}), notes, waiterName });
+  const rsInfo = getRoomServicePrefixInfo(tStr, { ...(typeof bot === 'object' ? bot : {}), notes: resolvedNotes, waiterName });
   const isParcel = tStr.startsWith('P-');
   const displayLoc = rsInfo.isRoomService
     ? `Room: ${rsInfo.roomNumber} [${rsInfo.prefix}]`
@@ -358,10 +360,10 @@ export function printBOTSlip(bot, tableNumber, waiterName, notes) {
       </tbody>
     </table>
     ${
-      notes
+      resolvedNotes
         ? `
       <div class="divider"></div>
-      <div style="font-size: 11px;"><strong>NOTE:</strong> ${escapeHtml(notes)}</div>
+      <div style="font-size: 11px; font-weight: bold; padding: 2px 0;"><strong>NOTE:</strong> ${escapeHtml(resolvedNotes)}</div>
     `
         : ''
     }
