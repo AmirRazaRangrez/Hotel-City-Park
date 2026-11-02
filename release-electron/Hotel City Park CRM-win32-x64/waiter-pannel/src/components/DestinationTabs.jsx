@@ -61,8 +61,8 @@ export default function DestinationTabs({
               src={`./icons/${tab.iconFile}`}
               alt={tab.label}
               style={{
-                width: tab.id === 'tables' ? '32px' : '26px',
-                height: tab.id === 'tables' ? '32px' : '26px',
+                width: tab.id === 'rooms' ? '34px' : (tab.id === 'tables' ? '32px' : '26px'),
+                height: tab.id === 'rooms' ? '34px' : (tab.id === 'tables' ? '32px' : '26px'),
                 objectFit: 'contain',
                 flexShrink: 0
               }}
