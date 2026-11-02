@@ -28,8 +28,8 @@ function getGuestPortalBaseUrl() {
     return process.env.GUEST_PORTAL_URL.trim().replace(/\/$/, '');
   }
 
-  // Default to official Vercel deployment domain
-  return 'https://hcprso.vercel.app';
+  // Default to official Cloudflare deployment domain
+  return 'https://guestweb.dominal.in';
 }
 
 /**
