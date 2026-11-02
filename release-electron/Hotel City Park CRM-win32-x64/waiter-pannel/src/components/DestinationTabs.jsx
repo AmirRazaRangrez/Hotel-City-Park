@@ -21,15 +21,13 @@ export default function DestinationTabs({
     <nav
       aria-label="Navigation Tabs"
       style={{
-        padding: '6px 12px 8px',
+        padding: '8px 12px',
         background: 'var(--bg-surface)',
         borderBottom: '1px solid var(--border-light)',
         display: 'flex',
         gap: '8px',
-        overflowX: 'auto',
-        scrollbarWidth: 'none',
-        msOverflowStyle: 'none',
-        WebkitOverflowScrolling: 'touch',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         flexShrink: 0
       }}
     >
@@ -41,20 +39,18 @@ export default function DestinationTabs({
             type="button"
             id={`tab-btn-${tab.id}`}
             onClick={() => onTabChange(tab.id)}
+            title={tab.label}
+            aria-label={tab.label}
             style={{
-              flexShrink: 0,
-              padding: '7px 14px',
-              borderRadius: 'var(--radius-sm, 10px)',
+              flex: 1,
+              padding: '9px 8px',
+              borderRadius: 'var(--radius-sm, 12px)',
               background: isActive ? activeBg : 'var(--bg-surface-secondary)',
               border: isActive ? `1.5px solid ${activeAccent}` : '1px solid var(--border-light)',
-              color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-              fontSize: '0.80rem',
-              fontWeight: isActive ? 800 : 650,
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '6px',
-              whiteSpace: 'nowrap',
+              position: 'relative',
               boxShadow: isActive ? 'var(--shadow-subtle)' : 'none',
               transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
               cursor: 'pointer'
@@ -62,10 +58,10 @@ export default function DestinationTabs({
           >
             <img
               src={`./icons/${tab.iconFile}`}
-              alt=""
+              alt={tab.label}
               style={{
-                width: '20px',
-                height: '20px',
+                width: '26px',
+                height: '26px',
                 objectFit: 'contain',
                 flexShrink: 0
               }}
@@ -76,18 +72,21 @@ export default function DestinationTabs({
                 }
               }}
             />
-            <span style={{ fontSize: '0.95rem', display: 'none' }}>{tab.fallbackEmoji}</span>
-            <span>{tab.label}</span>
+            <span style={{ fontSize: '1.25rem', display: 'none' }}>{tab.fallbackEmoji}</span>
             {tab.count !== undefined && tab.count > 0 && (
               <span
                 style={{
+                  position: 'absolute',
+                  top: '3px',
+                  right: '6px',
                   background: activeAccent,
                   color: 'var(--text-on-accent, #fff)',
                   fontSize: '0.66rem',
                   fontWeight: 900,
-                  padding: '1px 7px',
+                  padding: '1px 6px',
                   borderRadius: '999px',
-                  lineHeight: 1.2
+                  lineHeight: 1.2,
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
                 }}
               >
                 {tab.count}
