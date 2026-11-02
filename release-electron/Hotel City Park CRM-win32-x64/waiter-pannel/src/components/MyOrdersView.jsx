@@ -70,9 +70,11 @@ export default function MyOrdersView({
   const [paymentMode, setPaymentMode] = useState('cash');
   const [selectedRoomId, setSelectedRoomId] = useState('');
   const [isPaidAtRoom, setIsPaidAtRoom] = useState(false);
+  const [tableRsPayMethod, setTableRsPayMethod] = useState('cash'); // 'cash' | 'upi' | 'card'
   const [selectedOwner, setSelectedOwner] = useState('Jaijeet sir');
   const [ownerNote, setOwnerNote] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [roomCardSearch, setRoomCardSearch] = useState('');
   const [localOccupiedRooms, setLocalOccupiedRooms] = useState(occupiedRooms || []);
   const [confirmSettleData, setConfirmSettleData] = useState(null); // Confirmation dialog before settle & print
 
@@ -375,6 +377,10 @@ export default function MyOrdersView({
           settlePayload.target_room_number = targetRoomNumber;
           settlePayload.charge_to_room = targetRoomNumber;
           settlePayload.is_paid = isPaidAtRoom ? 1 : 0;
+          if (isPaidAtRoom) {
+            settlePayload.payment_method = tableRsPayMethod || 'cash';
+            settlePayload.payment_mode = tableRsPayMethod || 'cash';
+          }
           settlePayload.customer_name = roomObj?.guest_name 
             ? `Room ${targetRoomNumber} - ${roomObj.guest_name}`
             : `Room ${targetRoomNumber}`;
@@ -457,7 +463,7 @@ export default function MyOrdersView({
         : `Add to Room Folio (Room ${rawRoomNum}) - Pending ⏳`;
     } else {
       if (paymentMode === 'room_folio') {
-        modeSummary = `Room Folio (Room ${selectedRoomId}${selectedRoomObj?.guest_name ? ` • ${selectedRoomObj.guest_name}` : ''}) - ${isPaidAtRoom ? 'Paid ✓' : 'Pending ⏳'}`;
+        modeSummary = `Room Folio (Room ${selectedRoomId}${selectedRoomObj?.guest_name ? ` • ${selectedRoomObj.guest_name}` : ''}) - ${isPaidAtRoom ? `Paid ✓ (${(tableRsPayMethod || 'cash').toUpperCase()})` : 'Pending ⏳'}`;
       } else if (paymentMode === 'owner') {
         modeSummary = `Owner Account (${selectedOwner})`;
       } else {
@@ -737,6 +743,9 @@ export default function MyOrdersView({
                         const rawNum = String(t.table_number || '').replace(/^RS-/i, '').replace(/^Room\s*/i, '').replace(/•.*$/, '').trim();
                         if (isRoom && rawNum) setSelectedRoomId(rawNum);
                         else setSelectedRoomId('');
+                        setRoomCardSearch('');
+                        setTableRsPayMethod('cash');
+                        setIsPaidAtRoom(false);
                         setSettleModalTable(t);
                       }}
                       style={{
