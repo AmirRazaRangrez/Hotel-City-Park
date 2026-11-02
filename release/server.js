@@ -7108,18 +7108,21 @@ app.get('/api/restaurant/occupied-rooms', async (req, res) => {
         r.room_number,
         r.room_type,
         r.status,
+        r.floor,
         r.price,
         b.id as booking_id,
         b.guest_id,
         b.checkin_time,
-        g.name as guest_name,
-        g.mobile as guest_mobile,
+        COALESCE(g.name, 'In-House Guest') as guest_name,
+        COALESCE(g.mobile, '—') as guest_mobile,
+        COALESCE(g.mobile, '—') as guest_phone,
         g.address as guest_address,
         g.doc_type as guest_doc_type
       FROM rooms r
       JOIN bookings b ON (r.current_booking_id = b.id OR b.room_id = r.id) AND b.status = 'active'
       JOIN guests g ON b.guest_id = g.id
-      WHERE r.status = 'occupied'
+      WHERE r.status = 'occupied' OR b.status = 'active'
+      GROUP BY r.id
       ORDER BY CAST(r.room_number AS INTEGER) ASC, r.room_number ASC
     `).all();
 
@@ -16235,12 +16238,29 @@ if (fs.existsSync(guestOrderDistDir)) {
   });
 }
 
-const waiterDistDir = path.join(__dirname, 'release-electron', 'Hotel City Park CRM-win32-x64', 'waiter-pannel', 'dist');
-if (fs.existsSync(waiterDistDir)) {
+const waiterDistCandidates = [
+  path.join(__dirname, 'release-electron', 'Hotel City Park CRM-win32-x64', 'waiter-pannel', 'dist'),
+  path.join(__dirname, '..', '..', 'waiter-pannel', 'dist'),
+  path.join(__dirname, 'waiter-pannel', 'dist'),
+  path.join(__dirname, '..', 'waiter-pannel', 'dist'),
+  path.join(__dirname, '..', 'release-electron', 'Hotel City Park CRM-win32-x64', 'waiter-pannel', 'dist'),
+  path.join(process.cwd(), 'release-electron', 'Hotel City Park CRM-win32-x64', 'waiter-pannel', 'dist')
+];
+const waiterDistDir = waiterDistCandidates.find(p => fs.existsSync(p));
+if (waiterDistDir) {
+  app.get(/^\/waiter$/, (req, res, next) => {
+    if (req.originalUrl.split('?')[0] === '/waiter') {
+      const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+      return res.redirect(301, '/waiter/' + q);
+    }
+    next();
+  });
   app.use('/waiter', express.static(waiterDistDir));
+  app.use('/waiter/assets', express.static(path.join(waiterDistDir, 'assets')));
   app.get(/^\/waiter(\/.*)?$/, (req, res) => {
     res.sendFile(path.join(waiterDistDir, 'index.html'));
   });
+  console.log('[Server] Live Waiter Panel mounted at /waiter from ' + waiterDistDir);
 }
 
 async function startServer() {

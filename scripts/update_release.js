@@ -168,6 +168,13 @@ if (fs.existsSync(adminDistSrc)) {
   console.log('  ✓ release/admin/dist updated.');
 }
 
+// Sync Waiter web bundle (waiter-pannel/dist) if available
+const waiterDistSrc = path.join(rootDir, 'release-electron', 'Hotel City Park CRM-win32-x64', 'waiter-pannel', 'dist');
+if (fs.existsSync(waiterDistSrc)) {
+  copyDirSync(waiterDistSrc, path.join(releaseDir, 'waiter-pannel', 'dist'));
+  console.log('  ✓ release/waiter-pannel/dist updated.');
+}
+
 // Sync Admin dedicated desktop launcher
 const adminLauncherSrc = path.join(publicDir, 'HotelCityPark-Admin.exe');
 if (fs.existsSync(adminLauncherSrc)) {
@@ -221,6 +228,12 @@ if (fs.existsSync(electronAppDir)) {
   if (fs.existsSync(adminDistSrc)) {
     copyDirSync(adminDistSrc, path.join(electronAppDir, 'admin', 'dist'));
     console.log('  ✓ release-electron/resources/app/admin/dist updated.');
+  }
+
+  // Sync waiter-pannel/dist to electron app
+  if (fs.existsSync(waiterDistSrc)) {
+    copyDirSync(waiterDistSrc, path.join(electronAppDir, 'waiter-pannel', 'dist'));
+    console.log('  ✓ release-electron/resources/app/waiter-pannel/dist updated.');
   }
 
   // Sync standalone admin launcher

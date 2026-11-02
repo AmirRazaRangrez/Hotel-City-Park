@@ -16238,12 +16238,29 @@ if (fs.existsSync(guestOrderDistDir)) {
   });
 }
 
-const waiterDistDir = path.join(__dirname, 'release-electron', 'Hotel City Park CRM-win32-x64', 'waiter-pannel', 'dist');
-if (fs.existsSync(waiterDistDir)) {
+const waiterDistCandidates = [
+  path.join(__dirname, 'release-electron', 'Hotel City Park CRM-win32-x64', 'waiter-pannel', 'dist'),
+  path.join(__dirname, '..', '..', 'waiter-pannel', 'dist'),
+  path.join(__dirname, 'waiter-pannel', 'dist'),
+  path.join(__dirname, '..', 'waiter-pannel', 'dist'),
+  path.join(__dirname, '..', 'release-electron', 'Hotel City Park CRM-win32-x64', 'waiter-pannel', 'dist'),
+  path.join(process.cwd(), 'release-electron', 'Hotel City Park CRM-win32-x64', 'waiter-pannel', 'dist')
+];
+const waiterDistDir = waiterDistCandidates.find(p => fs.existsSync(p));
+if (waiterDistDir) {
+  app.get(/^\/waiter$/, (req, res, next) => {
+    if (req.originalUrl.split('?')[0] === '/waiter') {
+      const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+      return res.redirect(301, '/waiter/' + q);
+    }
+    next();
+  });
   app.use('/waiter', express.static(waiterDistDir));
+  app.use('/waiter/assets', express.static(path.join(waiterDistDir, 'assets')));
   app.get(/^\/waiter(\/.*)?$/, (req, res) => {
     res.sendFile(path.join(waiterDistDir, 'index.html'));
   });
+  console.log('[Server] Live Waiter Panel mounted at /waiter from ' + waiterDistDir);
 }
 
 async function startServer() {
