@@ -87,6 +87,7 @@ export default function MenuView({
 
     const matched = [];
     for (const item of menuItems) {
+      if (item.is_available === 0 || item.is_available === false) continue;
       const matchesCat = selectedCat === 'all' || String(item.category_id) === String(selectedCat) || String(item.category) === String(selectedCat);
       if (!matchesCat && !q) continue;
 

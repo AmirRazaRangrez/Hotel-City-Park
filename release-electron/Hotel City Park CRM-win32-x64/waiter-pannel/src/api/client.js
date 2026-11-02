@@ -553,12 +553,21 @@ export const api = {
 
   // Menus & Categories
   getRestaurantMenu: async () => {
+    let items = [];
+    let fullRes = null;
     try {
       const res = await request('/restaurant/menu', { timeout: 3000 });
-      if (res && (res.items || Array.isArray(res))) return res;
+      if (res && (res.items || Array.isArray(res))) {
+        fullRes = res;
+        items = res.items || (Array.isArray(res) ? res : []);
+      }
     } catch (_) {}
-    const pkg = await fetchCloudWaiterPackage();
-    return { success: true, items: pkg?.restaurantMenu || [] };
+    if (!items || items.length === 0) {
+      const pkg = await fetchCloudWaiterPackage();
+      items = pkg?.restaurantMenu || [];
+    }
+    const filtered = items.filter(d => d.is_available !== 0 && d.is_available !== false);
+    return fullRes ? { ...fullRes, items: filtered, dishes: filtered } : { success: true, items: filtered, dishes: filtered };
   },
 
   getRestaurantCategories: async () => {
@@ -571,12 +580,21 @@ export const api = {
   },
 
   getBarMenu: async () => {
+    let items = [];
+    let fullRes = null;
     try {
       const res = await request('/bar/menu', { timeout: 3000 });
-      if (res && (res.items || Array.isArray(res))) return res;
+      if (res && (res.items || Array.isArray(res))) {
+        fullRes = res;
+        items = res.items || (Array.isArray(res) ? res : []);
+      }
     } catch (_) {}
-    const pkg = await fetchCloudWaiterPackage();
-    return { success: true, items: pkg?.barMenu || [] };
+    if (!items || items.length === 0) {
+      const pkg = await fetchCloudWaiterPackage();
+      items = pkg?.barMenu || [];
+    }
+    const filtered = items.filter(d => d.is_available !== 0 && d.is_available !== false);
+    return fullRes ? { ...fullRes, items: filtered, drinks: filtered } : { success: true, items: filtered, drinks: filtered };
   },
 
   getBarCategories: async () => {

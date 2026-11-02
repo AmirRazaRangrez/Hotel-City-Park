@@ -95,9 +95,14 @@ export default function TableSessionView({
   const gst = Math.round(subtotal * 0.05);
   const grandTotal = subtotal + gst;
 
+  // Available Menu Items (Exclude hidden dishes from POS catalog)
+  const availableMenu = useMemo(() => {
+    return menu.filter((dish) => dish.is_available !== 0 && dish.is_available !== false);
+  }, [menu]);
+
   // Filtered Menu Items
   const filteredMenu = useMemo(() => {
-    return menu.filter((dish) => {
+    return availableMenu.filter((dish) => {
       if (selectedCategory !== 'all' && dish.category !== selectedCategory) {
         return false;
       }
@@ -109,7 +114,7 @@ export default function TableSessionView({
       }
       return true;
     });
-  }, [menu, selectedCategory, searchQuery]);
+  }, [availableMenu, selectedCategory, searchQuery]);
 
   const handleAddToCart = (dish) => {
     setCart((prev) => {
@@ -580,7 +585,7 @@ export default function TableSessionView({
                 transition: 'all 0.15s ease'
               }}
             >
-              All Items ({menu.length})
+              All Items ({availableMenu.length})
             </button>
             {categories.map((cat) => (
               <button

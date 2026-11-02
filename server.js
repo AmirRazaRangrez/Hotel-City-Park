@@ -5970,6 +5970,11 @@ app.post('/api/restaurant/menu', requireAuth, requireRole('manager'), (req, res)
     `);
     const result = stmt.run(category || 'Main Course', name.trim(), parseFloat(price) || 0, (description || '').trim(), code, isVegVal);
 
+    socketServer.broadcast('MENU_UPDATED', { itemId: result.lastInsertRowid, department: 'restaurant', action: 'create' });
+    if (isCloudSyncAllowed('firebase') && typeof firebaseService.syncWaiterDataToCloud === 'function') {
+      firebaseService.syncWaiterDataToCloud(db).catch(() => {});
+    }
+
     res.json({
       success: true,
       dish: { id: result.lastInsertRowid, name: name.trim(), price: parseFloat(price) || 0, shortcode: code, is_veg: isVegVal, category: category || 'Main Course' },
@@ -6005,6 +6010,12 @@ app.put('/api/restaurant/menu/:id', requireAuth, requireRole('manager'), (req, r
     );
 
     const updatedDish = db.prepare('SELECT * FROM menu_items WHERE id = ?').get(id);
+
+    socketServer.broadcast('MENU_UPDATED', { itemId: id, department: 'restaurant', is_available: updatedDish.is_available, action: 'update' });
+    if (isCloudSyncAllowed('firebase') && typeof firebaseService.syncWaiterDataToCloud === 'function') {
+      firebaseService.syncWaiterDataToCloud(db).catch(() => {});
+    }
+
     res.json({ success: true, dish: updatedDish });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -6015,6 +6026,12 @@ app.delete('/api/restaurant/menu/:id', requireAuth, requireRole('manager'), (req
   try {
     const { id } = req.params;
     db.prepare("DELETE FROM menu_items WHERE id = ? AND department = 'restaurant'").run(id);
+
+    socketServer.broadcast('MENU_UPDATED', { itemId: id, department: 'restaurant', action: 'delete' });
+    if (isCloudSyncAllowed('firebase') && typeof firebaseService.syncWaiterDataToCloud === 'function') {
+      firebaseService.syncWaiterDataToCloud(db).catch(() => {});
+    }
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -8262,6 +8279,12 @@ app.put('/api/bar/menu/:id', requireAuth, requireRole('manager'), (req, res) => 
     );
 
     const updated = db.prepare('SELECT * FROM menu_items WHERE id = ?').get(id);
+
+    socketServer.broadcast('MENU_UPDATED', { itemId: id, department: 'bar', is_available: updated.is_available, action: 'update' });
+    if (isCloudSyncAllowed('firebase') && typeof firebaseService.syncWaiterDataToCloud === 'function') {
+      firebaseService.syncWaiterDataToCloud(db).catch(() => {});
+    }
+
     res.json({ success: true, drink: updated, dish: updated });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });

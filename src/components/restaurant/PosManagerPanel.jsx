@@ -73,6 +73,7 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
   const [newItemCategory, setNewItemCategory] = useState('');
   const [newItemVeg, setNewItemVeg] = useState(1);
   const [newItemCode, setNewItemCode] = useState('');
+  const [newItemAvailable, setNewItemAvailable] = useState(1);
 
   // Department Staff state
   const [staffList, setStaffList] = useState([]);
@@ -234,6 +235,37 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
     }
   };
 
+  const handleToggleAvailability = async (item) => {
+    const isCurrentlyHidden = item.is_available === 0 || item.is_available === false;
+    const nextVal = isCurrentlyHidden ? 1 : 0;
+
+    // Optimistic local state update for instantaneous manager UI feedback
+    setMenuItems((prev) =>
+      prev.map((it) => (it.id === item.id ? { ...it, is_available: nextVal } : it))
+    );
+
+    try {
+      if (department === 'bar') {
+        await api.updateBarDrink(item.id, { is_available: nextVal });
+      } else {
+        await api.updateRestaurantDish(item.id, { is_available: nextVal });
+      }
+      showToast(
+        nextVal === 1
+          ? `"${item.name}" is now VISIBLE in Restaurant POS, Waiter Panel & Guest Web`
+          : `"${item.name}" is now HIDDEN from Restaurant POS, Waiter Panel & Guest Web`,
+        nextVal === 1 ? 'green' : 'info'
+      );
+      if (onMenuChanged) onMenuChanged();
+    } catch (err) {
+      // Revert on error
+      setMenuItems((prev) =>
+        prev.map((it) => (it.id === item.id ? { ...it, is_available: item.is_available } : it))
+      );
+      showToast('Failed to update dish visibility: ' + err.message, 'red');
+    }
+  };
+
   const handleDeleteItem = async (item) => {
     const confirmed = await showConfirm({
       title: `Delete "${item.name}"?`,
@@ -264,6 +296,7 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
     setNewItemCategory(rateCategoryFilter !== 'all' ? rateCategoryFilter : (categories[0]?.name || 'Main Course'));
     setNewItemVeg(1);
     setNewItemCode('');
+    setNewItemAvailable(1);
     setIsAddItemOpen(true);
   };
 
@@ -1666,7 +1699,8 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
                   <th style={{ padding: '10px 14px' }}>Item Name</th>
                   <th style={{ padding: '10px 14px' }}>Category</th>
                   <th style={{ padding: '10px 14px' }}>Shortcode</th>
-                  <th style={{ padding: '10px 14px', width: '200px' }}>Rate / Price (₹)</th>
+                  <th style={{ padding: '10px 14px', width: '180px' }}>Rate / Price (₹)</th>
+                  <th style={{ padding: '10px 14px', textAlign: 'center', width: '140px' }}>Show in Menu</th>
                   <th style={{ padding: '10px 14px', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
@@ -1674,12 +1708,37 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
                 {filteredRates.map((item) => {
                   const isDirty = editingRates[item.id] !== undefined && editingRates[item.id] !== String(item.price);
                   const currentInputValue = editingRates[item.id] !== undefined ? editingRates[item.id] : item.price;
+                  const isHidden = item.is_available === 0 || item.is_available === false;
 
                   return (
-                    <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '10px 14px', fontWeight: 750, color: '#0f172a' }}>
+                    <tr
+                      key={item.id}
+                      style={{
+                        borderBottom: '1px solid #f1f5f9',
+                        opacity: isHidden ? 0.65 : 1,
+                        background: isHidden ? '#fafafa' : 'transparent',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      <td style={{ padding: '10px 14px', fontWeight: 750, color: isHidden ? '#64748b' : '#0f172a' }}>
                         <span style={{ marginRight: '6px' }}>{item.is_veg ? '🟢' : '🔴'}</span>
-                        {item.name}
+                        <span style={{ textDecoration: isHidden ? 'line-through' : 'none' }}>{item.name}</span>
+                        {isHidden && (
+                          <span
+                            style={{
+                              marginLeft: '8px',
+                              padding: '2px 7px',
+                              background: '#fee2e2',
+                              color: '#b91c1c',
+                              fontSize: '0.68rem',
+                              borderRadius: '6px',
+                              fontWeight: 800,
+                              letterSpacing: '0.04em'
+                            }}
+                          >
+                            HIDDEN
+                          </span>
+                        )}
                       </td>
                       <td style={{ padding: '10px 14px', color: '#64748b' }}>
                         <span style={{ background: '#f1f5f9', padding: '2px 8px', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 700 }}>
@@ -1730,6 +1789,43 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
                           )}
                         </div>
                       </td>
+                      <td style={{ padding: '10px 14px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleAvailability(item)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '5px 12px',
+                            borderRadius: '20px',
+                            fontSize: '0.78rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            transition: 'all 0.18s ease',
+                            background: isHidden ? '#f1f5f9' : '#ecfdf5',
+                            color: isHidden ? '#64748b' : '#059669',
+                            border: isHidden ? '1px solid #cbd5e1' : '1px solid #a7f3d0',
+                            boxShadow: isHidden ? 'none' : '0 1px 2px rgba(16, 185, 129, 0.12)'
+                          }}
+                          title={
+                            isHidden
+                              ? 'Currently HIDDEN from Restaurant POS, Waiter Panel & Guest Web. Click to Show.'
+                              : 'Currently VISIBLE in Restaurant POS, Waiter Panel & Guest Web. Click to Hide.'
+                          }
+                        >
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              width: '8px',
+                              height: '8px',
+                              borderRadius: '50%',
+                              backgroundColor: isHidden ? '#94a3b8' : '#10b981'
+                            }}
+                          />
+                          <span>{isHidden ? 'Hidden' : 'Visible'}</span>
+                        </button>
+                      </td>
                       <td style={{ padding: '10px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <button
                           type="button"
@@ -1745,7 +1841,7 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
                             cursor: 'pointer',
                             marginRight: '6px'
                           }}
-                          title="Rename dish, change category, food type or price"
+                          title="Rename dish, change category, food type, visibility or price"
                         >
                           ✏️ Edit
                         </button>
@@ -1771,7 +1867,7 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
                 })}
                 {filteredRates.length === 0 && (
                   <tr>
-                    <td colSpan="5" style={{ padding: '36px', textAlign: 'center', color: '#94a3b8' }}>
+                    <td colSpan="6" style={{ padding: '36px', textAlign: 'center', color: '#94a3b8' }}>
                       No items found. Click "+ Add New" to add items.
                     </td>
                   </tr>
@@ -2311,6 +2407,22 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
                 </div>
               )}
 
+              <div>
+                <label style={{ display: 'block', fontSize: '0.80rem', fontWeight: 800, color: '#475569', marginBottom: '6px' }}>
+                  Show in Menu (Restaurant, Waiter, Room Service Web)
+                </label>
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 750 }}>
+                    <input type="radio" name="new_item_vis" checked={newItemAvailable === 1} onChange={() => setNewItemAvailable(1)} />
+                    <span style={{ color: '#059669' }}>🟢 Visible</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 750 }}>
+                    <input type="radio" name="new_item_vis" checked={newItemAvailable === 0} onChange={() => setNewItemAvailable(0)} />
+                    <span style={{ color: '#dc2626' }}>⚪ Hidden</span>
+                  </label>
+                </div>
+              </div>
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
                 <button
                   type="button"
@@ -2458,6 +2570,32 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
                   </div>
                 </div>
               )}
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.80rem', fontWeight: 800, color: '#475569', marginBottom: '6px' }}>
+                  Show in Menu (Restaurant, Waiter, Room Service Web)
+                </label>
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 750 }}>
+                    <input
+                      type="radio"
+                      name="edit_item_vis"
+                      checked={editingItem.is_available !== 0 && editingItem.is_available !== false}
+                      onChange={() => setEditingItem({ ...editingItem, is_available: 1 })}
+                    />
+                    <span style={{ color: '#059669' }}>🟢 Visible</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 750 }}>
+                    <input
+                      type="radio"
+                      name="edit_item_vis"
+                      checked={editingItem.is_available === 0 || editingItem.is_available === false}
+                      onChange={() => setEditingItem({ ...editingItem, is_available: 0 })}
+                    />
+                    <span style={{ color: '#dc2626' }}>⚪ Hidden</span>
+                  </label>
+                </div>
+              </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
                 <button

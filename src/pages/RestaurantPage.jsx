@@ -225,6 +225,10 @@ export default function RestaurantPage({ onPrintKOTSlip, onPrintBillSlip }) {
       loadMenuAndCategories();
     });
 
+    const unsubMenu = socketClient.on('MENU_UPDATED', () => {
+      loadMenuAndCategories();
+    });
+
     // 2. Continuous real-time background sync (Never freezes when table is open!)
     const interval = setInterval(() => {
       loadTables(true);
@@ -235,6 +239,7 @@ export default function RestaurantPage({ onPrintKOTSlip, onPrintBillSlip }) {
       unsubTables();
       unsubOrders();
       unsubRooms();
+      unsubMenu();
       clearInterval(interval);
       stopContinuousOrderAlert();
     };

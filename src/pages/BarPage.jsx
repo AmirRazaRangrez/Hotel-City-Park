@@ -155,6 +155,10 @@ export default function BarPage({ onPrintBOTSlip, onPrintBillSlip }) {
       loadMenuAndCategories();
     });
 
+    const unsubMenu = socketClient.on('MENU_UPDATED', () => {
+      loadMenuAndCategories();
+    });
+
     // 2. Quiet fallback interval
     const interval = setInterval(() => {
       if (!activeSessionTable) {
@@ -165,6 +169,7 @@ export default function BarPage({ onPrintBOTSlip, onPrintBillSlip }) {
     return () => {
       unsubBar();
       unsubRooms();
+      unsubMenu();
       clearInterval(interval);
     };
   }, [loadTables, loadMenuAndCategories, activeSessionTable]);
