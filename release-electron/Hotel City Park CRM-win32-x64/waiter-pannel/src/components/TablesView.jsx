@@ -231,21 +231,10 @@ export default function TablesView({
                 })()}
 
                 {/* Bill Amount or Table Type / Waiter Subtitle */}
-                {isLockedByOther ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 800 }}>
-                      Attended by {t.waiter_name || 'Staff'}
-                    </span>
-                    {billTotal > 0 && (
-                      <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#94a3b8', marginTop: '2px' }}>
-                        ₹{Number(billTotal).toLocaleString('en-IN')}
-                      </span>
-                    )}
-                  </div>
-                ) : isCaptainAssist ? (
+                {isAttendedByOther ? (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <span style={{ fontSize: '0.68rem', color: 'var(--apple-blue)', fontWeight: 800 }}>
-                      🛡️ {t.waiter_name || 'Staff'} (Assist)
+                      👤 {t.waiter_name || 'Staff'} (Running)
                     </span>
                     {billTotal > 0 && (
                       <span style={{ fontSize: '0.86rem', fontWeight: 900, color: 'var(--apple-orange)', marginTop: '2px' }}>
