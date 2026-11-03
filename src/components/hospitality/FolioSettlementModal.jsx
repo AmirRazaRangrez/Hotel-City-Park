@@ -681,6 +681,7 @@ export default function FolioSettlementModal({
                 room_numbers: roomNums,
                 particulars: `Room #${roomNums} - Checkout Bill Settlement (Cash)`,
                 cashier_name: cashierName,
+                stageLabel: 'Paid For checkout',
                 is_split: true
               });
             }
@@ -699,6 +700,7 @@ export default function FolioSettlementModal({
                 room_numbers: roomNums,
                 particulars: `Room #${roomNums} - Checkout Bill Settlement (UPI)`,
                 cashier_name: cashierName,
+                stageLabel: 'Paid For checkout',
                 is_split: true
               });
             }
@@ -716,6 +718,7 @@ export default function FolioSettlementModal({
                 room_numbers: roomNums,
                 particulars: `Room #${roomNums} - Checkout Bill Settlement (Card POS)`,
                 cashier_name: cashierName,
+                stageLabel: 'Paid For checkout',
                 is_split: true
               });
             }
@@ -734,7 +737,7 @@ export default function FolioSettlementModal({
                 room_numbers: roomNums,
                 particulars: `Room #${roomNums} - Checkout Bill Settlement (Cheque)`,
                 cashier_name: cashierName,
-                stageLabel: 'Paid while checkout',
+                stageLabel: 'Paid For checkout',
                 is_split: true
               });
             }
@@ -777,6 +780,9 @@ export default function FolioSettlementModal({
               settleAmt: isRefund ? 0 : totalSettled,
               refundAmt: isRefund ? refundAmt : 0,
               settled_at: new Date(),
+              discount_amount: activeDiscountAmt,
+              discount_pct: discountType === 'pct' ? (Number(discountValue) || 0) : (activeDiscountAmt > 0 && dynamicBalanceDue > 0 ? Math.round((activeDiscountAmt / dynamicBalanceDue) * 100) : 0),
+              discount: activeDiscountAmt,
               cardSurcharge: isRefund ? 0 : cardSurcharge,
               upiTax: isRefund ? 0 : upiTax,
               splitCash: isRefund ? 0 : splitCash,
@@ -2144,6 +2150,9 @@ export default function FolioSettlementModal({
                   settleAmt: isRefund ? 0 : (isCompanyPayingLater ? 0 : totalSettled),
                   refundAmt: isRefund ? refundAmount : 0,
                   settled_at: new Date(),
+                  discount_amount: activeDiscountAmt,
+                  discount_pct: discountType === 'pct' ? (Number(discountValue) || 0) : (activeDiscountAmt > 0 && dynamicBalanceDue > 0 ? Math.round((activeDiscountAmt / dynamicBalanceDue) * 100) : 0),
+                  discount: activeDiscountAmt,
                   cardSurcharge,
                   upiTax,
                   splitCash,

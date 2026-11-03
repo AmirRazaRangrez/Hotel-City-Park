@@ -5362,6 +5362,9 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                         settleAmt: 0,
                         refundAmt: folioData?.refund_amount || 0,
                         settled_at: folioData?.actual_checkout_time || new Date(),
+                        discount_amount: folioData?.discount_amount || folioData?.room?.discount_amount || folioData?.booking?.discount_amount || 0,
+                        discount_pct: folioData?.discount_pct || folioData?.room?.discount_pct || folioData?.booking?.discount_pct || 0,
+                        discount: folioData?.discount_amount || folioData?.room?.discount_amount || folioData?.booking?.discount_amount || 0,
                         checked_out_by: folioData?.checked_out_by || 'Front Desk'
                       };
                       printFinalBillA4(folioData?.room || folioData, folioData, settlementData);

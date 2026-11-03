@@ -1019,13 +1019,13 @@ export function buildMoneyReceiptHTML(receipt) {
   const rawParticulars = receipt.particulars || receipt.purpose || receipt.notes || receipt.description || (receipt.booking_id ? `Room Booking ${receipt.booking_id}` : 'Official Payment Receipt');
   const cleanParticulars = String(rawParticulars).replace(/Room\s*#\s*/gi, 'Room ');
 
-  // Row 1: "Paid for Pre-Booking" / "paid while checking" / "paid while Living" / "paid while checkout"
+  // Row 1: "Paid for Pre-Booking" / "paid while checking" / "paid while Living" / "Paid For checkout"
   const checkStr = (cleanParticulars + ' ' + (receipt.payment_stage || '') + ' ' + (receipt.purpose || '') + ' ' + (receipt.notes || '') + ' ' + (receipt.stageLabel || '')).toLowerCase();
   let stageLabel = receipt.stageLabel || 'Paid For CheckIn';
   if (receipt.stageLabel) {
     stageLabel = receipt.stageLabel;
   } else if (checkStr.includes('checkout') || checkStr.includes('final') || checkStr.includes('settlement')) {
-    stageLabel = 'Paid while checkout';
+    stageLabel = 'Paid For checkout';
   } else if (
     receipt.is_prebooking === true ||
     receipt.is_prebooked === true ||
@@ -4263,9 +4263,9 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
   // Duration & Billable Days
   const billableDays = Number(c.billableDays || c.chargedDays || summary.chargedDays || c.days || 1);
 
-  // Financial Breakdown
-  const discountPct = Number(c.discountPct || summary.discountPct || r.discount_pct || 0);
-  const discountAmt = Number(c.discountAmount || summary.discountAmount || r.discount_amount || 0);
+  // Financial Breakdown (Check-in / Tariff level discount)
+  const discountPct = Number(c.discountPct || summary.discountPct || 0);
+  const discountAmt = Number(c.discountAmount || summary.discountAmount || 0);
 
   // Other Charges & Extras breakdown
   const extraBedCharge = Number(r.extra_bed_charge ?? c.extraBedCharge ?? summary.extraBedCharge ?? c.hotelExtrasCharge ?? r.hotelExtrasCharge ?? 0);
@@ -4497,8 +4497,20 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
     ? (otaVoucherCovered + deskAdvance)
     : deskAdvance;
 
+  // Checkout / Settlement Discount (subtracted in Settlement Details)
+  const settlementDiscount = Number(
+    s.discount_amount ?? s.discountAmount ?? s.discount ??
+    r.discount_amount ?? r.discountAmount ?? r.discount ??
+    c.discountAmount ?? c.discount_amount ?? summary.discountAmount ?? 0
+  );
+  const settlementDiscountPct = Number(
+    s.discount_pct ?? s.discountPct ??
+    r.discount_pct ?? r.discountPct ??
+    c.discountPct ?? summary.discountPct ?? 0
+  );
+
   const explicitRefund = Number(s?.refundAmount || s?.refund_amount || s?.refundAmt || c?.refundAmount || c?.refund_amount || r?.refund_amount || 0);
-  const rawDiff = grossPayable - totalAdvanceOrVoucher;
+  const rawDiff = grossPayable - totalAdvanceOrVoucher - settlementDiscount;
   const isRefundPending = rawDiff < 0 || explicitRefund > 0;
   const refundAmount = isRefundPending ? (explicitRefund > 0 ? explicitRefund : Math.abs(rawDiff)) : 0;
   const netPayable = isRefundPending ? 0 : Math.max(0, rawDiff);
@@ -5368,6 +5380,12 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
                     <td style="padding: 1.5px 0; text-align: right; font-weight: 700; color: #000;">${deskAdvance.toFixed(2)}</td>
                   </tr>
                   `}
+                  ${settlementDiscount > 0 ? `
+                  <tr>
+                    <td style="padding: 1.5px 0; font-weight: 700; color: #000;">Discount ${settlementDiscountPct > 0 ? `(${settlementDiscountPct}%)` : ''}</td>
+                    <td style="padding: 1.5px 0; text-align: right; font-weight: 700; color: #000;">${settlementDiscount.toFixed(2)}</td>
+                  </tr>
+                  ` : ''}
                   <tr style="border-top: 1.5px dashed #000;">
                     <td style="padding: 3px 0; font-weight: 700; font-size: 11pt; color: #000;">${isRefundPending ? 'Refund Amount' : 'Net Payable'}</td>
                     <td style="padding: 3px 0; text-align: right; font-weight: 700; font-size: 11.5pt; color: #000;">${isRefundPending ? `-${Math.abs(refundAmount).toFixed(2)}` : netPayable.toFixed(2)}</td>
