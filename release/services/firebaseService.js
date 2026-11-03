@@ -937,11 +937,22 @@ async function syncWaiterDataToCloud(db) {
     let occRooms = [];
     try {
       occRooms = db.prepare(`
-        SELECT r.id, r.room_number, r.status, g.name as guest_name, g.mobile as guest_phone, b.id as booking_id 
+        SELECT 
+          r.id, 
+          r.room_number, 
+          r.room_type,
+          r.status, 
+          r.floor,
+          COALESCE(g.name, 'In-House Guest') as guest_name, 
+          COALESCE(g.mobile, '—') as guest_phone, 
+          COALESCE(g.mobile, '—') as guest_mobile, 
+          b.id as booking_id 
         FROM rooms r 
-        JOIN bookings b ON (r.current_booking_id = b.id OR b.room_id = r.id) 
+        JOIN bookings b ON (r.current_booking_id = b.id OR b.room_id = r.id) AND b.status = 'active'
         JOIN guests g ON b.guest_id = g.id 
-        WHERE b.status = 'active' OR r.status = 'occupied'
+        WHERE r.status = 'occupied' OR b.status = 'active'
+        GROUP BY r.id
+        ORDER BY CAST(r.room_number AS INTEGER) ASC, r.room_number ASC
       `).all();
     } catch (_) {}
 

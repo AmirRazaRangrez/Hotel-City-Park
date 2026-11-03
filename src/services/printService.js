@@ -1022,10 +1022,13 @@ export function buildMoneyReceiptHTML(receipt) {
   // Row 1: "Paid for Pre-Booking" / "paid while checking" / "paid while Living" / "Paid For checkout"
   const checkStr = (cleanParticulars + ' ' + (receipt.payment_stage || '') + ' ' + (receipt.purpose || '') + ' ' + (receipt.notes || '') + ' ' + (receipt.stageLabel || '')).toLowerCase();
   let stageLabel = receipt.stageLabel || 'Paid For CheckIn';
-  if (receipt.stageLabel) {
+  if (checkStr.includes('checkout') || checkStr.includes('final') || checkStr.includes('settlement')) {
+    stageLabel = 'Paid While Checkout';
+  } else if (receipt.stageLabel) {
     stageLabel = receipt.stageLabel;
-  } else if (checkStr.includes('checkout') || checkStr.includes('final') || checkStr.includes('settlement')) {
-    stageLabel = 'Paid For checkout';
+  }
+  if (typeof stageLabel === 'string' && stageLabel.toLowerCase().includes('checkout')) {
+    stageLabel = 'Paid While Checkout';
   } else if (
     receipt.is_prebooking === true ||
     receipt.is_prebooked === true ||
@@ -1044,7 +1047,7 @@ export function buildMoneyReceiptHTML(receipt) {
   } else if (checkStr.includes('check-in') || checkStr.includes('checkin') || checkStr.includes('checking')) {
     stageLabel = 'Paid For CheckIn';
   } else if (checkStr.includes('living') || checkStr.includes('mid-stay') || checkStr.includes('running') || checkStr.includes('stay') || checkStr.includes('fnb') || checkStr.includes('order') || checkStr.includes('restaurant') || checkStr.includes('bar')) {
-    stageLabel = 'Paid while Living';
+    stageLabel = 'Paid While Living';
   } else {
     stageLabel = 'Paid For CheckIn';
   }
@@ -3479,9 +3482,9 @@ export function buildGuestPaymentSummaryHTML(data) {
     if (/pre-?booking|advance.*pre-?booking/i.test(rawPurpose) || p.is_prebooking || p.prebooking) {
       purposeStr = 'Paid for Pre-Booking';
     } else if (/advance\s+payment\s+at\s+check-?in/i.test(rawPurpose)) {
-      purposeStr = 'paid while checkin : checkin';
+      purposeStr = 'Paid While CheckIn';
     } else if (/settlement\s+at\s+check-?out/i.test(rawPurpose)) {
-      purposeStr = 'paid during checkout : settlement';
+      purposeStr = 'Paid While Checkout';
     } else {
       purposeStr = rawPurpose.replace(/\s*\([^)]*\)/g, '').trim();
     }
@@ -5040,7 +5043,7 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
           ${discountAmt > 0 ? `
           <tr style="background: transparent;">
             <td style="padding: 2.2px 6px; font-weight: 400; color: #000; width: ${particularsWidth};">
-              Less Discount @${discountPct > 0 ? discountPct.toFixed(2) : ((discountAmt / grossTariff) * 100).toFixed(2)}%
+              Less Discount 
             </td>
             ${dates.map(d => {
               const entry = entryMap[d];

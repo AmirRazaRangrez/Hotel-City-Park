@@ -33,7 +33,7 @@ function formatCurrentDateTime(d = new Date()) {
 }
 
 function printHtmlDocument(printHtml) {
-  // 1. Invisible iframe print (immune to pop-up blockers in Chrome, Edge, and Electron!)
+  // Invisible iframe print strictly once without popups
   try {
     let iframe = document.getElementById('hidden-occupancy-print-iframe');
     if (!iframe) {
@@ -57,32 +57,11 @@ function printHtmlDocument(printHtml) {
         iframe.contentWindow.focus();
         iframe.contentWindow.print();
       } catch (err) {
-        console.warn('Iframe print error, falling back to window.open:', err);
-        const printWin = window.open('', '_blank', 'width=1000,height=800');
-        if (printWin) {
-          printWin.document.open();
-          printWin.document.write(printHtml);
-          printWin.document.close();
-        }
+        console.warn('Iframe print error:', err);
       }
-    }, 350);
-    return;
+    }, 300);
   } catch (err) {
-    console.warn('Iframe print setup error, falling back to window.open:', err);
-  }
-
-  // 2. Fallback to window.open
-  try {
-    const printWin = window.open('', '_blank', 'width=1000,height=800');
-    if (printWin) {
-      printWin.document.open();
-      printWin.document.write(printHtml);
-      printWin.document.close();
-    } else {
-      window.print();
-    }
-  } catch (_) {
-    window.print();
+    console.warn('Iframe print setup error:', err);
   }
 }
 
@@ -203,11 +182,34 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
     return { withBreakfast, withoutBreakfast, totalBreakfastPax };
   }, [chartData]);
 
-  // Occupied and Empty room lists
-  const occupiedRooms = useMemo(() => chartData.filter((r) => r.is_occupied).map((r) => r.room_number), [chartData]);
-  const emptyRooms = useMemo(() => chartData.filter((r) => !r.is_occupied).map((r) => r.room_number), [chartData]);
+  // Print Debounce State
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  // Occupied, Empty, Maintenance, and Dirty room lists (Strictly Deduplicated and Sorted)
+  const occupiedRooms = useMemo(() => {
+    const list = chartData.filter((r) => r.is_occupied).map((r) => String(r.room_number || '').trim()).filter(Boolean);
+    return [...new Set(list)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [chartData]);
+
+  const maintenanceRooms = useMemo(() => {
+    const list = chartData.filter((r) => !r.is_occupied && String(r.status || r.room_status).toLowerCase() === 'maintenance').map((r) => String(r.room_number || '').trim()).filter(Boolean);
+    return [...new Set(list)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [chartData]);
+
+  const dirtyRooms = useMemo(() => {
+    const list = chartData.filter((r) => !r.is_occupied && (String(r.status || r.room_status).toLowerCase() === 'needs_cleaning' || String(r.status || r.room_status).toLowerCase() === 'dirty')).map((r) => String(r.room_number || '').trim()).filter(Boolean);
+    return [...new Set(list)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [chartData]);
+
+  const emptyRooms = useMemo(() => {
+    const list = chartData.filter((r) => !r.is_occupied && String(r.status || r.room_status).toLowerCase() !== 'maintenance' && String(r.status || r.room_status).toLowerCase() !== 'needs_cleaning' && String(r.status || r.room_status).toLowerCase() !== 'dirty').map((r) => String(r.room_number || '').trim()).filter(Boolean);
+    return [...new Set(list)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [chartData]);
 
   const handlePrintCleanerHistory = async () => {
+    if (isPrinting) return;
+    setIsPrinting(true);
+    setTimeout(() => setIsPrinting(false), 2000);
     try {
       showToast('Fetching cleaner history for ' + selectedDate + '...', 'info', 1500);
       const res = await api.getCleanerHistory(selectedDate);
@@ -277,13 +279,6 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
             <span>Housekeeping Supervisor: __________________</span>
             <span>Front Office Manager: __________________</span>
           </div>
-          <script>
-            window.onload = function() {
-              window.focus();
-              window.print();
-              setTimeout(function() { window.close(); }, 800);
-            };
-          </script>
         </body>
         </html>
       `;
@@ -294,25 +289,30 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
     }
   };
 
-  // Print function matching the exact format from Image 2
+  // Print function matching the exact format strictly once
   const handlePrint = (filterMode = viewFilter) => {
+    if (isPrinting) return;
+    setIsPrinting(true);
+    setTimeout(() => setIsPrinting(false), 2000);
+
     let rowsToPrint = chartData;
     if (filterMode === 'occupied') {
       rowsToPrint = chartData.filter((r) => r.is_occupied);
     }
 
     const printTimeStr = formatCurrentDateTime(new Date(generatedAt || Date.now()));
-    const occupiedTotal = summary?.occupiedCount || chartData.filter((r) => r.is_occupied).length;
+    const occupiedRoomNumbers = [...new Set(chartData.filter((r) => r.is_occupied).map((r) => String(r.room_number || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const maintenanceRoomNumbers = [...new Set(chartData.filter((r) => !r.is_occupied && String(r.status || r.room_status).toLowerCase() === 'maintenance').map((r) => String(r.room_number || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const dirtyRoomNumbers = [...new Set(chartData.filter((r) => !r.is_occupied && (String(r.status || r.room_status).toLowerCase() === 'needs_cleaning' || String(r.status || r.room_status).toLowerCase() === 'dirty')).map((r) => String(r.room_number || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const emptyRoomNumbers = [...new Set(chartData.filter((r) => !r.is_occupied && String(r.status || r.room_status).toLowerCase() !== 'maintenance' && String(r.status || r.room_status).toLowerCase() !== 'needs_cleaning' && String(r.status || r.room_status).toLowerCase() !== 'dirty').map((r) => String(r.room_number || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    const occupiedTotal = occupiedRoomNumbers.length;
     const allTotal = summary?.totalRooms || chartData.length;
-    const occupancyPercentage = summary?.occupancyPct || (allTotal > 0 ? Math.round((occupiedTotal / allTotal) * 100) : 0);
+    const occupancyPercentage = allTotal > 0 ? Math.round((occupiedTotal / allTotal) * 100) : 0;
     const totalGuestsPax = summary?.totalPax || rowsToPrint.filter((r) => r.is_occupied).reduce((sum, r) => sum + (Number(r.pax) || 0), 0);
     const totalBreakfastPax = rowsToPrint
       .filter((r) => r.is_occupied && String(r.breakfast || '').trim().toLowerCase() === 'yes')
       .reduce((sum, r) => sum + (Number(r.pax) || 0), 0);
-    const occupiedRoomNumbers = chartData.filter((r) => r.is_occupied).map((r) => r.room_number);
-    const maintenanceRoomNumbers = chartData.filter((r) => !r.is_occupied && String(r.status || r.room_status).toLowerCase() === 'maintenance').map((r) => r.room_number);
-    const dirtyRoomNumbers = chartData.filter((r) => !r.is_occupied && (String(r.status || r.room_status).toLowerCase() === 'needs_cleaning' || String(r.status || r.room_status).toLowerCase() === 'dirty')).map((r) => r.room_number);
-    const emptyRoomNumbers = chartData.filter((r) => !r.is_occupied && String(r.status || r.room_status).toLowerCase() !== 'maintenance' && String(r.status || r.room_status).toLowerCase() !== 'needs_cleaning' && String(r.status || r.room_status).toLowerCase() !== 'dirty').map((r) => r.room_number);
 
     const rowsHtml = rowsToPrint
       .map((r) => {
@@ -389,36 +389,55 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
             line-height: 1.25;
           }
           .chart-header {
-            text-align: center;
             margin-bottom: 6px;
+            border-bottom: 1.5px solid #000;
+            padding-bottom: 5px;
+          }
+          .header-grid {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+          }
+          .header-left {
+            flex: 1;
+            max-width: 33%;
+            text-align: left;
+            font-size: 9px;
+            line-height: 1.35;
+          }
+          .header-left b { font-weight: 800; }
+          .header-center {
+            flex: 1;
+            text-align: center;
+            padding: 0 4px;
           }
           .chart-title {
             font-size: 18px;
             font-weight: 900;
             letter-spacing: 0.5px;
             text-transform: uppercase;
-            margin: 0 0 4px 0;
+            margin: 0 0 2px 0;
           }
-          .chart-subrow {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-end;
+          .chart-subtitle {
             font-size: 11.5px;
-            font-weight: 700;
-            border-bottom: 1.5px solid #000;
-            padding-bottom: 4px;
-            margin-bottom: 6px;
-          }
-          .chart-room-status-list {
-            flex: 1;
-            margin: 0 14px;
-            font-size: 9.5px;
-            line-height: 1.35;
-            text-align: left;
-            font-weight: 500;
-          }
-          .chart-room-status-list b {
             font-weight: 800;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+          }
+          .header-right {
+            flex: 1;
+            max-width: 38%;
+            text-align: right;
+            font-size: 9px;
+            line-height: 1.35;
+          }
+          .header-right b { font-weight: 800; }
+          .as-on-date {
+            font-weight: 800;
+            font-size: 9.5px;
+            white-space: nowrap;
+            margin-bottom: 2px;
           }
           .chart-table {
             width: 100%;
@@ -478,16 +497,20 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
       </head>
       <body>
         <div class="chart-header">
-          <div class="chart-title">HOTEL CITY PARK</div>
-          <div class="chart-subrow">
-            <div style="font-weight: 800; white-space: nowrap;">ROOM OCCUPANCY CHART</div>
-            <div class="chart-room-status-list">
+          <div class="header-grid">
+            <div class="header-left">
               <div><b>Occupied (${occupiedRoomNumbers.length}):</b> ${occupiedRoomNumbers.join(', ') || 'None'}</div>
-              <div><b>Vacant / Ready (${emptyRoomNumbers.length}):</b> ${emptyRoomNumbers.join(', ') || 'None'}</div>
-              ${maintenanceRoomNumbers.length > 0 ? `<div><b>Maintenance (${maintenanceRoomNumbers.length}):</b> ${maintenanceRoomNumbers.join(', ')}</div>` : ''}
-              ${dirtyRoomNumbers.length > 0 ? `<div><b>Dirty / Cleaning (${dirtyRoomNumbers.length}):</b> ${dirtyRoomNumbers.join(', ')}</div>` : ''}
+              ${maintenanceRoomNumbers.length > 0 ? `<div style="margin-top: 2px;"><b>Maintenance (${maintenanceRoomNumbers.length}):</b> ${maintenanceRoomNumbers.join(', ')}</div>` : ''}
+              ${dirtyRoomNumbers.length > 0 ? `<div style="margin-top: 2px;"><b>Dirty / Cleaning (${dirtyRoomNumbers.length}):</b> ${dirtyRoomNumbers.join(', ')}</div>` : ''}
             </div>
-            <div style="font-weight: 800; white-space: nowrap;">AS ON ${printTimeStr}</div>
+            <div class="header-center">
+              <div class="chart-title">HOTEL CITY PARK</div>
+              <div class="chart-subtitle">ROOM OCCUPANCY CHART</div>
+            </div>
+            <div class="header-right">
+              <div class="as-on-date">AS ON ${printTimeStr}</div>
+              <div><b>Vacant / Ready (${emptyRoomNumbers.length}):</b> ${emptyRoomNumbers.join(', ') || 'None'}</div>
+            </div>
           </div>
         </div>
 
@@ -520,13 +543,6 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
           <div>TOTAL PAX : ${totalGuestsPax}</div>
         </div>
 
-        <script>
-          window.onload = function() {
-            window.focus();
-            window.print();
-            setTimeout(function() { window.close(); }, 800);
-          };
-        </script>
       </body>
       </html>
     `;
@@ -535,6 +551,9 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
   };
 
   const handlePrintWeeklyMatrix = () => {
+    if (isPrinting) return;
+    setIsPrinting(true);
+    setTimeout(() => setIsPrinting(false), 2000);
     if (!matrixData || !matrixData.matrix || matrixData.matrix.length === 0) {
       showToast('Weekly occupancy data is not loaded yet.', 'warning', 3000);
       return;
@@ -754,13 +773,6 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
           <div>Verified By: __________________________ (General Manager)</div>
         </div>
 
-        <script>
-          window.onload = function() {
-            window.focus();
-            window.print();
-            setTimeout(function() { window.close(); }, 800);
-          };
-        </script>
       </body>
       </html>
     `;
@@ -1023,6 +1035,7 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
                 <button
                   type="button"
                   id="btn-print-occupancy-chart"
+                  disabled={isPrinting}
                   onClick={() => handlePrint(viewFilter)}
                   style={{
                     display: 'inline-flex',
@@ -1314,43 +1327,54 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
                 {/* Official Table Header Banner */}
                 <div
                   style={{
-                    padding: '12px 16px 8px 16px',
+                    padding: '12px 16px',
                     borderBottom: '2px solid var(--border-medium, #0f172a)',
-                    background: 'var(--bg-surface-secondary, #f8fafc)'
+                    background: 'var(--bg-surface-secondary, #f8fafc)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    gap: '16px'
                   }}
                 >
-                  <div style={{ textAlign: 'center', fontWeight: 900, fontSize: '1.1rem', letterSpacing: '0.5px' }}>
-                    HOTEL CITY PARK
-                  </div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-end',
-                      marginTop: '4px',
-                      fontSize: '0.8rem',
-                      fontWeight: 750,
-                      color: 'var(--text-secondary, #475569)'
-                    }}
-                  >
-                    <div style={{ color: 'var(--text-primary, #0f172a)', fontWeight: 800, whiteSpace: 'nowrap' }}>ROOM OCCUPANCY CHART</div>
-                    <div style={{ flex: 1, margin: '0 14px', fontSize: '0.75rem', lineHeight: 1.35, textAlign: 'left' }}>
-                      <div>
-                        <span style={{ fontWeight: 800, color: '#166534' }}>Occupied ({occupiedRooms.length}): </span>
-                        <span style={{ color: 'var(--text-primary, #0f172a)' }}>{occupiedRooms.join(', ') || 'None'}</span>
-                      </div>
-                      <div>
-                        <span style={{ fontWeight: 800, color: '#475569' }}>Vacant ({emptyRooms.length}): </span>
-                        <span style={{ color: 'var(--text-primary, #0f172a)' }}>{emptyRooms.join(', ') || 'None'}</span>
-                      </div>
-                      {chartData.filter(r => !r.is_occupied && String(r.status || r.room_status).toLowerCase() === 'maintenance').length > 0 && (
-                        <div>
-                          <span style={{ fontWeight: 800, color: '#dc2626' }}>Maintenance ({chartData.filter(r => !r.is_occupied && String(r.status || r.room_status).toLowerCase() === 'maintenance').length}): </span>
-                          <span style={{ color: '#dc2626', fontWeight: 700 }}>{chartData.filter(r => !r.is_occupied && String(r.status || r.room_status).toLowerCase() === 'maintenance').map(r => r.room_number).join(', ')}</span>
-                        </div>
-                      )}
+                  {/* Left: Occupied & Maintenance */}
+                  <div style={{ flex: 1, maxWidth: '33%', textAlign: 'left', fontSize: '0.78rem', lineHeight: 1.4 }}>
+                    <div>
+                      <span style={{ fontWeight: 800, color: '#166534' }}>Occupied ({occupiedRooms.length}): </span>
+                      <span style={{ color: 'var(--text-primary, #0f172a)', fontWeight: 600 }}>{occupiedRooms.join(', ') || 'None'}</span>
                     </div>
-                    <div style={{ whiteSpace: 'nowrap' }}>AS ON {formatCurrentDateTime(new Date(generatedAt || Date.now()))}</div>
+                    {maintenanceRooms.length > 0 && (
+                      <div style={{ marginTop: '2px' }}>
+                        <span style={{ fontWeight: 800, color: '#dc2626' }}>Maintenance ({maintenanceRooms.length}): </span>
+                        <span style={{ color: '#dc2626', fontWeight: 600 }}>{maintenanceRooms.join(', ')}</span>
+                      </div>
+                    )}
+                    {dirtyRooms.length > 0 && (
+                      <div style={{ marginTop: '2px' }}>
+                        <span style={{ fontWeight: 800, color: '#d97706' }}>Dirty / Cleaning ({dirtyRooms.length}): </span>
+                        <span style={{ color: '#d97706', fontWeight: 600 }}>{dirtyRooms.join(', ')}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Center: Title */}
+                  <div style={{ flex: 1, textAlign: 'center' }}>
+                    <div style={{ fontWeight: 900, fontSize: '1.15rem', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+                      HOTEL CITY PARK
+                    </div>
+                    <div style={{ color: 'var(--text-primary, #0f172a)', fontWeight: 800, fontSize: '0.85rem', letterSpacing: '0.5px', marginTop: '2px', textTransform: 'uppercase' }}>
+                      ROOM OCCUPANCY CHART
+                    </div>
+                  </div>
+
+                  {/* Right: As On & Vacant */}
+                  <div style={{ flex: 1, maxWidth: '38%', textAlign: 'right', fontSize: '0.78rem', lineHeight: 1.4 }}>
+                    <div style={{ fontWeight: 800, color: 'var(--text-secondary, #475569)', marginBottom: '2px' }}>
+                      AS ON {formatCurrentDateTime(new Date(generatedAt || Date.now()))}
+                    </div>
+                    <div>
+                      <span style={{ fontWeight: 800, color: '#475569' }}>Vacant / Ready ({emptyRooms.length}): </span>
+                      <span style={{ color: 'var(--text-primary, #0f172a)', fontWeight: 600 }}>{emptyRooms.join(', ') || 'None'}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -1813,6 +1837,7 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
             </button>
             <button
               type="button"
+              disabled={isPrinting}
               onClick={() => handlePrint(viewFilter)}
               style={{
                 padding: '6px 18px',

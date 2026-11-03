@@ -681,7 +681,7 @@ export default function FolioSettlementModal({
                 room_numbers: roomNums,
                 particulars: `Room #${roomNums} - Checkout Bill Settlement (Cash)`,
                 cashier_name: cashierName,
-                stageLabel: 'Paid For checkout',
+                stageLabel: 'Paid While Checkout',
                 is_split: true
               });
             }
@@ -700,7 +700,7 @@ export default function FolioSettlementModal({
                 room_numbers: roomNums,
                 particulars: `Room #${roomNums} - Checkout Bill Settlement (UPI)`,
                 cashier_name: cashierName,
-                stageLabel: 'Paid For checkout',
+                stageLabel: 'Paid While Checkout',
                 is_split: true
               });
             }
@@ -718,7 +718,7 @@ export default function FolioSettlementModal({
                 room_numbers: roomNums,
                 particulars: `Room #${roomNums} - Checkout Bill Settlement (Card POS)`,
                 cashier_name: cashierName,
-                stageLabel: 'Paid For checkout',
+                stageLabel: 'Paid While Checkout',
                 is_split: true
               });
             }
@@ -737,7 +737,7 @@ export default function FolioSettlementModal({
                 room_numbers: roomNums,
                 particulars: `Room #${roomNums} - Checkout Bill Settlement (Cheque)`,
                 cashier_name: cashierName,
-                stageLabel: 'Paid For checkout',
+                stageLabel: 'Paid While Checkout',
                 is_split: true
               });
             }

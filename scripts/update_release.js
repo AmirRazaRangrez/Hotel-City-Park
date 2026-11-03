@@ -367,7 +367,7 @@ if (fs.existsSync(electronFolder)) {
     try {
       console.log('  ⚡ Compressing package with high-speed 7-Zip...');
       if (fs.existsSync(zipFile)) fs.unlinkSync(zipFile);
-      execSync(`"${s7zPath}" a -tzip -mx=3 "${zipFile}" "Hotel City Park CRM-win32-x64"`, {
+      execSync(`"${s7zPath}" a -y -tzip -mx=3 "${zipFile}" "Hotel City Park CRM-win32-x64"`, {
         cwd: path.join(rootDir, 'release-electron'),
         stdio: 'inherit'
       });
