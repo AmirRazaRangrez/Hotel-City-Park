@@ -6680,18 +6680,44 @@ export function buildAccountingAnalysisPrintHTML({ records = [], filters = {}, s
  */
 export function printAccountingAnalysisReport({ records = [], filters = {}, summary = {} }) {
   const html = buildAccountingAnalysisPrintHTML({ records, filters, summary });
-  const printWindow = window.open('', '_blank', 'width=1100,height=800');
-  if (printWindow) {
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
-    printWindow.focus();
+  try {
+    const printWindow = window.open('', '_blank', 'width=1100,height=800');
+    if (printWindow) {
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => {
+        printWindow.print();
+      }, 450);
+      return true;
+    }
+  } catch (_) {}
+
+  // Fallback to invisible iframe print (never blocked by popup blocker!)
+  try {
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
     setTimeout(() => {
-      printWindow.print();
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      setTimeout(() => iframe.remove(), 10000);
     }, 450);
     return true;
+  } catch (err) {
+    console.error('Accounting analysis print error:', err);
+    return false;
   }
-  return false;
 }
 
 /**

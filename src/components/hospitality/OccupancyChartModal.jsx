@@ -32,6 +32,60 @@ function formatCurrentDateTime(d = new Date()) {
   return `${day}-${month}-${year} AT ${hours}:${minutes}:${seconds} ${ampm}`;
 }
 
+function printHtmlDocument(printHtml) {
+  // 1. Invisible iframe print (immune to pop-up blockers in Chrome, Edge, and Electron!)
+  try {
+    let iframe = document.getElementById('hidden-occupancy-print-iframe');
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.id = 'hidden-occupancy-print-iframe';
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.style.visibility = 'hidden';
+      document.body.appendChild(iframe);
+    }
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(printHtml);
+    doc.close();
+    setTimeout(() => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (err) {
+        console.warn('Iframe print error, falling back to window.open:', err);
+        const printWin = window.open('', '_blank', 'width=1000,height=800');
+        if (printWin) {
+          printWin.document.open();
+          printWin.document.write(printHtml);
+          printWin.document.close();
+        }
+      }
+    }, 350);
+    return;
+  } catch (err) {
+    console.warn('Iframe print setup error, falling back to window.open:', err);
+  }
+
+  // 2. Fallback to window.open
+  try {
+    const printWin = window.open('', '_blank', 'width=1000,height=800');
+    if (printWin) {
+      printWin.document.open();
+      printWin.document.write(printHtml);
+      printWin.document.close();
+    } else {
+      window.print();
+    }
+  } catch (_) {
+    window.print();
+  }
+}
+
 export default function OccupancyChartModal({ isOpen, onClose }) {
   const { showToast } = useApp();
   const [chartMode, setChartMode] = useState('daily');
@@ -234,12 +288,7 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
         </html>
       `;
 
-      const printWin = window.open('', '_blank', 'width=900,height=700');
-      if (printWin) {
-        printWin.document.open();
-        printWin.document.write(printHtml);
-        printWin.document.close();
-      }
+      printHtmlDocument(printHtml);
     } catch (err) {
       showToast('Error downloading cleaner history: ' + err.message, 'error', 3000);
     }
@@ -482,14 +531,7 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
       </html>
     `;
 
-    const printWin = window.open('', '_blank', 'width=1000,height=800');
-    if (printWin) {
-      printWin.document.open();
-      printWin.document.write(printHtml);
-      printWin.document.close();
-    } else {
-      showToast('Pop-up blocked. Please allow pop-ups to print the occupancy chart.', 'warning', 4000);
-    }
+    printHtmlDocument(printHtml);
   };
 
   const handlePrintWeeklyMatrix = () => {
@@ -723,14 +765,7 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
       </html>
     `;
 
-    const printWin = window.open('', '_blank', 'width=1200,height=900');
-    if (printWin) {
-      printWin.document.open();
-      printWin.document.write(printHtml);
-      printWin.document.close();
-    } else {
-      showToast('Pop-up blocked. Please allow pop-ups to print the occupancy matrix.', 'warning', 4000);
-    }
+    printHtmlDocument(printHtml);
   };
 
   if (!isOpen) return null;

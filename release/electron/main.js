@@ -478,9 +478,9 @@ function createMainWindow() {
     }
   });
 
-  // Intercept window open calls: keep CRM pages inside app, open external web links in browser
+  // Intercept window open calls: keep CRM pages inside app, allow print popups/blank, open external web links in browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith(`http://localhost:${PORT}`) || url.startsWith('blob:')) {
+    if (!url || url === 'about:blank' || url.startsWith(`http://localhost:${PORT}`) || url.startsWith('blob:') || url.startsWith(`http://127.0.0.1:${PORT}`)) {
       return { action: 'allow' };
     }
     shell.openExternal(url);
