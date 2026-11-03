@@ -1706,21 +1706,25 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                           calc: {
                             grossTariff: detailBooking.total_room_charge || detailBooking.room_rate,
                             roomCharge: detailBooking.total_room_charge || detailBooking.room_rate,
-                            roomTariffNet: detailBooking.total_room_charge,
-                            tariffTax5Pct: Math.round((detailBooking.total_room_charge || 0) * 0.05),
+                            roomTariffNet: Math.max(0, (Number(detailBooking.total_room_charge || detailBooking.room_rate || 0)) - (Number(detailBooking.discount_amount || 0))),
+                            tariffTax5Pct: detailBooking.tax_amount || detailBooking.total_tax,
                             foodTotal: detailBooking.food_total || 0,
                             barTotal: detailBooking.bar_total || 0,
                             hotelExtrasCharge: detailBooking.extra_bed_charge || 0,
-                            advancePaid: detailBooking.initial_paid || detailBooking.total_paid || 0,
+                            advancePaid: detailBooking.advance_payment !== undefined && detailBooking.advance_payment !== null && Number(detailBooking.advance_payment) > 0
+                              ? Number(detailBooking.advance_payment)
+                              : Math.max(0, Number(detailBooking.total_paid || 0) - Number(detailBooking.final_settlement_payment || 0)),
                             chargedDays: detailBooking.charged_days || 1,
                             billableDays: detailBooking.charged_days || 1,
                             discountPct: detailBooking.discount_pct || 0,
                             discountAmount: detailBooking.discount_amount || 0
                           },
                           settlement: {
-                            settleAmt: detailBooking.final_settle_amount || detailBooking.total_paid || 0,
+                            settleAmt: detailBooking.final_settlement_payment || detailBooking.final_settle_amount || 0,
                             refundAmt: detailBooking.refund_amount || 0,
                             settled_at: detailBooking.actual_checkout_time || detailBooking.checkout_time || new Date(),
+                            discount_amount: detailBooking.discount_amount || 0,
+                            discount_pct: detailBooking.discount_pct || 0,
                             invoiceNo: detailBooking.invoice_no || formatTaxInvoiceNumber(detailBooking.voucher_number || detailBooking.voucher_no || detailBooking.checkin_voucher_no || detailBooking.id),
                             checked_out_by: detailBooking.checked_out_by || (currentUser ? (currentUser.full_name || currentUser.username) : 'Cashier_1')
                           }
@@ -3257,21 +3261,25 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                                 calc: {
                                   grossTariff: detailBooking.grossTariff || detailBooking.total_room_charge || detailBooking.room_rate,
                                   roomCharge: detailBooking.total_room_charge || detailBooking.room_rate,
-                                  roomTariffNet: detailBooking.grossTariff || detailBooking.total_room_charge,
+                                  roomTariffNet: Math.max(0, (Number(detailBooking.total_room_charge || detailBooking.room_rate || 0)) - (Number(detailBooking.discount_amount || 0))),
                                   tariffTax5Pct: detailBooking.tax_amount || detailBooking.total_tax,
                                   foodTotal: detailBooking.food_total || 0,
                                   barTotal: detailBooking.bar_total || 0,
                                   hotelExtrasCharge: detailBooking.extra_bed_charge || 0,
-                                  advancePaid: detailBooking.initial_paid || detailBooking.total_paid || 0,
+                                  advancePaid: detailBooking.advance_payment !== undefined && detailBooking.advance_payment !== null && Number(detailBooking.advance_payment) > 0
+                                    ? Number(detailBooking.advance_payment)
+                                    : Math.max(0, Number(detailBooking.total_paid || 0) - Number(detailBooking.final_settlement_payment || 0)),
                                   chargedDays: detailBooking.charged_days || 1,
                                   billableDays: detailBooking.charged_days || 1,
                                   discountPct: detailBooking.discount_pct || 0,
                                   discountAmount: detailBooking.discount_amount || 0
                                 },
                                 settlement: {
-                                  settleAmt: detailBooking.final_settle_amount || 0,
+                                  settleAmt: detailBooking.final_settlement_payment || detailBooking.final_settle_amount || 0,
                                   refundAmt: detailBooking.refund_amount || 0,
                                   settled_at: detailBooking.actual_checkout_time || detailBooking.checkout_time || new Date(),
+                                  discount_amount: detailBooking.discount_amount || 0,
+                                  discount_pct: detailBooking.discount_pct || 0,
                                   invoiceNo: detailBooking.invoice_no || formatTaxInvoiceNumber(detailBooking.voucher_number || detailBooking.voucher_no || detailBooking.checkin_voucher_no || detailBooking.id),
                                   checked_out_by: detailBooking.checked_out_by || (currentUser ? (currentUser.full_name || currentUser.username) : 'Cashier_1')
                                 }

@@ -3149,10 +3149,10 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
     const roomCharge = Number(booking.total_room_charge || booking.room_rate || 0);
     const extra = Number(booking.extra_bed_charge || 0);
     const discount = Number(booking.discount_amount || 0);
-    const tax = Number(booking.early_checkin_gst || Math.round(roomCharge * 0.05));
+    const tax = Number(booking.early_checkin_gst || Math.max(0, Math.round(roomCharge - (roomCharge / 1.05))));
     const foodTotal = restaurantOrders.filter(o => o.is_paid === 0).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
     const barTotal = barOrders.filter(o => o.is_paid === 0).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
-    const grandTotal = Math.max(0, roomCharge + foodTotal + barTotal + extra - discount + tax);
+    const grandTotal = Math.max(0, roomCharge + foodTotal + barTotal + extra - discount);
     const paid = payments
       .filter(p => p.payment_type !== 'refund')
       .reduce((sum, p) => {
@@ -3160,6 +3160,10 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
         return sum + Math.max(0, (Number(p.amount) || 0) - surcharge);
       }, 0) || Number(booking.total_paid || booking.advance_payment || 0);
     const pending = Math.max(0, grandTotal - paid);
+
+    const actualAdvance = booking.advance_payment !== undefined && booking.advance_payment !== null && Number(booking.advance_payment) > 0
+      ? Number(booking.advance_payment)
+      : Math.max(0, paid - Number(booking.final_settlement_payment || 0));
 
     const formattedBooking = {
       ...booking,
@@ -3171,7 +3175,7 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
       total: grandTotal,
       total_paid: paid,
       paid: paid,
-      advance_payment: paid,
+      advance_payment: actualAdvance,
       pending: pending,
       balance_due: pending,
       tax_amount: tax,
@@ -5494,6 +5498,15 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
                 ? 'pending_from_company' 
                 : ((primaryBooking.total_paid || 0) >= (bRoomCharge || primaryBooking.total_room_charge || 0) ? 'settled' : 'pending')));
 
+      const existingDiscountAmt = parseFloat(primaryBooking.discount_amount) || 0;
+      const aggregateDiscountAmt = checkout_discount_amt > 0
+        ? (existingDiscountAmt + checkout_discount_amt)
+        : existingDiscountAmt;
+      const baseStayTariff = parseFloat(primaryBooking.total_room_charge) || parseFloat(primaryBooking.room_rate) || 0;
+      const aggregateDiscountPct = (baseStayTariff > 0 && aggregateDiscountAmt > 0)
+        ? Math.round((aggregateDiscountAmt / baseStayTariff) * 100)
+        : (checkout_discount_pct > 0 ? checkout_discount_pct : (parseFloat(primaryBooking.discount_pct) || 0));
+
       db.prepare(`
         UPDATE bookings 
         SET 
@@ -5536,8 +5549,8 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
         checkoutTaxType,
         checkoutIsIgstVal,
         bRoomCharge,
-        checkout_discount_pct, checkout_discount_pct,
-        checkout_discount_amt, checkout_discount_amt,
+        aggregateDiscountPct, aggregateDiscountPct,
+        aggregateDiscountAmt, aggregateDiscountAmt,
         bSettle,
         bRefund,
         updatedPaymentStatus,

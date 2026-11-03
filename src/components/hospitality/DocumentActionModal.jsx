@@ -89,12 +89,14 @@ export default function DocumentActionModal({
     const calc = {
       grossTariff: room.grossTariff || room.total_room_charge || room.room_rate,
       roomCharge: room.total_room_charge || room.room_rate,
-      roomTariffNet: room.grossTariff || room.total_room_charge,
-      tariffTax5Pct: room.tax_amount || room.total_tax || Math.round((room.total_room_charge || 0) * 0.05),
+      roomTariffNet: Math.max(0, (Number(room.total_room_charge || room.room_rate || 0)) - (Number(room.discount_amount || 0))),
+      tariffTax5Pct: room.tax_amount || room.total_tax || Math.max(0, Math.round((room.total_room_charge || 0) - ((room.total_room_charge || 0) / 1.05))),
       foodTotal: room.food_total || 0,
       barTotal: room.bar_total || 0,
       hotelExtrasCharge: room.extra_bed_charge || 0,
-      advancePaid: room.initial_paid || room.total_paid || 0,
+      advancePaid: room.advance_payment !== undefined && room.advance_payment !== null && Number(room.advance_payment) > 0
+        ? Number(room.advance_payment)
+        : Math.max(0, Number(room.total_paid || 0) - Number(room.final_settlement_payment || 0)),
       chargedDays: room.charged_days || 1,
       billableDays: room.charged_days || 1,
       discountPct: room.discount_pct || 0,
@@ -103,9 +105,11 @@ export default function DocumentActionModal({
       barOrders: room.barOrders || room.bar_orders || []
     };
     const settlement = {
-      settleAmt: room.final_settle_amount || room.total_paid || 0,
+      settleAmt: room.final_settlement_payment || room.final_settle_amount || 0,
       refundAmt: room.refund_amount || 0,
       settled_at: room.actual_checkout_time || room.checkout_time || new Date(),
+      discount_amount: room.discount_amount || 0,
+      discount_pct: room.discount_pct || 0,
       invoiceNo: room.invoice_no || formatTaxInvoiceNumber(room.voucher_number || room.voucher_no || room.checkin_voucher_no || room.id),
       checked_out_by: room.checked_out_by || cashierName
     };
