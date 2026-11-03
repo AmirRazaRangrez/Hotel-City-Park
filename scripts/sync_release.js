@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 const rootDir = path.resolve(__dirname, '..');
 
@@ -28,25 +29,56 @@ function copyFileSyncSafe(src, dest) {
   return false;
 }
 
-console.log('🔄 Starting comprehensive release and release-electron synchronization...');
+console.log('🔄 Updating release and release-electron folders...\n');
 
-// Target destination directories
+// 1. Identify active bundles from dist/index.html
+const distHtml = path.join(rootDir, 'dist', 'index.html');
+let activeIndexAsset = null;
+if (fs.existsSync(distHtml)) {
+  const htmlContent = fs.readFileSync(distHtml, 'utf8');
+  const m = htmlContent.match(/assets\/(index-[^"']+\.js)/);
+  if (m) activeIndexAsset = m[1];
+}
+
+// Clean stale index assets from root dist/assets
+const rootAssetsDir = path.join(rootDir, 'dist', 'assets');
+if (fs.existsSync(rootAssetsDir) && activeIndexAsset) {
+  fs.readdirSync(rootAssetsDir).forEach(file => {
+    if (file.startsWith('index-') && file.endsWith('.js') && file !== activeIndexAsset) {
+      try {
+        fs.unlinkSync(path.join(rootAssetsDir, file));
+        console.log(`  - Cleaned stale root asset: ${file}`);
+      } catch (_) {}
+    }
+  });
+}
+
+// Target release destinations
 const releaseDir = path.join(rootDir, 'release');
 const electronAppDir1 = path.join(rootDir, 'release-electron', 'Hotel City Park CRM-win32-x64', 'resources', 'app');
 const electronAppDir2 = path.join(rootDir, 'release-electron', 'resources', 'app');
 const targetAppDirs = [releaseDir, electronAppDir1, electronAppDir2].filter(d => fs.existsSync(d));
 
-// 1. Sync compiled dist bundle
+// 2. Synchronize dist bundle
 const distSrc = path.join(rootDir, 'dist');
 if (fs.existsSync(distSrc)) {
   for (const appDir of targetAppDirs) {
     const targetDist = path.join(appDir, 'dist');
-    console.log(`  ✓ Copying dist to ${path.relative(rootDir, targetDist)}`);
+    const targetAssets = path.join(targetDist, 'assets');
+    // Clean stale assets in target before copying
+    if (fs.existsSync(targetAssets) && activeIndexAsset) {
+      fs.readdirSync(targetAssets).forEach(file => {
+        if (file.startsWith('index-') && file.endsWith('.js') && file !== activeIndexAsset) {
+          try { fs.unlinkSync(path.join(targetAssets, file)); } catch (_) {}
+        }
+      });
+    }
+    console.log(`  ✓ Syncing dist to ${path.relative(rootDir, targetDist)}`);
     copyFolderSync(distSrc, targetDist);
   }
 }
 
-// 2. Sync server.js and database.js
+// 3. Synchronize server.js, database.js, package.json
 for (const appDir of targetAppDirs) {
   if (copyFileSyncSafe(path.join(rootDir, 'server.js'), path.join(appDir, 'server.js'))) {
     console.log(`  ✓ Copied server.js to ${path.relative(rootDir, path.join(appDir, 'server.js'))}`);
@@ -59,7 +91,7 @@ for (const appDir of targetAppDirs) {
   }
 }
 
-// 3. Sync services and middleware
+// 4. Synchronize services and middleware
 const servicesSrc = path.join(rootDir, 'services');
 const middlewareSrc = path.join(rootDir, 'middleware');
 for (const appDir of targetAppDirs) {
@@ -73,7 +105,7 @@ for (const appDir of targetAppDirs) {
   }
 }
 
-// 4. Sync public static assets (styles.css, images, etc.)
+// 5. Synchronize public static assets
 const publicSrc = path.join(rootDir, 'public');
 if (fs.existsSync(publicSrc)) {
   const assetFilter = (_, name) => /\.(css|png|jpg|jpeg|svg|ico|webp|gif|txt|html)$/i.test(name) || fs.statSync(_).isDirectory();
@@ -84,7 +116,7 @@ if (fs.existsSync(publicSrc)) {
   }
 }
 
-// 5. Sync Admin & Waiter Web Bundles into electron app
+// 6. Synchronize Admin and Waiter panel builds
 const adminDistSrc = path.join(rootDir, 'admin', 'dist');
 if (fs.existsSync(adminDistSrc) && fs.existsSync(electronAppDir1)) {
   copyFolderSync(adminDistSrc, path.join(electronAppDir1, 'admin', 'dist'));
@@ -97,11 +129,10 @@ if (fs.existsSync(waiterDistSrc) && fs.existsSync(releaseDir)) {
   console.log(`  ✓ Synced waiter-pannel/dist to ${path.relative(rootDir, releaseDir)}`);
 }
 
-// 6. Verification
+// 7. Syntax Verification
 console.log('\n🔍 Verifying release-electron syntax...');
 const electronServer = path.join(electronAppDir1, 'server.js');
 if (fs.existsSync(electronServer)) {
-  const { execSync } = require('child_process');
   try {
     execSync(`node -c "${electronServer}"`, { stdio: 'pipe' });
     console.log('  ✓ release-electron/resources/app/server.js syntax OK');
@@ -110,4 +141,4 @@ if (fs.existsSync(electronServer)) {
   }
 }
 
-console.log('\n✅ Release and release-electron synchronization complete!');
+console.log('\n✅ release-electron folder updated successfully!');

@@ -189,7 +189,7 @@ if (fs.existsSync(electronAppDir)) {
   console.log('⚡ Synchronizing Electron desktop application bundle (release-electron)...');
   copyDirSync(publicDir, path.join(electronAppDir, 'public'), assetFilter);
   copyDirSync(publicDir, path.join(electronAppDir, 'dist'), assetFilter);
-  
+
   const electronAssetsDir = path.join(electronAppDir, 'dist', 'assets');
   if (fs.existsSync(electronAssetsDir)) {
     const oldFiles = fs.readdirSync(electronAssetsDir);
@@ -249,7 +249,7 @@ if (fs.existsSync(electronAppDir)) {
     try {
       fs.copyFileSync(masterExe, adminExe);
       console.log('  ✓ release-electron/Hotel City Park Admin.exe synchronized.');
-    } catch (_) {}
+    } catch (_) { }
   }
 
   // Remove src folder in packaged app so it runs pure compiled production code
@@ -258,7 +258,7 @@ if (fs.existsSync(electronAppDir)) {
     try {
       fs.rmSync(electronSrcDir, { recursive: true, force: true });
       console.log('  ✓ Cleaned src directory from release-electron package for ultra-fast startup');
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // Sync Clean_Start.bat
