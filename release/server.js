@@ -3149,10 +3149,10 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
     const roomCharge = Number(booking.total_room_charge || booking.room_rate || 0);
     const extra = Number(booking.extra_bed_charge || 0);
     const discount = Number(booking.discount_amount || 0);
-    const tax = Number(booking.early_checkin_gst || Math.round(roomCharge * 0.05));
+    const tax = Number(booking.early_checkin_gst || Math.max(0, Math.round(roomCharge - (roomCharge / 1.05))));
     const foodTotal = restaurantOrders.filter(o => o.is_paid === 0).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
     const barTotal = barOrders.filter(o => o.is_paid === 0).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
-    const grandTotal = Math.max(0, roomCharge + foodTotal + barTotal + extra - discount + tax);
+    const grandTotal = Math.max(0, roomCharge + foodTotal + barTotal + extra - discount);
     const paid = payments
       .filter(p => p.payment_type !== 'refund')
       .reduce((sum, p) => {
@@ -3160,6 +3160,10 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
         return sum + Math.max(0, (Number(p.amount) || 0) - surcharge);
       }, 0) || Number(booking.total_paid || booking.advance_payment || 0);
     const pending = Math.max(0, grandTotal - paid);
+
+    const actualAdvance = booking.advance_payment !== undefined && booking.advance_payment !== null && Number(booking.advance_payment) > 0
+      ? Number(booking.advance_payment)
+      : Math.max(0, paid - Number(booking.final_settlement_payment || 0));
 
     const formattedBooking = {
       ...booking,
@@ -3171,7 +3175,7 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
       total: grandTotal,
       total_paid: paid,
       paid: paid,
-      advance_payment: paid,
+      advance_payment: actualAdvance,
       pending: pending,
       balance_due: pending,
       tax_amount: tax,
@@ -5283,6 +5287,8 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
     const cheque_photo = b.cheque_photo ?? b.chequePhoto ?? b.chequeScan;
     const cleanCheckedOutBy = (checked_out_by || 'Front Desk Cashier').trim();
     const online_utr = (b.online_utr || b.utr_number || b.split_online_utr || req.body.online_utr || req.body.utr_number || '').trim() || null;
+    const checkout_discount_pct = parseFloat(b.discount_pct ?? b.discountPct) || 0;
+    const checkout_discount_amt = parseFloat(b.discount_amount ?? b.discountAmount ?? b.discount) || 0;
 
     // Corporate / GST company details for Tax Invoice
     const checkoutCompanyName = (b.company_name ?? b.companyName ?? '').trim() || null;
@@ -5419,7 +5425,7 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
     `).get(...activeBookingIds, ...groupRoomIds, checkinLocal);
     const groupExpensesTotal = expensesRow ? expensesRow.total : 0;
 
-    const totalGroupBill = currentGroupRoomCharge + effectiveRestUnpaid + effectiveBarUnpaid + groupExpensesTotal;
+    const totalGroupBill = currentGroupRoomCharge + effectiveRestUnpaid + effectiveBarUnpaid + groupExpensesTotal - (checkout_discount_amt > 0 ? checkout_discount_amt : 0);
     const computedMaxBalanceDue = Math.max(0, totalGroupBill - currentGroupTotalPaid);
     const clientBalanceDue = parseFloat(b.balance_due ?? b.balanceDue ?? b.remaining_balance ?? b.remainingBalance);
     const maxBalanceDue = Math.max(computedMaxBalanceDue, !isNaN(clientBalanceDue) ? clientBalanceDue : 0);
@@ -5492,6 +5498,15 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
                 ? 'pending_from_company' 
                 : ((primaryBooking.total_paid || 0) >= (bRoomCharge || primaryBooking.total_room_charge || 0) ? 'settled' : 'pending')));
 
+      const existingDiscountAmt = parseFloat(primaryBooking.discount_amount) || 0;
+      const aggregateDiscountAmt = checkout_discount_amt > 0
+        ? (existingDiscountAmt + checkout_discount_amt)
+        : existingDiscountAmt;
+      const baseStayTariff = parseFloat(primaryBooking.total_room_charge) || parseFloat(primaryBooking.room_rate) || 0;
+      const aggregateDiscountPct = (baseStayTariff > 0 && aggregateDiscountAmt > 0)
+        ? Math.round((aggregateDiscountAmt / baseStayTariff) * 100)
+        : (checkout_discount_pct > 0 ? checkout_discount_pct : (parseFloat(primaryBooking.discount_pct) || 0));
+
       db.prepare(`
         UPDATE bookings 
         SET 
@@ -5504,6 +5519,8 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
           tax_type = COALESCE(?, tax_type),
           is_igst = COALESCE(?, is_igst),
           total_room_charge = COALESCE(?, total_room_charge),
+          discount_pct = CASE WHEN ? > 0 THEN ? ELSE discount_pct END,
+          discount_amount = CASE WHEN ? > 0 THEN ? ELSE discount_amount END,
           total_paid = total_paid + ? - ?,
           payment_status = ?,
           final_settlement_payment = ?,
@@ -5532,6 +5549,8 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
         checkoutTaxType,
         checkoutIsIgstVal,
         bRoomCharge,
+        aggregateDiscountPct, aggregateDiscountPct,
+        aggregateDiscountAmt, aggregateDiscountAmt,
         bSettle,
         bRefund,
         updatedPaymentStatus,
@@ -5970,6 +5989,11 @@ app.post('/api/restaurant/menu', requireAuth, requireRole('manager'), (req, res)
     `);
     const result = stmt.run(category || 'Main Course', name.trim(), parseFloat(price) || 0, (description || '').trim(), code, isVegVal);
 
+    socketServer.broadcast('MENU_UPDATED', { itemId: result.lastInsertRowid, department: 'restaurant', action: 'create' });
+    if (isCloudSyncAllowed('firebase') && typeof firebaseService.syncWaiterDataToCloud === 'function') {
+      firebaseService.syncWaiterDataToCloud(db).catch(() => {});
+    }
+
     res.json({
       success: true,
       dish: { id: result.lastInsertRowid, name: name.trim(), price: parseFloat(price) || 0, shortcode: code, is_veg: isVegVal, category: category || 'Main Course' },
@@ -6005,6 +6029,12 @@ app.put('/api/restaurant/menu/:id', requireAuth, requireRole('manager'), (req, r
     );
 
     const updatedDish = db.prepare('SELECT * FROM menu_items WHERE id = ?').get(id);
+
+    socketServer.broadcast('MENU_UPDATED', { itemId: id, department: 'restaurant', is_available: updatedDish.is_available, action: 'update' });
+    if (isCloudSyncAllowed('firebase') && typeof firebaseService.syncWaiterDataToCloud === 'function') {
+      firebaseService.syncWaiterDataToCloud(db).catch(() => {});
+    }
+
     res.json({ success: true, dish: updatedDish });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -6015,6 +6045,12 @@ app.delete('/api/restaurant/menu/:id', requireAuth, requireRole('manager'), (req
   try {
     const { id } = req.params;
     db.prepare("DELETE FROM menu_items WHERE id = ? AND department = 'restaurant'").run(id);
+
+    socketServer.broadcast('MENU_UPDATED', { itemId: id, department: 'restaurant', action: 'delete' });
+    if (isCloudSyncAllowed('firebase') && typeof firebaseService.syncWaiterDataToCloud === 'function') {
+      firebaseService.syncWaiterDataToCloud(db).catch(() => {});
+    }
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -8262,6 +8298,12 @@ app.put('/api/bar/menu/:id', requireAuth, requireRole('manager'), (req, res) => 
     );
 
     const updated = db.prepare('SELECT * FROM menu_items WHERE id = ?').get(id);
+
+    socketServer.broadcast('MENU_UPDATED', { itemId: id, department: 'bar', is_available: updated.is_available, action: 'update' });
+    if (isCloudSyncAllowed('firebase') && typeof firebaseService.syncWaiterDataToCloud === 'function') {
+      firebaseService.syncWaiterDataToCloud(db).catch(() => {});
+    }
+
     res.json({ success: true, drink: updated, dish: updated });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -14202,6 +14244,126 @@ app.delete('/api/expenses/:id', requireAuth, requireRole('manager'), (req, res) 
 // ==========================================================================
 // 20. MANAGER FINANCIAL ANALYTICS & RECONCILIATION APIS
 // ==========================================================================
+
+// Booking Analysis & OTA Performance Graph API
+app.get('/api/manager/booking-analysis', requireAuth, requireRole('manager', 'hospitality'), (req, res) => {
+  try {
+    const { startDate, endDate, otaPlatform, source } = req.query;
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const start = startDate || todayStr;
+    const end = endDate || todayStr;
+
+    // Filter conditions
+    let platformCondition = '';
+    const queryParams = [start, end];
+
+    if (otaPlatform && otaPlatform !== 'all') {
+      if (otaPlatform === 'all_ota') {
+        platformCondition = " AND (b.booking_source = 'OTA' OR b.ota_platform IS NOT NULL)";
+      } else if (otaPlatform === 'walkin' || otaPlatform === 'Walk-in') {
+        platformCondition = " AND (b.booking_source = 'Walk-in' AND (b.ota_platform IS NULL OR b.ota_platform = ''))";
+      } else if (otaPlatform === 'btc' || otaPlatform === 'BTC') {
+        platformCondition = " AND (b.booking_source = 'BTC' OR b.btc_company_id IS NOT NULL)";
+      } else {
+        platformCondition = " AND (LOWER(b.ota_platform) = LOWER(?) OR (b.ota_platform IS NULL AND LOWER(b.booking_source) = LOWER(?)))";
+        queryParams.push(otaPlatform, otaPlatform);
+      }
+    }
+
+    // 1. Time Series Daily Trends (grouped by date)
+    const dailyQuery = `
+      SELECT 
+        DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') as date,
+        COUNT(DISTINCT b.voucher_number) as booking_count,
+        COUNT(*) as rooms_count,
+        COALESCE(SUM(b.total_room_charge), 0) as total_revenue
+      FROM bookings b
+      WHERE b.status != 'cancelled'
+        AND DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') BETWEEN DATE(?) AND DATE(?)
+        ${platformCondition}
+      GROUP BY date
+      ORDER BY date ASC
+    `;
+    const dailyRecords = db.prepare(dailyQuery).all(...queryParams);
+
+    // 2. Channel Distribution (Grouped by OTA channel across the date range)
+    const channelQuery = `
+      SELECT 
+        COALESCE(b.ota_platform, b.booking_source, 'Direct') as channel,
+        b.booking_source,
+        b.ota_platform,
+        COUNT(DISTINCT b.voucher_number) as booking_count,
+        COUNT(*) as rooms_count,
+        COALESCE(SUM(b.total_room_charge), 0) as total_revenue
+      FROM bookings b
+      WHERE b.status != 'cancelled'
+        AND DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') BETWEEN DATE(?) AND DATE(?)
+      GROUP BY channel
+      ORDER BY booking_count DESC
+    `;
+    const channelDistribution = db.prepare(channelQuery).all(start, end);
+
+    // 3. Aggregate totals for the active filter
+    let totalBookings = 0;
+    let totalRooms = 0;
+    let totalRevenue = 0;
+    dailyRecords.forEach(r => {
+      totalBookings += Number(r.booking_count || 0);
+      totalRooms += Number(r.rooms_count || 0);
+      totalRevenue += Number(r.total_revenue || 0);
+    });
+
+    const adr = totalRooms > 0 ? Math.round(totalRevenue / totalRooms) : 0;
+
+    // 4. Detailed list of bookings in this filter & date range (limit 100)
+    const listQuery = `
+      SELECT 
+        b.id,
+        b.voucher_number,
+        r.room_number,
+        g.name as guest_name,
+        g.mobile as guest_phone,
+        b.booking_source,
+        COALESCE(b.ota_platform, b.booking_source) as ota_platform,
+        b.ota_booking_id,
+        b.checkin_time,
+        b.approx_checkout_time,
+        b.total_room_charge,
+        b.payment_status,
+        b.status
+      FROM bookings b
+      LEFT JOIN rooms r ON b.room_id = r.id
+      LEFT JOIN guests g ON b.guest_id = g.id
+      WHERE b.status != 'cancelled'
+        AND DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') BETWEEN DATE(?) AND DATE(?)
+        ${platformCondition}
+      ORDER BY b.id DESC
+      LIMIT 100
+    `;
+    const bookingsList = db.prepare(listQuery).all(...queryParams);
+
+    res.json({
+      success: true,
+      startDate: start,
+      endDate: end,
+      otaPlatform: otaPlatform || 'all',
+      summary: {
+        totalBookings,
+        totalRooms,
+        totalRevenue,
+        adr
+      },
+      dailyRecords,
+      channelDistribution,
+      bookingsList
+    });
+  } catch (err) {
+    console.error('Error in /api/manager/booking-analysis:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get(['/api/manager/analytics', '/api/stats/analytics'], requireAuth, requireRole('manager'), (req, res) => {
   try {
     const { date, startDate, endDate, from_date, to_date } = req.query;

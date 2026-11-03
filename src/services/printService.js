@@ -7407,7 +7407,8 @@ export function buildCFormHTML(data = {}) {
   const rpValidTill = data.rpValidTill || 'N/A';
   const rpIssuingAuth = data.rpIssuingAuth || 'N/A';
   const isPoliceInformed = data.isPoliceInformed !== false;
-  const policeStationName = data.policeStationName || 'Murarji Peth Police Station, Solapur';
+  const houseOwnerParticulars = data.houseOwnerParticulars || 'Hotel City Paark, 119, Murarji Peth, Char Hutatma Chowk, Solapur - 413 001';
+  const policeStationName = data.policeStationName || 'Faujdar Chavadi Police Station\n(Near Mule Hospital, Railway lines, Murarji Peth, Solapur)';
   const foreignerPhone = data.foreignerPhone || data.mobile || data.phone || '';
   const landlordPhone = data.landlordPhone || '0217-2729712 / 9890012345';
 
@@ -7427,7 +7428,7 @@ export function buildCFormHTML(data = {}) {
       <div style="margin-top: 3.5mm;">
         <strong>1. House Owner’s Full Name, Address &amp; Police Station</strong>
         <div style="border-bottom: 1px dotted #000; padding: 2px 0 1px 4px; min-height: 18px; font-weight: 700;">
-          Hotel City Paark, 119, Murarji Peth, Char Hutatma Chowk, Solapur - 413 001. Police Station: Murarji Peth Police Station, Solapur
+          ${escapeHtml(houseOwnerParticulars)}. Police Station: ${escapeHtml(policeStationName).replace(/\n/g, ', ')}
         </div>
       </div>
 
@@ -7573,10 +7574,10 @@ export function buildCFormHTML(data = {}) {
             <span>[ ${!isPoliceInformed ? '✓' : ' '} ] No</span>
           </div>
         </div>
-        <div style="display: flex; align-items: flex-end; margin-top: 2px;">
-          <span style="white-space: nowrap;">If Yes, Police Station Name : &nbsp;</span>
-          <div style="border-bottom: 1px dotted #000; flex: 1; padding: 1px 0 1px 4px; font-weight: 700;">
-            ${escapeHtml(policeStationName)}
+        <div style="display: flex; align-items: flex-start; margin-top: 2px;">
+          <span style="white-space: nowrap; margin-top: 2px;">If Yes, Police Station Name : &nbsp;</span>
+          <div style="border-bottom: 1px dotted #000; flex: 1; padding: 1px 0 1px 4px; font-weight: 700; line-height: 1.3;">
+            ${escapeHtml(policeStationName).replace(/\n/g, '<br/>')}
           </div>
         </div>
       </div>

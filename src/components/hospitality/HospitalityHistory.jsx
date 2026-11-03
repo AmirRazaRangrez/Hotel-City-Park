@@ -5,6 +5,7 @@ import { formatCurrency, formatDateTime, formatTaxInvoiceNumber, cleanVoucherNum
 import { printCashReceipt, downloadReceiptPDF, printPettyCashVoucher, printGuestRegistrationA4, printFinalBillA4, downloadGuestRegistrationPDF, printGuestPaymentSummary, printGuestActivitiesSummary, downloadGuestActivitiesSummaryPDF } from '../../services/printService';
 import ImageLightbox from '../common/ImageLightbox';
 import DocumentActionModal from './DocumentActionModal';
+import CFormModal from './CFormModal';
 import DocumentScannerModal from '../common/DocumentScannerModal';
 import { compressBase64Image } from '../../utils/imageCompressor';
 
@@ -27,6 +28,7 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
   const [filterToDate, setFilterToDate] = useState('');
   const [filterShowScope, setFilterShowScope] = useState('all'); // 'all' | 'checkin' | 'checkout' | 'number_range'
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [cFormBooking, setCFormBooking] = useState(null);
   const filterFromNoRef = useRef(null);
 
   // Long-press (Click & Hold) Refs
@@ -3188,7 +3190,7 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                           type="button"
                           className="filter-chip"
                           onClick={() => {
-                            setDocActionModal({ isOpen: true, type: 'cform', data: detailBooking });
+                            setCFormBooking(detailBooking);
                           }}
                           style={{
                             fontWeight: 800,
@@ -4284,6 +4286,40 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
         type={docActionModal.type}
         data={docActionModal.data}
       />
+
+      {cFormBooking && (
+        <CFormModal
+          isOpen={Boolean(cFormBooking)}
+          onClose={() => setCFormBooking(null)}
+          initialData={{
+            guestName: cFormBooking.guestName || cFormBooking.guest_name,
+            nationality: cFormBooking.nationality || cFormBooking.guest_nationality || '',
+            passportNo: cFormBooking.passportNo || cFormBooking.aadharNumber || cFormBooking.idNumber || cFormBooking.id_number,
+            passportPlaceOfIssue: cFormBooking.passportPlaceOfIssue || cFormBooking.passport_place_of_issue || '',
+            passportDateOfIssue: cFormBooking.passportDateOfIssue || cFormBooking.passport_date_of_issue || '',
+            passportValidTill: cFormBooking.expiryDate || cFormBooking.passportValidTill || '',
+            checkinTime: cFormBooking.checkinTime || cFormBooking.checkin_time,
+            mobile: cFormBooking.mobile || cFormBooking.guest_mobile || cFormBooking.phone,
+            stayNights: cFormBooking.stayNights || cFormBooking.chargedDays || 1,
+            addressInSolapur: 'Hotel City Paark, 119 Murarji Peth, Solapur - 413001',
+            cFormData: cFormBooking.c_form_data || cFormBooking.cFormData || null
+          }}
+          onSave={async (savedCData) => {
+            try {
+              if (cFormBooking.id || cFormBooking.booking_id) {
+                await api.updateCFormData(cFormBooking.id || cFormBooking.booking_id, {
+                  c_form_data: savedCData,
+                  guest_nationality: savedCData.nationality
+                });
+                showToast("✓ Form 'C' details saved successfully!", 'green');
+              }
+            } catch (err) {
+              showToast("Error saving Form 'C': " + err.message, 'red');
+            }
+            setCFormBooking(null);
+          }}
+        />
+      )}
     </div>
   );
 }

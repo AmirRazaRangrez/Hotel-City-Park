@@ -390,6 +390,11 @@ export const api = {
   getOccupancyMatrix: (startDate) => request('/hospitality/occupancy-matrix' + (startDate ? `?startDate=${startDate}` : '')),
 
   // Shift Cash Handover Statements (Front Office & F&B)
+  updateCFormData: (bookingId, data) => request('/bookings/' + bookingId + '/c-form', { method: 'POST', body: data }),
+  getBookingAnalysis: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request('/manager/booking-analysis' + (qs ? '?' + qs : ''));
+  },
   getFoCashHandoverData: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/hospitality/cash-handover-data${qs ? '?' + qs : ''}`);

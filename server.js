@@ -14244,6 +14244,126 @@ app.delete('/api/expenses/:id', requireAuth, requireRole('manager'), (req, res) 
 // ==========================================================================
 // 20. MANAGER FINANCIAL ANALYTICS & RECONCILIATION APIS
 // ==========================================================================
+
+// Booking Analysis & OTA Performance Graph API
+app.get('/api/manager/booking-analysis', requireAuth, requireRole('manager', 'hospitality'), (req, res) => {
+  try {
+    const { startDate, endDate, otaPlatform, source } = req.query;
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const start = startDate || todayStr;
+    const end = endDate || todayStr;
+
+    // Filter conditions
+    let platformCondition = '';
+    const queryParams = [start, end];
+
+    if (otaPlatform && otaPlatform !== 'all') {
+      if (otaPlatform === 'all_ota') {
+        platformCondition = " AND (b.booking_source = 'OTA' OR b.ota_platform IS NOT NULL)";
+      } else if (otaPlatform === 'walkin' || otaPlatform === 'Walk-in') {
+        platformCondition = " AND (b.booking_source = 'Walk-in' AND (b.ota_platform IS NULL OR b.ota_platform = ''))";
+      } else if (otaPlatform === 'btc' || otaPlatform === 'BTC') {
+        platformCondition = " AND (b.booking_source = 'BTC' OR b.btc_company_id IS NOT NULL)";
+      } else {
+        platformCondition = " AND (LOWER(b.ota_platform) = LOWER(?) OR (b.ota_platform IS NULL AND LOWER(b.booking_source) = LOWER(?)))";
+        queryParams.push(otaPlatform, otaPlatform);
+      }
+    }
+
+    // 1. Time Series Daily Trends (grouped by date)
+    const dailyQuery = `
+      SELECT 
+        DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') as date,
+        COUNT(DISTINCT b.voucher_number) as booking_count,
+        COUNT(*) as rooms_count,
+        COALESCE(SUM(b.total_room_charge), 0) as total_revenue
+      FROM bookings b
+      WHERE b.status != 'cancelled'
+        AND DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') BETWEEN DATE(?) AND DATE(?)
+        ${platformCondition}
+      GROUP BY date
+      ORDER BY date ASC
+    `;
+    const dailyRecords = db.prepare(dailyQuery).all(...queryParams);
+
+    // 2. Channel Distribution (Grouped by OTA channel across the date range)
+    const channelQuery = `
+      SELECT 
+        COALESCE(b.ota_platform, b.booking_source, 'Direct') as channel,
+        b.booking_source,
+        b.ota_platform,
+        COUNT(DISTINCT b.voucher_number) as booking_count,
+        COUNT(*) as rooms_count,
+        COALESCE(SUM(b.total_room_charge), 0) as total_revenue
+      FROM bookings b
+      WHERE b.status != 'cancelled'
+        AND DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') BETWEEN DATE(?) AND DATE(?)
+      GROUP BY channel
+      ORDER BY booking_count DESC
+    `;
+    const channelDistribution = db.prepare(channelQuery).all(start, end);
+
+    // 3. Aggregate totals for the active filter
+    let totalBookings = 0;
+    let totalRooms = 0;
+    let totalRevenue = 0;
+    dailyRecords.forEach(r => {
+      totalBookings += Number(r.booking_count || 0);
+      totalRooms += Number(r.rooms_count || 0);
+      totalRevenue += Number(r.total_revenue || 0);
+    });
+
+    const adr = totalRooms > 0 ? Math.round(totalRevenue / totalRooms) : 0;
+
+    // 4. Detailed list of bookings in this filter & date range (limit 100)
+    const listQuery = `
+      SELECT 
+        b.id,
+        b.voucher_number,
+        r.room_number,
+        g.name as guest_name,
+        g.mobile as guest_phone,
+        b.booking_source,
+        COALESCE(b.ota_platform, b.booking_source) as ota_platform,
+        b.ota_booking_id,
+        b.checkin_time,
+        b.approx_checkout_time,
+        b.total_room_charge,
+        b.payment_status,
+        b.status
+      FROM bookings b
+      LEFT JOIN rooms r ON b.room_id = r.id
+      LEFT JOIN guests g ON b.guest_id = g.id
+      WHERE b.status != 'cancelled'
+        AND DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') BETWEEN DATE(?) AND DATE(?)
+        ${platformCondition}
+      ORDER BY b.id DESC
+      LIMIT 100
+    `;
+    const bookingsList = db.prepare(listQuery).all(...queryParams);
+
+    res.json({
+      success: true,
+      startDate: start,
+      endDate: end,
+      otaPlatform: otaPlatform || 'all',
+      summary: {
+        totalBookings,
+        totalRooms,
+        totalRevenue,
+        adr
+      },
+      dailyRecords,
+      channelDistribution,
+      bookingsList
+    });
+  } catch (err) {
+    console.error('Error in /api/manager/booking-analysis:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get(['/api/manager/analytics', '/api/stats/analytics'], requireAuth, requireRole('manager'), (req, res) => {
   try {
     const { date, startDate, endDate, from_date, to_date } = req.query;

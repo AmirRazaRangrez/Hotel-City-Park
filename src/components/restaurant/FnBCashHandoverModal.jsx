@@ -146,13 +146,13 @@ export default function FnBCashHandoverModal({ isOpen, onClose, currentUser }) {
         >
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#92400e' }}>Date:</span>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="form-input form-input-sm"
-              style={{ width: '150px', height: '34px', fontSize: '0.82rem', fontWeight: 700 }}
-            />
+            <div style={{ width: '160px' }}>
+              <ThemedDatePicker
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                style={{ height: '34px', fontSize: '0.82rem', fontWeight: 700 }}
+              />
+            </div>
           </div>
 
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>

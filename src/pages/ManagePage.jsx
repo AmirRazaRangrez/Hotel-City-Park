@@ -6,6 +6,7 @@ import ExpensesPage from './ExpensesPage';
 import StoreManagerView from '../components/common/StoreManagerView';
 import ThemedSelect from '../components/common/ThemedSelect';
 import ThemedDatePicker from '../components/common/ThemedDatePicker';
+import BookingAnalysisGraph from '../components/manager/BookingAnalysisGraph';
 import { ExpenseCategoriesMasterContent } from '../components/common/ExpenseCategoriesMasterModal';
 import { blockNonNumericKeys, sanitizePhoneInput, blockNumericKeys, sanitizeNameInput } from '../utils/inputEnhancements';
 import { printAccountingAnalysisReport, exportAccountingAnalysisToExcel, exportAccountingAnalysisToCsv, generateAccountingAnalysisExcelXml } from '../services/printService';
@@ -1641,6 +1642,8 @@ export default function ManagePage({ onPrintClosingReport }) {
       {/* Subview 1: Analytics */}
       {subTab === 'analytics' && (
         <div className="manager-subview-panel" id="man-subview-analytics">
+          {/* Real-time OTA & Booking Analysis Graph */}
+          <BookingAnalysisGraph />
           <div className="section-toolbar" style={{ marginBottom: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
             <div className="toolbar-title">
               <h2>Financial Analytics &amp; Real-Time Cash Drawer</h2>
