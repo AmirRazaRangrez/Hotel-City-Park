@@ -56,9 +56,11 @@ export default function ThemedDatePicker({
   }, [value]);
 
   const [typedDateText, setTypedDateText] = useState(null);
+  const hasUserTypedRef = useRef(false);
 
   useEffect(() => {
     setTypedDateText(null);
+    hasUserTypedRef.current = false;
   }, [value]);
 
   const parseAndCommitText = (text) => {
@@ -104,6 +106,7 @@ export default function ThemedDatePicker({
   };
 
   const handleDateInputChange = (e) => {
+    hasUserTypedRef.current = true;
     const rawVal = e.target.value;
 
     if (!rawVal || !rawVal.trim()) {
@@ -202,6 +205,8 @@ export default function ThemedDatePicker({
   // Handle date click
   const handleSelectDay = (year, month, day, isDisabled) => {
     if (isDisabled || disabled) return;
+    hasUserTypedRef.current = false;
+    setTypedDateText(null);
     const iso = formatIsoDate(year, month, day);
     if (onChange) {
       // Support both direct value or synthetic event pattern
@@ -416,6 +421,7 @@ export default function ThemedDatePicker({
               }
             }}
             onFocus={(e) => {
+              hasUserTypedRef.current = false;
               setTypedDateText(displayFormattedDate || '');
               e.target.select();
               if (!disabled) {
@@ -424,15 +430,16 @@ export default function ThemedDatePicker({
             }}
             onChange={handleDateInputChange}
             onBlur={() => {
-              if (typedDateText !== null) {
+              if (hasUserTypedRef.current && typedDateText !== null) {
                 const cleanDigits = typedDateText.replace(/\D/g, '');
                 if (cleanDigits.length === 8) {
                   parseAndCommitText(typedDateText);
                 } else if (!typedDateText.trim()) {
                   parseAndCommitText('');
                 }
-                setTypedDateText(null);
               }
+              setTypedDateText(null);
+              hasUserTypedRef.current = false;
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {

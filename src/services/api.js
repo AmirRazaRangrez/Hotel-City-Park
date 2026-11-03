@@ -404,6 +404,14 @@ export const api = {
     return request(`/restaurant/cash-handover-data${qs ? '?' + qs : ''}`);
   },
 
+  getFoCashHandoverHistory: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/hospitality/cash-handover-history${qs ? `?` + qs : ``}`);
+  },
+  getFnbCashHandoverHistory: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/restaurant/cash-handover-history${qs ? `?` + qs : ``}`);
+  },
   // Storeman Security PIN
   getStorePin: () => request('/store/pin'),
   saveStorePin: (pin) => request('/store/pin', { method: 'POST', body: { pin } }),

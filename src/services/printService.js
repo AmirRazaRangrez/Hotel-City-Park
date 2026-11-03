@@ -1267,8 +1267,107 @@ export function buildMoneyReceiptHTML(receipt) {
   return `
     <style>
       .half-a4-receipt-card {
-        height: 132mm !important;
-        max-height: 132mm !important;
+        width: 100% !important;
+        height: 130mm !important;
+        max-height: 131mm !important;
+        border: 1px solid #111111 !important;
+        border-radius: 4px !important;
+        padding: 8px 16px !important;
+        box-sizing: border-box !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: space-between !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+        position: relative !important;
+        overflow: hidden !important;
+        font-family: Arial, Helvetica, sans-serif !important;
+      }
+      .receipt-header-row {
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: flex-start !important;
+        border-bottom: 1px solid #111111 !important;
+        padding-bottom: 4px !important;
+        margin-bottom: 4px !important;
+        position: relative !important;
+        z-index: 1 !important;
+      }
+      .receipt-body-content {
+        flex: 1 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: space-between !important;
+        gap: 6px !important;
+        position: relative !important;
+        z-index: 1 !important;
+      }
+      .receipt-line-row {
+        display: flex !important;
+        align-items: flex-end !important;
+        font-size: 12.5pt !important;
+        gap: 8px !important;
+        width: 100% !important;
+      }
+      .receipt-lbl {
+        font-weight: 850 !important;
+        white-space: nowrap !important;
+        color: #000000 !important;
+        font-size: 12.5pt !important;
+      }
+      .receipt-fill-line {
+        flex: 1 !important;
+        border-bottom: 1px solid #111111 !important;
+        padding: 0 4px !important;
+        font-weight: 900 !important;
+        color: #000000 !important;
+        font-size: 12.5pt !important;
+        min-height: 24px !important;
+        line-height: 24px !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+      }
+      .receipt-table-section {
+        margin: 4px 0 !important;
+      }
+      .receipt-mini-table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        font-size: 12pt !important;
+        border: 1px solid #111111 !important;
+      }
+      .receipt-mini-table th,
+      .receipt-mini-table td {
+        border: 1px solid #111111 !important;
+        padding: 5px 10px !important;
+        height: 26px !important;
+      }
+      .receipt-mini-table th {
+        background: #f1f5f9 !important;
+        font-weight: 950 !important;
+        font-size: 12.5pt !important;
+        text-align: left !important;
+      }
+      .receipt-footer-row {
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: flex-end !important;
+        padding-top: 4px !important;
+      }
+      .receipt-rs-box {
+        border: 1px solid #111111 !important;
+        padding: 4px 14px !important;
+        font-size: 13pt !important;
+        font-weight: 950 !important;
+        border-radius: 4px !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+      }
+      .receipt-sig-line {
+        border-bottom: 1px solid #111111 !important;
+        width: 190px !important;
+        margin-bottom: 3px !important;
       }
       .two-per-a4-perforation {
         height: 8mm !important;
@@ -7085,31 +7184,25 @@ export function printFrontOfficeCashHandover(data = {}, options = {}) {
             <tr>
               <td style="padding: 2px 6px; padding-left: 14px; border-right: 1px solid #000;">1) F. O. Cash Sales</td>
               <td style="padding: 2px 6px; text-align: right; border-right: 1.5px solid #000; font-weight: 750;">${foCashSales.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              <td style="padding: 2px 6px; font-weight: 800; border-right: 1px solid #000;">Total Refund Rs.</td>
-              <td style="padding: 2px 6px; text-align: right; font-weight: 850;">${totalRefund.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              <td style="padding: 2px 6px; font-weight: 800; border-right: 1px solid #000; color: #b91c1c;">Expenses${data.expensesByCategory && data.expensesByCategory.length === 1 ? ` (${escapeHtml(data.expensesByCategory[0].category)})` : ''}</td>
+              <td style="padding: 2px 6px; text-align: right; font-weight: 850; color: #b91c1c;">${totalExpenses.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             </tr>
             <tr>
               <td style="padding: 2px 6px; padding-left: 14px; border-right: 1px solid #000;">2) F. O. Deposits-Advance Booking</td>
               <td style="padding: 2px 6px; text-align: right; border-right: 1.5px solid #000; font-weight: 750;">${foDeposits.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              ${expensesHtml ? expensesHtml : `
-                <td style="padding: 2px 6px; font-weight: 900; border-top: 1px solid #000; border-right: 1px solid #000; background: #fafafa;">Net Handover to A/c.'s Rs.</td>
-                <td style="padding: 2px 6px; text-align: right; font-weight: 950; border-top: 1px solid #000; background: #fafafa;">${netHandover.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              `}
+              <td style="padding: 2px 6px; font-weight: 800; border-right: 1px solid #000; color: #dc2626;">Total Refund Rs.</td>
+              <td style="padding: 2px 6px; text-align: right; font-weight: 850; color: #dc2626;">${totalRefund.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             </tr>
             <tr>
               <td style="padding: 2px 6px; padding-left: 14px; border-right: 1px solid #000;">3) Other Income</td>
               <td style="padding: 2px 6px; text-align: right; border-right: 1.5px solid #000; font-weight: 750;">${otherIncome.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              ${expensesHtml ? `
-                <td style="padding: 2px 6px; font-weight: 900; border-top: 1px solid #000; border-right: 1px solid #000; background: #fafafa;">Net Handover to A/c.'s Rs.</td>
-                <td style="padding: 2px 6px; text-align: right; font-weight: 950; border-top: 1px solid #000; background: #fafafa;">${netHandover.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              ` : `
-                <td style="padding: 2px 6px; border-right: 1px solid #000;" colspan="2"></td>
-              `}
+              <td style="padding: 2px 6px; border-right: 1px solid #000;" colspan="2"></td>
             </tr>
-            <tr style="border-top: 1px solid #000; border-bottom: 1px solid #000; background: #f8fafc;">
-              <td style="padding: 2.5px 6px; font-weight: 900; border-right: 1px solid #000;">To Handover Rs.</td>
-              <td style="padding: 2.5px 6px; text-align: right; font-weight: 950; border-right: 1.5px solid #000;">${toHandoverA.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              <td style="padding: 2.5px 6px; border-right: 1px solid #000;" colspan="2"></td>
+            <tr style="border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; background: #f8fafc;">
+              <td style="padding: 3px 6px; font-weight: 900; border-right: 1px solid #000;">To Handover Rs.</td>
+              <td style="padding: 3px 6px; text-align: right; font-weight: 950; border-right: 1.5px solid #000;">${toHandoverA.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              <td style="padding: 3px 6px; font-weight: 900; border-right: 1px solid #000; background: #f0fdf4; color: #166534;">Net Handover to A/c.'s Rs.</td>
+              <td style="padding: 3px 6px; text-align: right; font-weight: 950; background: #f0fdf4; color: #166534;">${netHandover.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             </tr>
             <tr>
               <td style="padding: 2.5px 6px; font-weight: 800; border-right: 1px solid #000;">B. To Pay F&B :-</td>
@@ -7126,7 +7219,7 @@ export function printFrontOfficeCashHandover(data = {}, options = {}) {
       </div>
 
       <!-- Footer: Total in Words and Signatures -->
-      <div style="margin-top: 1.5mm;">
+      <div style="margin-top: 1mm;">
         <!-- Total Rs in words -->
         <div style="border: 1px solid #000; padding: 2.5px 6px; margin-bottom: 2mm; background: #fff;">
           <div style="font-size: 8.5pt; font-weight: 900;">
@@ -7137,8 +7230,8 @@ export function printFrontOfficeCashHandover(data = {}, options = {}) {
           </div>
         </div>
 
-        <!-- 4 Signatures Section with Comfortable Gap -->
-        <div style="margin-top: 3.5mm; font-size: 7.8pt; font-weight: 750; display: flex; flex-direction: column; gap: 3.5mm;">
+        <!-- 4 Signatures Section with Generous Top Margin for comfortable hand-signing -->
+        <div style="margin-top: 5mm; font-size: 7.8pt; font-weight: 750; display: flex; flex-direction: column; gap: 4mm;">
           <!-- Row 1: Paying Cashier & Receiving Cashier -->
           <div style="display: flex; justify-content: space-between; align-items: flex-end;">
             <div style="display: flex; align-items: flex-end; gap: 4px; white-space: nowrap;">
@@ -7274,19 +7367,18 @@ export function printFnBCashHandover(data = {}, options = {}) {
             <tr>
               <td style="padding: 2px 6px; padding-left: 14px; border-right: 1px solid #000;">1) F&B Cash Sales</td>
               <td style="padding: 2px 6px; text-align: right; border-right: 1.5px solid #000; font-weight: 750;">${fnbCashSales.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              <td style="padding: 2px 6px; font-weight: 800; border-right: 1px solid #000;">Total Refund Rs.</td>
-              <td style="padding: 2px 6px; text-align: right; font-weight: 850;">${totalRefund.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              <td style="padding: 2px 6px; border-right: 1px solid #000;" colspan="2"></td>
             </tr>
             <tr>
               <td style="padding: 2px 6px; padding-left: 14px; border-right: 1px solid #000;">2) F&B Deposits</td>
               <td style="padding: 2px 6px; text-align: right; border-right: 1.5px solid #000; font-weight: 750;">${fnbDeposits.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              <td style="padding: 2px 6px; font-weight: 900; border-top: 1px solid #000; border-right: 1px solid #000; background: #fafafa;">Net Handover to A/c.'s Rs.</td>
-              <td style="padding: 2px 6px; text-align: right; font-weight: 950; border-top: 1px solid #000; background: #fafafa;">${netHandover.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              <td style="padding: 2px 6px; border-right: 1px solid #000;" colspan="2"></td>
             </tr>
-            <tr style="border-top: 1px solid #000; border-bottom: 1px solid #000; background: #f8fafc;">
-              <td style="padding: 2.5px 6px; font-weight: 900; border-right: 1px solid #000;">To Handover Rs.</td>
-              <td style="padding: 2.5px 6px; text-align: right; font-weight: 950; border-right: 1.5px solid #000;">${toHandoverA.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              <td style="padding: 2.5px 6px; border-right: 1px solid #000;" colspan="2"></td>
+            <tr style="border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; background: #f8fafc;">
+              <td style="padding: 3px 6px; font-weight: 900; border-right: 1px solid #000;">To Handover Rs.</td>
+              <td style="padding: 3px 6px; text-align: right; font-weight: 950; border-right: 1.5px solid #000;">${toHandoverA.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              <td style="padding: 3px 6px; font-weight: 900; border-right: 1px solid #000; background: #f0fdf4; color: #166534;">Net Handover to A/c.'s Rs.</td>
+              <td style="padding: 3px 6px; text-align: right; font-weight: 950; background: #f0fdf4; color: #166534;">${netHandover.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             </tr>
             <tr>
               <td style="padding: 2.5px 6px; font-weight: 800; border-right: 1px solid #000;">B. To Collect From Reception :-</td>
@@ -7303,7 +7395,7 @@ export function printFnBCashHandover(data = {}, options = {}) {
       </div>
 
       <!-- Footer: Total in Words and Signatures -->
-      <div style="margin-top: 1.5mm;">
+      <div style="margin-top: 1mm;">
         <!-- Total Rs in words -->
         <div style="border: 1px solid #000; padding: 2.5px 6px; margin-bottom: 2mm; background: #fff;">
           <div style="font-size: 8.5pt; font-weight: 900;">
@@ -7314,8 +7406,8 @@ export function printFnBCashHandover(data = {}, options = {}) {
           </div>
         </div>
 
-        <!-- Signatures Row: Comfortable margin & Receiving Cashier -->
-        <div style="margin-top: 3.5mm; font-size: 7.8pt; font-weight: 750; display: flex; flex-direction: column; gap: 3.5mm;">
+        <!-- Signatures Row: Generous top margin for comfortable signatures -->
+        <div style="margin-top: 5mm; font-size: 7.8pt; font-weight: 750; display: flex; flex-direction: column; gap: 4mm;">
           <div style="display: flex; justify-content: space-between; align-items: flex-end;">
             <div style="display: flex; align-items: flex-end; gap: 4px; white-space: nowrap;">
               <span>Signature of Paying Cashier :</span>
