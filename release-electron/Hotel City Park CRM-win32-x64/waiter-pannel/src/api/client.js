@@ -946,7 +946,9 @@ export const api = {
           gst: { doubleValue: Number(gstAmt) },
           grand_total: { doubleValue: Number(grandAmt) },
           settled_by: { stringValue: String(paymentData.waiter_name || 'Captain') },
-          status: { stringValue: 'pending' },
+          payment_mode: { stringValue: String(paymentData.payment_mode || paymentData.payment_method || 'cash') },
+          is_paid: { integerValue: String(paymentData.is_paid !== undefined ? paymentData.is_paid : 1) },
+          status: { stringValue: paymentData.is_paid === 0 ? 'pending' : 'completed' },
           items_summary: { stringValue: payload.items_summary },
           created_at: { stringValue: payload.created_at }
         }

@@ -65,6 +65,18 @@ export default function FolioSettlementModal({
   const [returnUtr, setReturnUtr] = useState('');
   const [refundReason, setRefundReason] = useState('');
 
+  // Checkout Discount & Admin Approval States
+  const [discountType, setDiscountType] = useState('pct'); // 'pct' | 'amount'
+  const [discountValue, setDiscountValue] = useState('');
+  const [discountApproval, setDiscountApproval] = useState({
+    status: 'idle', // 'idle' | 'waiting' | 'approved' | 'rejected'
+    approvalId: null,
+    approvedAmt: 0,
+    approvedPct: 0,
+    requestedAmt: 0,
+    requestedPct: 0
+  });
+
   // Corporate / GST Details for Tax Invoice (Can be inserted/edited at checkout)
   const [checkoutCompanyName, setCheckoutCompanyName] = useState(() => folioData?.companyName || room?.company_name || folioData?.room?.company_name || '');
   const [checkoutGstNumber, setCheckoutGstNumber] = useState(() => folioData?.gstNumber || room?.gst_number || folioData?.room?.gst_number || '');
@@ -199,7 +211,29 @@ export default function FolioSettlementModal({
             : (folioData?.balanceDue !== undefined && folioData.balanceDue > 0
                 ? Math.round(folioData.balanceDue)
                 : Math.max(0, Math.round(computedStayBal)))));
-  const balanceDue = dynamicBalanceDue;
+
+  // Gross stay tariff to cap discount
+  const grossStayTariff = Number(effectiveRoomTariff || 0) + (isOtaPrepaid ? (Number(hotelExtrasChargeVal || 0) + Number(extensionChargeVal || 0)) : Number(effectiveStayTax || 0));
+  const maxAllowableDiscount = Math.max(0, dynamicBalanceDue > 0 ? dynamicBalanceDue : grossStayTariff);
+
+  let enteredDiscountAmt = 0;
+  let enteredDiscountPct = 0;
+  const rawDiscountVal = parseFloat(discountValue) || 0;
+  if (rawDiscountVal > 0) {
+    if (discountType === 'pct') {
+      enteredDiscountPct = Math.min(100, Math.max(0, rawDiscountVal));
+      enteredDiscountAmt = Math.round((maxAllowableDiscount * enteredDiscountPct) / 100);
+    } else {
+      enteredDiscountAmt = Math.min(maxAllowableDiscount, Math.max(0, Math.round(rawDiscountVal)));
+      enteredDiscountPct = maxAllowableDiscount > 0 ? Math.round((enteredDiscountAmt / maxAllowableDiscount) * 100) : 0;
+    }
+  }
+
+  // Active approved discount (only effective when approved by admin!)
+  const activeDiscountAmt = discountApproval.status === 'approved' ? discountApproval.approvedAmt : 0;
+  const activeDiscountPct = discountApproval.status === 'approved' ? discountApproval.approvedPct : 0;
+
+  const balanceDue = Math.max(0, dynamicBalanceDue - activeDiscountAmt);
 
   useEffect(() => {
     // Only reset/initialize form fields when modal transitions from closed to open,
@@ -222,6 +256,8 @@ export default function FolioSettlementModal({
       setSplitCard(0);
       setSplitCheque(0);
       setBtcCheckoutMode('company_later');
+      setDiscountValue('');
+      setDiscountApproval({ status: 'idle', approvalId: null, approvedAmt: 0, approvedPct: 0, requestedAmt: 0, requestedPct: 0 });
 
       const defaultReason = isEarlyCheckout
         ? `Early checkout refund: Stayed ${stayDurationStr || `${earlyStayDays}d ${earlyStayHours}h`} (Expected ${expectedNights}d)`
@@ -242,6 +278,112 @@ export default function FolioSettlementModal({
       setChequePhoto(null);
     }
   }, [isBtc, splitCheque]);
+
+  // Adjust payment amount when discount is approved
+  useEffect(() => {
+    if (activeDiscountAmt > 0 && balanceDue >= 0) {
+      if (selectedMethod === 'cash') setSplitCash(balanceDue);
+      else if (selectedMethod === 'online') setSplitOnline(balanceDue);
+      else if (selectedMethod === 'card') setSplitCard(balanceDue);
+    }
+  }, [activeDiscountAmt, balanceDue]);
+
+  // Polling for Admin Approval
+  useEffect(() => {
+    if (discountApproval.status !== 'waiting' || !discountApproval.approvalId) return;
+
+    let isMounted = true;
+    const checkStatus = async () => {
+      try {
+        const res = await api.get(`/owner/approvals/${discountApproval.approvalId}/status`);
+        if (!isMounted) return;
+        if (res && res.status === 'APPROVED') {
+          clearInterval(timer);
+          setDiscountApproval(prev => ({
+            ...prev,
+            status: 'approved',
+            approvedAmt: prev.requestedAmt,
+            approvedPct: prev.requestedPct
+          }));
+          showToast(`✓ Admin APPROVED discount: ₹${discountApproval.requestedAmt} (${discountApproval.requestedPct}%)!`, 'green');
+        } else if (res && res.status === 'REJECTED') {
+          clearInterval(timer);
+          setDiscountApproval(prev => ({
+            ...prev,
+            status: 'rejected'
+          }));
+          showToast('✕ Admin REJECTED the discount request.', 'red');
+        }
+      } catch (_) {}
+    };
+
+    checkStatus();
+    const timer = setInterval(checkStatus, 1000);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, [discountApproval.status, discountApproval.approvalId, discountApproval.requestedAmt, discountApproval.requestedPct]);
+
+  const handleRequestDiscountApproval = async () => {
+    if (enteredDiscountAmt <= 0) {
+      showToast('Please enter a valid discount percentage or amount.', 'warning');
+      return;
+    }
+    try {
+      const staffName = currentUser?.full_name || currentUser?.username || 'Front Desk';
+      const roomNumStr = String(room?.room_number || folioData?.roomNumber || '');
+      const guestName = folioData?.guestName || room?.guest_name || 'Guest';
+      const grossAmt = Math.round(dynamicBalanceDue > 0 ? dynamicBalanceDue : grossStayTariff);
+      const finalAmt = Math.max(0, grossAmt - enteredDiscountAmt);
+
+      setDiscountApproval({
+        status: 'waiting',
+        approvalId: null,
+        approvedAmt: 0,
+        approvedPct: 0,
+        requestedAmt: enteredDiscountAmt,
+        requestedPct: enteredDiscountPct
+      });
+
+      const res = await api.post('/owner/approvals/request', {
+        type: 'discount',
+        dept: 'Room',
+        room_number: roomNumStr,
+        guest_name: guestName,
+        discount: enteredDiscountAmt,
+        discount_pct: enteredDiscountPct,
+        current_total: grossAmt,
+        final_amount: finalAmt,
+        requested_by: staffName,
+        reason: `Checkout Discount: Room #${roomNumStr} • Guest: ${guestName} • Gross: ₹${grossAmt} • Requested: ${enteredDiscountPct}% (₹${enteredDiscountAmt}) • Cashier: ${staffName}`,
+        metadata: {
+          checkout: true,
+          booking_id: folioData?.bookingId || room?.current_booking_id,
+          room_number: roomNumStr,
+          guest_name: guestName,
+          total: grossAmt,
+          discount_pct: enteredDiscountPct,
+          discount: enteredDiscountAmt,
+          final_amount: finalAmt,
+          requested_by: staffName
+        }
+      });
+
+      if (res && res.id) {
+        setDiscountApproval(prev => ({
+          ...prev,
+          approvalId: res.id
+        }));
+        showToast('Discount approval request sent to Admin phone!', 'blue');
+      } else {
+        throw new Error(res?.error || 'Failed to submit request');
+      }
+    } catch (err) {
+      setDiscountApproval({ status: 'idle', approvalId: null, approvedAmt: 0, approvedPct: 0, requestedAmt: 0, requestedPct: 0 });
+      showToast('Could not send discount permission request: ' + (err?.message || 'Server error'), 'red');
+    }
+  };
 
   if (!isOpen || !folioData || !room) return null;
 
@@ -360,6 +502,12 @@ export default function FolioSettlementModal({
       return;
     }
 
+    if (enteredDiscountAmt > 0 && discountApproval.status !== 'approved') {
+      showToast('⚠️ Discount requires Admin Approval before checkout can proceed.', 'warning', 4500);
+      handleRequestDiscountApproval();
+      return;
+    }
+
     if (room?.status && room.status !== 'occupied') {
       showToast(`Room #${room.room_number || ''} is not currently occupied (${room.status}) and has already been checked out.`, 'warning', 4500);
       onClose();
@@ -438,7 +586,13 @@ export default function FolioSettlementModal({
         tax_type: checkoutTaxMode === 'IGST' ? 'IGST' : 'CGST_SGST',
         taxType: checkoutTaxMode === 'IGST' ? 'IGST' : 'CGST_SGST',
         is_igst: checkoutTaxMode === 'IGST' ? 1 : 0,
-        isIgst: checkoutTaxMode === 'IGST'
+        isIgst: checkoutTaxMode === 'IGST',
+        discount_amount: activeDiscountAmt,
+        discountAmount: activeDiscountAmt,
+        discount_pct: activeDiscountPct,
+        discountPct: activeDiscountPct,
+        discount_approved: activeDiscountAmt > 0,
+        approval_id: discountApproval.approvalId
       };
 
       if (typeof onCheckoutStart === 'function') {
@@ -1029,6 +1183,192 @@ export default function FolioSettlementModal({
                       ✓ Guest will pay the balance of <strong>{formatCurrency(balanceDue)}</strong> right now. Select payment method below.
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Checkout Discount Section */}
+              {!isRefund && !isOtaPrepaid && (
+                <div style={{
+                  background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
+                  border: discountApproval.status === 'approved' ? '1.5px solid #86efac' : '1.5px solid #cbd5e1',
+                  borderRadius: '12px',
+                  padding: '14px 18px',
+                  marginBottom: '16px',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '1.25rem' }}>🏷️</span>
+                      <div>
+                        <strong style={{ fontSize: '0.90rem', color: '#1e293b' }}>Checkout Discount</strong>
+                        <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                          Requires Owner / Admin phone approval to proceed
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div style={{ display: 'flex', background: '#e2e8f0', borderRadius: '8px', padding: '3px' }}>
+                      <button
+                        type="button"
+                        onClick={() => { setDiscountType('pct'); setDiscountApproval({ status: 'idle', approvalId: null, approvedAmt: 0, approvedPct: 0, requestedAmt: 0, requestedPct: 0 }); }}
+                        style={{
+                          border: 'none',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          background: discountType === 'pct' ? '#2563eb' : 'transparent',
+                          color: discountType === 'pct' ? '#fff' : '#475569',
+                          fontWeight: 800,
+                          fontSize: '0.76rem',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        % Percentage
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setDiscountType('amount'); setDiscountApproval({ status: 'idle', approvalId: null, approvedAmt: 0, approvedPct: 0, requestedAmt: 0, requestedPct: 0 }); }}
+                        style={{
+                          border: 'none',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          background: discountType === 'amount' ? '#2563eb' : 'transparent',
+                          color: discountType === 'amount' ? '#fff' : '#475569',
+                          fontWeight: 800,
+                          fontSize: '0.76rem',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        ₹ Flat Amount
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontWeight: 800, fontSize: '0.82rem', color: '#334155' }}>
+                        {discountType === 'pct' ? 'Enter %:' : 'Enter Amount (₹):'}
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        max={discountType === 'pct' ? '100' : String(maxAllowableDiscount)}
+                        placeholder={discountType === 'pct' ? 'e.g. 10' : 'e.g. 500'}
+                        value={discountValue}
+                        onChange={(e) => {
+                          setDiscountValue(e.target.value);
+                          setDiscountApproval({ status: 'idle', approvalId: null, approvedAmt: 0, approvedPct: 0, requestedAmt: 0, requestedPct: 0 });
+                        }}
+                        disabled={discountApproval.status === 'waiting'}
+                        style={{
+                          width: '120px',
+                          padding: '6px 10px',
+                          borderRadius: '8px',
+                          border: '1.5px solid #94a3b8',
+                          fontSize: '0.88rem',
+                          fontWeight: 800,
+                          textAlign: 'right'
+                        }}
+                      />
+                    </div>
+
+                    {enteredDiscountAmt > 0 && (
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', fontSize: '0.80rem' }}>
+                        <span style={{ color: '#64748b' }}>
+                          Discount: <strong style={{ color: '#dc2626' }}>- {formatCurrency(enteredDiscountAmt)}</strong> ({enteredDiscountPct}%)
+                        </span>
+                        <span style={{ color: '#64748b' }}>
+                          New Balance: <strong style={{ color: '#16a34a' }}>{formatCurrency(Math.max(0, dynamicBalanceDue - enteredDiscountAmt))}</strong>
+                        </span>
+                      </div>
+                    )}
+
+                    {enteredDiscountAmt > 0 && (
+                      <div style={{ marginLeft: 'auto' }}>
+                        {discountApproval.status === 'idle' && (
+                          <button
+                            type="button"
+                            onClick={handleRequestDiscountApproval}
+                            style={{
+                              padding: '6px 14px',
+                              borderRadius: '8px',
+                              background: '#2563eb',
+                              color: '#ffffff',
+                              border: 'none',
+                              fontWeight: 800,
+                              fontSize: '0.78rem',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            🔐 Request Admin Approval
+                          </button>
+                        )}
+                        {discountApproval.status === 'waiting' && (
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: '#eff6ff',
+                            border: '1px solid #bfdbfe',
+                            color: '#1d4ed8',
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            fontSize: '0.78rem',
+                            fontWeight: 800
+                          }}>
+                            <span style={{ width: '10px', height: '10px', border: '2px solid #2563eb', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block' }} />
+                            Waiting for Admin Approval...
+                          </div>
+                        )}
+                        {discountApproval.status === 'approved' && (
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: '#f0fdf4',
+                            border: '1px solid #86efac',
+                            color: '#15803d',
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            fontSize: '0.80rem',
+                            fontWeight: 800
+                          }}>
+                            ✓ Admin APPROVED ({activeDiscountPct}% · -{formatCurrency(activeDiscountAmt)})
+                          </div>
+                        )}
+                        {discountApproval.status === 'rejected' && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{
+                              background: '#fef2f2',
+                              border: '1px solid #fecaca',
+                              color: '#b91c1c',
+                              padding: '6px 10px',
+                              borderRadius: '8px',
+                              fontSize: '0.78rem',
+                              fontWeight: 800
+                            }}>
+                              ✕ Admin Rejected
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleRequestDiscountApproval}
+                              style={{
+                                padding: '5px 10px',
+                                borderRadius: '8px',
+                                background: '#f1f5f9',
+                                color: '#334155',
+                                border: '1px solid #cbd5e1',
+                                fontWeight: 700,
+                                fontSize: '0.76rem',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              Retry
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 

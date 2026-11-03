@@ -5283,6 +5283,8 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
     const cheque_photo = b.cheque_photo ?? b.chequePhoto ?? b.chequeScan;
     const cleanCheckedOutBy = (checked_out_by || 'Front Desk Cashier').trim();
     const online_utr = (b.online_utr || b.utr_number || b.split_online_utr || req.body.online_utr || req.body.utr_number || '').trim() || null;
+    const checkout_discount_pct = parseFloat(b.discount_pct ?? b.discountPct) || 0;
+    const checkout_discount_amt = parseFloat(b.discount_amount ?? b.discountAmount ?? b.discount) || 0;
 
     // Corporate / GST company details for Tax Invoice
     const checkoutCompanyName = (b.company_name ?? b.companyName ?? '').trim() || null;
@@ -5419,7 +5421,7 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
     `).get(...activeBookingIds, ...groupRoomIds, checkinLocal);
     const groupExpensesTotal = expensesRow ? expensesRow.total : 0;
 
-    const totalGroupBill = currentGroupRoomCharge + effectiveRestUnpaid + effectiveBarUnpaid + groupExpensesTotal;
+    const totalGroupBill = currentGroupRoomCharge + effectiveRestUnpaid + effectiveBarUnpaid + groupExpensesTotal - (checkout_discount_amt > 0 ? checkout_discount_amt : 0);
     const computedMaxBalanceDue = Math.max(0, totalGroupBill - currentGroupTotalPaid);
     const clientBalanceDue = parseFloat(b.balance_due ?? b.balanceDue ?? b.remaining_balance ?? b.remainingBalance);
     const maxBalanceDue = Math.max(computedMaxBalanceDue, !isNaN(clientBalanceDue) ? clientBalanceDue : 0);
@@ -5504,6 +5506,8 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
           tax_type = COALESCE(?, tax_type),
           is_igst = COALESCE(?, is_igst),
           total_room_charge = COALESCE(?, total_room_charge),
+          discount_pct = CASE WHEN ? > 0 THEN ? ELSE discount_pct END,
+          discount_amount = CASE WHEN ? > 0 THEN ? ELSE discount_amount END,
           total_paid = total_paid + ? - ?,
           payment_status = ?,
           final_settlement_payment = ?,
@@ -5532,6 +5536,8 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
         checkoutTaxType,
         checkoutIsIgstVal,
         bRoomCharge,
+        checkout_discount_pct, checkout_discount_pct,
+        checkout_discount_amt, checkout_discount_amt,
         bSettle,
         bRefund,
         updatedPaymentStatus,
