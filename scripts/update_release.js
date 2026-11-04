@@ -360,6 +360,21 @@ console.log('\n📦 [6/6] Packaging updated release-electron zip archive for cli
 const electronFolder = path.join(rootDir, 'release-electron', 'Hotel City Park CRM-win32-x64');
 const zipFile = path.join(rootDir, 'release-electron', 'Hotel City Park CRM-win32-x64.zip');
 
+// Ensure no demo database exists inside the client distribution package
+const embeddedDbs = [
+  path.join(electronFolder, 'resources', 'app', 'hotel_city_park.db'),
+  path.join(electronFolder, 'hotel_city_park.db'),
+  path.join(rootDir, 'release', 'hotel_city_park.db')
+];
+for (const dbPath of embeddedDbs) {
+  if (fs.existsSync(dbPath)) {
+    try {
+      fs.unlinkSync(dbPath);
+      console.log('  ✓ Cleaned demo DB: ' + path.relative(rootDir, dbPath));
+    } catch (_) {}
+  }
+}
+
 if (fs.existsSync(electronFolder)) {
   let zipped = false;
   const s7zPath = 'C:\\Users\\91937\\scoop\\shims\\7z.exe';
