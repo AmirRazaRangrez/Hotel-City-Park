@@ -18,28 +18,29 @@ describe('Handover Statements Real Shift Verification (Multi-Device F&B Room Fol
         guestId = guest.id;
       }
 
+      const todayStr = new Date().toISOString().slice(0, 10);
       db.prepare(`
         INSERT INTO bookings (id, room_id, guest_id, checkin_time, room_rate, total_room_charge, voucher_number, total_paid, split_cash, status, created_at)
-        VALUES (84, ?, ?, datetime('now'), 2350, 2350, '261104-684', 2000, 2000, 'active', datetime('now'))
+        VALUES (84, ?, ?, '${todayStr} 10:00:00', 2350, 2350, '261104-684', 2000, 2000, 'active', '${todayStr} 10:00:00')
         ON CONFLICT(id) DO UPDATE SET room_id = ?, guest_id = ?, status = 'active'
       `).run(roomId, guestId, roomId, guestId);
 
       db.prepare(`
         INSERT INTO payments (id, receipt_no, booking_id, room_id, department, payment_type, payment_mode, amount, split_cash, cashier_name, created_at)
-        VALUES (142, 'CR92', 84, ?, 'hospitality', 'advance', 'cash', 2000, 2000, 'cap-1', datetime('now'))
-        ON CONFLICT(id) DO UPDATE SET amount = 2000, split_cash = 2000, created_at = datetime('now')
+        VALUES (142, 'CR92', 84, ?, 'hospitality', 'advance', 'cash', 2000, 2000, 'cap-1', '${todayStr} 10:00:00')
+        ON CONFLICT(id) DO UPDATE SET amount = 2000, split_cash = 2000, created_at = '${todayStr} 10:00:00'
       `).run(roomId);
 
       db.prepare(`
         INSERT INTO restaurant_orders (id, order_number, table_number, room_id, booking_id, subtotal, tax, total, payment_mode, is_paid, created_at, room_service_for, status, items_json)
-        VALUES (55, 'RES-579167', 'RS-502', ?, 84, 360, 18, 378, 'room_folio', 0, datetime('now'), 'room_mates', 'completed', '[]')
-        ON CONFLICT(id) DO UPDATE SET total = 378, payment_mode = 'room_folio', created_at = datetime('now')
+        VALUES (55, 'RES-579167', 'RS-502', ?, 84, 360, 18, 378, 'room_folio', 0, '${todayStr} 13:02:00', 'room_mates', 'completed', '[]')
+        ON CONFLICT(id) DO UPDATE SET total = 378, payment_mode = 'room_folio', created_at = '${todayStr} 13:02:00'
       `).run(roomId);
 
       db.prepare(`
         INSERT INTO restaurant_orders (id, order_number, table_number, subtotal, tax, total, payment_mode, is_paid, created_at, status, items_json)
-        VALUES (56, 'RES-667469', 'T2', 540, 27, 567, 'cash', 1, datetime('now'), 'completed', '[]')
-        ON CONFLICT(id) DO UPDATE SET total = 567, payment_mode = 'cash', is_paid = 1, created_at = datetime('now')
+        VALUES (56, 'RES-667469', 'T2', 540, 27, 567, 'cash', 1, '${todayStr} 13:30:00', 'completed', '[]')
+        ON CONFLICT(id) DO UPDATE SET total = 567, payment_mode = 'cash', is_paid = 1, created_at = '${todayStr} 13:30:00'
       `).run();
     } catch (e) {
       console.warn('Test setup seed notice:', e.message);

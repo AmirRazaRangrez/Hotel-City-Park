@@ -74,6 +74,35 @@ export default function AdvanceBookingModal({
   const totalSelectedRooms = Object.values(selectedRoomCounts).reduce((sum, qty) => sum + (parseInt(qty) || 0), 0);
   const selectedEntries = Object.entries(selectedRoomCounts).filter(([_, qty]) => qty > 0);
 
+  // Maximum real capacity of all selected rooms (including extra beds)
+  const selectedCapacity = useMemo(() => {
+    let maxAdults = 0;
+    let maxChildren = 0;
+    let maxExtraBeds = 0;
+    let totalMaxGuests = 0;
+
+    Object.entries(selectedRoomCounts).forEach(([cat, qty]) => {
+      const q = parseInt(qty) || 0;
+      if (q > 0) {
+        const rInfo = Array.isArray(rooms) ? rooms.find(r => r.room_type === cat) : null;
+        const bAdults = rInfo?.max_adults || 2;
+        const bChildren = rInfo?.max_children || 2;
+        const bExtraBeds = rInfo?.max_extra_beds !== undefined ? rInfo.max_extra_beds : 1;
+        maxAdults += (bAdults + bExtraBeds) * q;
+        maxChildren += bChildren * q;
+        maxExtraBeds += bExtraBeds * q;
+        totalMaxGuests += (bAdults + bChildren + bExtraBeds) * q;
+      }
+    });
+
+    return {
+      maxAdults: Math.max(maxAdults, 2),
+      maxChildren: Math.max(maxChildren, 2),
+      maxExtraBeds,
+      totalMaxGuests: Math.max(totalMaxGuests, 4)
+    };
+  }, [selectedRoomCounts, rooms]);
+
   const handleToggleCategory = (cat) => {
     setSelectedRoomCounts((prev) => {
       const next = { ...prev };
@@ -265,6 +294,32 @@ export default function AdvanceBookingModal({
     }
     if (totalSelectedRooms === 0) {
       showToast('Please select at least one room category', 'error', 3000);
+      return;
+    }
+
+    // Compulsory Mobile Validation
+    const cleanPhone = String(formData.phone || '').trim().replace(/\D/g, '');
+    if (!cleanPhone) {
+      showToast('Mobile number is compulsory. Please enter 10-digit mobile number.', 'error', 3500);
+      return;
+    }
+    if (cleanPhone.length < 10) {
+      showToast('Please enter a valid 10-digit customer mobile number.', 'error', 3500);
+      return;
+    }
+
+    // Room Capacity Validation (including extra beds)
+    const curAdults = parseInt(formData.adults) || 1;
+    const curChildren = parseInt(formData.children) || 0;
+    const curTotalGuests = curAdults + curChildren;
+
+    if (curAdults > selectedCapacity.maxAdults) {
+      showToast(`Number of adults (${curAdults}) exceeds maximum adult capacity (${selectedCapacity.maxAdults}) for selected rooms (including extra beds). Please select more rooms.`, 'error', 4500);
+      return;
+    }
+
+    if (curTotalGuests > selectedCapacity.totalMaxGuests) {
+      showToast(`Total guests (${curTotalGuests} = ${curAdults} Adults + ${curChildren} Children) exceeds maximum capacity (${selectedCapacity.totalMaxGuests}) of selected rooms (including extra beds). Please select more rooms.`, 'error', 4500);
       return;
     }
 
@@ -879,11 +934,12 @@ export default function AdvanceBookingModal({
 
                     {/* 2. Mobile / Phone */}
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.80rem', fontWeight: 800, color: t.labelSecondary, textTransform: 'uppercase', marginBottom: '6px' }}>
-                        Mobile Number
+                      <label style={{ display: 'block', fontSize: '0.80rem', fontWeight: 800, color: t.labelPrimary, textTransform: 'uppercase', marginBottom: '6px' }}>
+                        Mobile Number <span style={{ color: '#ef4444' }}>* (Compulsory)</span>
                       </label>
                       <input
                         type="tel"
+                        required
                         placeholder="e.g. 9829012345"
                         value={formData.phone}
                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
@@ -892,7 +948,7 @@ export default function AdvanceBookingModal({
                           boxSizing: 'border-box',
                           padding: '11px 14px',
                           background: t.inputBg,
-                          border: `1.5px solid ${t.inputBorder}`,
+                          border: `1.5px solid ${!formData.phone?.trim() ? '#ef4444' : t.inputBorder}`,
                           borderRadius: '10px',
                           color: t.inputText,
                           fontSize: '0.94rem',
@@ -956,16 +1012,21 @@ export default function AdvanceBookingModal({
 
                     {/* 5. Guests (Adults & Children) */}
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.80rem', fontWeight: 800, color: t.labelSecondary, textTransform: 'uppercase', marginBottom: '6px' }}>
-                        Guests (Ad / Ch)
-                      </label>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <label style={{ fontSize: '0.80rem', fontWeight: 800, color: t.labelSecondary, textTransform: 'uppercase' }}>
+                          Guests (Ad / Ch)
+                        </label>
+                        <span style={{ fontSize: '0.70rem', fontWeight: 800, color: (formData.adults > selectedCapacity.maxAdults || (formData.adults + formData.children) > selectedCapacity.totalMaxGuests) ? '#ef4444' : '#059669' }}>
+                          Max: {selectedCapacity.maxAdults} Ad, {selectedCapacity.totalMaxGuests} Tot
+                        </span>
+                      </div>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <div style={{ flex: 1 }}>
                           <input
                             type="number"
                             min="1"
-                            max="10"
-                            title="Adults"
+                            max={selectedCapacity.maxAdults}
+                            title={`Adults (Max ${selectedCapacity.maxAdults} for selected rooms)`}
                             placeholder="Adults"
                             value={formData.adults}
                             onChange={(e) => setFormData({ ...formData, adults: parseInt(e.target.value) || 1 })}
@@ -974,7 +1035,7 @@ export default function AdvanceBookingModal({
                               boxSizing: 'border-box',
                               padding: '11px 12px',
                               background: t.inputBg,
-                              border: `1.5px solid ${t.inputBorder}`,
+                              border: `1.5px solid ${formData.adults > selectedCapacity.maxAdults ? '#ef4444' : t.inputBorder}`,
                               borderRadius: '10px',
                               color: t.inputText,
                               fontSize: '0.92rem',
@@ -988,7 +1049,7 @@ export default function AdvanceBookingModal({
                           <input
                             type="number"
                             min="0"
-                            max="10"
+                            max={selectedCapacity.totalMaxGuests - 1}
                             title="Children"
                             placeholder="Children"
                             value={formData.children}
@@ -998,7 +1059,7 @@ export default function AdvanceBookingModal({
                               boxSizing: 'border-box',
                               padding: '11px 12px',
                               background: t.inputBg,
-                              border: `1.5px solid ${t.inputBorder}`,
+                              border: `1.5px solid ${(formData.adults + formData.children) > selectedCapacity.totalMaxGuests ? '#ef4444' : t.inputBorder}`,
                               borderRadius: '10px',
                               color: t.inputText,
                               fontSize: '0.92rem',
@@ -1239,6 +1300,22 @@ export default function AdvanceBookingModal({
                         >
                           <span>Total Selected Rooms:</span>
                           <span style={{ fontSize: '1.05rem', fontWeight: 900 }}>{totalSelectedRooms}</span>
+                        </div>
+                        <div
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            background: '#0284c7',
+                            color: '#ffffff',
+                            fontSize: '0.80rem',
+                            fontWeight: 800,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          <span>Max Capacity:</span>
+                          <span style={{ fontWeight: 900 }}>{selectedCapacity.maxAdults} Adults / {selectedCapacity.totalMaxGuests} Guests</span>
                         </div>
                         <span style={{ fontSize: '0.74rem', color: t.textSecondary }}>
                           (Informational summary for reservation)

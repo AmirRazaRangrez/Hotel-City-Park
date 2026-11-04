@@ -607,6 +607,8 @@ app.get('/api/hospitality/cleaner-history', (req, res) => {
 app.get('/api/hospitality/occupancy-chart', (req, res) => {
   try {
     const queryDate = req.query.date ? String(req.query.date).trim() : null;
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const isTodayOrFuture = !queryDate || queryDate >= todayStr;
     let rooms;
     if (queryDate) {
       rooms = db.prepare(`
@@ -620,6 +622,8 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
           b.voucher_number,
           b.checkin_time,
           b.approx_checkout_time,
+          b.actual_checkout_time,
+          b.status as booking_status,
           b.meal_plan,
           b.adults_male,
           b.adults_female,
@@ -638,7 +642,7 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
         LEFT JOIN bookings b ON b.room_id = r.id 
           AND DATE(b.checkin_time) <= DATE(?) 
           AND DATE(COALESCE(b.actual_checkout_time, b.approx_checkout_time, b.checkin_time)) >= DATE(?)
-          AND b.status != 'cancelled'
+          AND b.status NOT IN ('cancelled', 'void')
         LEFT JOIN guests g ON b.guest_id = g.id
         ORDER BY CAST(r.room_number AS INTEGER) ASC, r.room_number ASC
       `).all(queryDate, queryDate);
@@ -654,6 +658,8 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
           b.voucher_number,
           b.checkin_time,
           b.approx_checkout_time,
+          b.actual_checkout_time,
+          b.status as booking_status,
           b.meal_plan,
           b.adults_male,
           b.adults_female,
@@ -681,7 +687,14 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
     let totalBreakfastRooms = 0;
 
     const chartRows = rooms.map(r => {
-      const isOccupied = queryDate ? Boolean(r.booking_id) : (r.room_status === 'occupied' && Boolean(r.booking_id));
+      let isOccupied = false;
+      if (isTodayOrFuture) {
+        // Live occupancy: room MUST be marked occupied AND have an active booking that has not checked out
+        isOccupied = r.room_status === 'occupied' && Boolean(r.booking_id) && r.booking_status === 'active' && !r.actual_checkout_time;
+      } else {
+        // Historical query: room was occupied on queryDate if checked in on or before queryDate and not checked out prior to/on queryDate
+        isOccupied = Boolean(r.booking_id) && r.booking_status !== 'cancelled' && (!r.actual_checkout_time || r.actual_checkout_time > `${queryDate} 23:59:59`);
+      }
       if (isOccupied) {
         occupiedCount++;
         const adults = (r.adults_male || 0) + (r.adults_female || 0) + (r.adults_other || 0);
@@ -715,9 +728,12 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
                              plan.includes('map') || 
                              (plan.includes('with') && !plan.includes('without'));
 
+        // Breakfast pax: strictly adults included in breakfast (minimum 1 if room is with breakfast), matching Room Folio
+        const roomBreakfastPax = hasBreakfast ? Math.max(1, adults) : 0;
+
         if (hasBreakfast) {
           totalBreakfastRooms++;
-          totalBreakfastPax += pax;
+          totalBreakfastPax += roomBreakfastPax;
         }
 
         // Company / Source
@@ -742,6 +758,9 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
           discount_pct: (r.discount_pct && Number(r.discount_pct) > 0) ? Number(r.discount_pct).toFixed(2) : '',
           city: String(city || '').toUpperCase(),
           breakfast: hasBreakfast ? 'Yes' : 'No',
+          breakfast_pax: roomBreakfastPax,
+          adults: adults,
+          children: children,
           pax: pax,
           checkin_time: r.checkin_time || '',
           approx_checkout_time: r.approx_checkout_time || ''
@@ -974,7 +993,19 @@ function getFnbRoomFolioCollectionsForShift(start, end) {
     LEFT JOIN guests g ON b.guest_id = g.id
     WHERE b.actual_checkout_time IS NOT NULL
       AND (LOWER(b.final_settlement_mode) = 'cash' OR (b.split_cash IS NOT NULL AND b.split_cash > 0))
-      AND datetime(b.actual_checkout_time, 'localtime') >= datetime(?) AND datetime(b.actual_checkout_time, 'localtime') <= datetime(?)
+      AND (
+        CASE 
+          WHEN b.actual_checkout_time LIKE '%Z' OR b.actual_checkout_time LIKE '%T%'
+          THEN datetime(b.actual_checkout_time, 'localtime')
+          ELSE datetime(b.actual_checkout_time)
+        END >= datetime(?)
+        AND
+        CASE 
+          WHEN b.actual_checkout_time LIKE '%Z' OR b.actual_checkout_time LIKE '%T%'
+          THEN datetime(b.actual_checkout_time, 'localtime')
+          ELSE datetime(b.actual_checkout_time)
+        END <= datetime(?)
+      )
   `).all(start, end);
 
   checkedOutBookings.forEach(b => {
@@ -1025,8 +1056,26 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     WHERE p.department = 'hospitality'
       AND p.payment_type IN ('advance', 'bill_settlement', 'extension')
       AND (LOWER(p.payment_mode) = 'cash' OR (p.split_cash IS NOT NULL AND p.split_cash > 0))
-      AND datetime(p.created_at, 'localtime') >= datetime(?) AND datetime(p.created_at, 'localtime') <= datetime(?)
-    ORDER BY datetime(p.created_at, 'localtime') ASC
+      AND (
+        CASE 
+          WHEN p.created_at LIKE '%Z' OR p.created_at LIKE '%T%'
+          THEN datetime(p.created_at, 'localtime')
+          ELSE datetime(p.created_at)
+        END >= datetime(?)
+        AND
+        CASE 
+          WHEN p.created_at LIKE '%Z' OR p.created_at LIKE '%T%'
+          THEN datetime(p.created_at, 'localtime')
+          ELSE datetime(p.created_at)
+        END <= datetime(?)
+      )
+    ORDER BY (
+      CASE 
+        WHEN p.created_at LIKE '%Z' OR p.created_at LIKE '%T%'
+        THEN datetime(p.created_at, 'localtime')
+        ELSE datetime(p.created_at)
+      END
+    ) ASC
   `).all(start, end);
 
   let foCashSales = 0;
@@ -1042,8 +1091,26 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     SELECT id, booking_number, customer_name, room_number, advance_amount, payment_mode, created_at
     FROM advance_bookings
     WHERE (LOWER(payment_mode) = 'cash' OR LOWER(payment_mode) LIKE '%cash%')
-      AND datetime(created_at, 'localtime') >= datetime(?) AND datetime(created_at, 'localtime') <= datetime(?)
-    ORDER BY datetime(created_at, 'localtime') ASC
+      AND (
+        CASE 
+          WHEN created_at LIKE '%Z' OR created_at LIKE '%T%'
+          THEN datetime(created_at, 'localtime')
+          ELSE datetime(created_at)
+        END >= datetime(?)
+        AND
+        CASE 
+          WHEN created_at LIKE '%Z' OR created_at LIKE '%T%'
+          THEN datetime(created_at, 'localtime')
+          ELSE datetime(created_at)
+        END <= datetime(?)
+      )
+    ORDER BY (
+      CASE 
+        WHEN created_at LIKE '%Z' OR created_at LIKE '%T%'
+        THEN datetime(created_at, 'localtime')
+        ELSE datetime(created_at)
+      END
+    ) ASC
   `).all(start, end);
 
   let foDeposits = 0;
@@ -1056,7 +1123,19 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     FROM payments p
     WHERE p.payment_type = 'advance_booking'
       AND (LOWER(p.payment_mode) = 'cash' OR (p.split_cash IS NOT NULL AND p.split_cash > 0))
-      AND datetime(p.created_at, 'localtime') >= datetime(?) AND datetime(p.created_at, 'localtime') <= datetime(?)
+      AND (
+        CASE 
+          WHEN p.created_at LIKE '%Z' OR p.created_at LIKE '%T%'
+          THEN datetime(p.created_at, 'localtime')
+          ELSE datetime(p.created_at)
+        END >= datetime(?)
+        AND
+        CASE 
+          WHEN p.created_at LIKE '%Z' OR p.created_at LIKE '%T%'
+          THEN datetime(p.created_at, 'localtime')
+          ELSE datetime(p.created_at)
+        END <= datetime(?)
+      )
   `).all(start, end);
 
   paymentDepositRows.forEach(p => {
@@ -1074,8 +1153,26 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     FROM booking_extra_expenses be
     LEFT JOIN bookings b ON be.booking_id = b.id
     LEFT JOIN rooms r ON be.room_id = r.id
-    WHERE datetime(be.created_at, 'localtime') >= datetime(?) AND datetime(be.created_at, 'localtime') <= datetime(?)
-    ORDER BY datetime(be.created_at, 'localtime') ASC
+    WHERE (
+        CASE 
+          WHEN be.created_at LIKE '%Z' OR be.created_at LIKE '%T%'
+          THEN datetime(be.created_at, 'localtime')
+          ELSE datetime(be.created_at)
+        END >= datetime(?)
+        AND
+        CASE 
+          WHEN be.created_at LIKE '%Z' OR be.created_at LIKE '%T%'
+          THEN datetime(be.created_at, 'localtime')
+          ELSE datetime(be.created_at)
+        END <= datetime(?)
+      )
+    ORDER BY (
+      CASE 
+        WHEN be.created_at LIKE '%Z' OR be.created_at LIKE '%T%'
+        THEN datetime(be.created_at, 'localtime')
+        ELSE datetime(be.created_at)
+      END
+    ) ASC
   `).all(start, end);
 
   let otherIncome = 0;
@@ -1095,7 +1192,19 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     LEFT JOIN guests g ON b.guest_id = g.id
     WHERE p.payment_type = 'refund'
       AND (LOWER(p.payment_mode) = 'cash' OR (p.split_cash IS NOT NULL AND p.split_cash > 0))
-      AND datetime(p.created_at, 'localtime') >= datetime(?) AND datetime(p.created_at, 'localtime') <= datetime(?)
+      AND (
+        CASE 
+          WHEN p.created_at LIKE '%Z' OR p.created_at LIKE '%T%'
+          THEN datetime(p.created_at, 'localtime')
+          ELSE datetime(p.created_at)
+        END >= datetime(?)
+        AND
+        CASE 
+          WHEN p.created_at LIKE '%Z' OR p.created_at LIKE '%T%'
+          THEN datetime(p.created_at, 'localtime')
+          ELSE datetime(p.created_at)
+        END <= datetime(?)
+      )
   `).all(start, end);
 
   let totalRefund = 0;
@@ -1110,8 +1219,26 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     FROM expenses
     WHERE (category != 'refund' OR category IS NULL)
       AND (LOWER(payment_mode) = 'cash' OR payment_mode IS NULL OR payment_mode = '')
-      AND datetime(created_at, 'localtime') >= datetime(?) AND datetime(created_at, 'localtime') <= datetime(?)
-    ORDER BY datetime(created_at, 'localtime') ASC
+      AND (
+        CASE 
+          WHEN created_at LIKE '%Z' OR created_at LIKE '%T%'
+          THEN datetime(created_at, 'localtime')
+          ELSE datetime(created_at)
+        END >= datetime(?)
+        AND
+        CASE 
+          WHEN created_at LIKE '%Z' OR created_at LIKE '%T%'
+          THEN datetime(created_at, 'localtime')
+          ELSE datetime(created_at)
+        END <= datetime(?)
+      )
+    ORDER BY (
+      CASE 
+        WHEN created_at LIKE '%Z' OR created_at LIKE '%T%'
+        THEN datetime(created_at, 'localtime')
+        ELSE datetime(created_at)
+      END
+    ) ASC
   `).all(start, end);
 
   let totalExpenses = 0;
@@ -1296,6 +1423,12 @@ app.get('/api/hospitality/cash-handover-data', async (req, res) => {
         ]);
       } catch (_) {}
     }
+    try {
+      await Promise.race([
+        syncAllPendingCloudRoomCharges(db),
+        new Promise(r => setTimeout(r, 800))
+      ]);
+    } catch (_) {}
     const dateStr = (req.query.date || new Date().toISOString().slice(0, 10)).trim();
     const shift = (req.query.shift || 'all').trim();
     const toDate = req.query.toDate ? req.query.toDate.trim() : null;
@@ -1311,8 +1444,14 @@ app.get('/api/hospitality/cash-handover-data', async (req, res) => {
 });
 
 // Front Office 1-Week / Date-Range Shift History Records
-app.get('/api/hospitality/cash-handover-history', (req, res) => {
+app.get('/api/hospitality/cash-handover-history', async (req, res) => {
   try {
+    try {
+      await Promise.race([
+        syncAllPendingCloudRoomCharges(db),
+        new Promise(r => setTimeout(r, 800))
+      ]);
+    } catch (_) {}
     const today = new Date();
     const defaultEnd = today.toISOString().slice(0, 10);
     const defaultStart = new Date(today.getTime() - 6 * 86400000).toISOString().slice(0, 10);
@@ -1377,6 +1516,12 @@ app.get('/api/restaurant/cash-handover-data', async (req, res) => {
         ]);
       } catch (_) {}
     }
+    try {
+      await Promise.race([
+        syncAllPendingCloudRoomCharges(db),
+        new Promise(r => setTimeout(r, 800))
+      ]);
+    } catch (_) {}
     const dateStr = (req.query.date || new Date().toISOString().slice(0, 10)).trim();
     const shift = (req.query.shift || 'all').trim();
     const toDate = req.query.toDate ? req.query.toDate.trim() : null;
@@ -1392,8 +1537,14 @@ app.get('/api/restaurant/cash-handover-data', async (req, res) => {
 });
 
 // F&B 1-Week / Date-Range Shift History Records
-app.get('/api/restaurant/cash-handover-history', (req, res) => {
+app.get('/api/restaurant/cash-handover-history', async (req, res) => {
   try {
+    try {
+      await Promise.race([
+        syncAllPendingCloudRoomCharges(db),
+        new Promise(r => setTimeout(r, 800))
+      ]);
+    } catch (_) {}
     const today = new Date();
     const defaultEnd = today.toISOString().slice(0, 10);
     const defaultStart = new Date(today.getTime() - 6 * 86400000).toISOString().slice(0, 10);
@@ -2305,6 +2456,10 @@ app.post('/api/advance-bookings', (req, res) => {
     if (!customer_name || !customer_name.trim()) {
       return res.status(400).json({ success: false, error: 'Customer name is required' });
     }
+    const cleanPhone = String(phone || '').trim().replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 10) {
+      return res.status(400).json({ success: false, error: 'Customer mobile number is compulsory (10 digits).' });
+    }
     if (!checkin_date) {
       return res.status(400).json({ success: false, error: 'Check-in date is required' });
     }
@@ -2433,6 +2588,13 @@ app.put('/api/advance-bookings/:id', (req, res) => {
     const existing = db.prepare('SELECT * FROM advance_bookings WHERE id = ?').get(id);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Advance booking not found' });
+    }
+
+    if (phone !== undefined) {
+      const cleanPhone = String(phone || '').trim().replace(/\D/g, '');
+      if (!cleanPhone || cleanPhone.length < 10) {
+        return res.status(400).json({ success: false, error: 'Customer mobile number is compulsory (10 digits).' });
+      }
     }
 
     const cleanRoomType = (room_type || room_category || existing.room_type || '').trim();
@@ -2826,7 +2988,21 @@ app.post('/api/checkin', requireAuth, requireRole('manager', 'hospitality'), (re
     const checkinRateType = req.body.rate_type || b.rate_type || null;
     const isOtaPrepaidCheckin = (booking_source || '').toUpperCase() === 'OTA' && (Boolean(cleanIsPrepaid) || checkinRateType === 'prepaid');
     const defaultAdvMode = isOtaPrepaidCheckin && (cash + card + online + cheque) === 0 ? 'prepaid' : 'cash';
-    const advMode = (advance_payment_mode || (cash > 0 ? 'cash' : (card > 0 ? 'card' : (online > 0 ? 'upi' : defaultAdvMode)))).toLowerCase();
+    let resolvedAdvMode = advance_payment_mode ? advance_payment_mode.toLowerCase() : '';
+    if (online > 0 && cash === 0 && card === 0 && cheque === 0) {
+      resolvedAdvMode = 'upi';
+    } else if (card > 0 && cash === 0 && online === 0 && cheque === 0) {
+      resolvedAdvMode = 'card';
+    } else if (cheque > 0 && cash === 0 && online === 0 && card === 0) {
+      resolvedAdvMode = 'cheque';
+    } else if (cash > 0 && online === 0 && card === 0 && cheque === 0) {
+      resolvedAdvMode = 'cash';
+    } else if ((cash > 0 ? 1 : 0) + (card > 0 ? 1 : 0) + (online > 0 ? 1 : 0) + (cheque > 0 ? 1 : 0) > 1) {
+      resolvedAdvMode = 'split';
+    } else if (!resolvedAdvMode) {
+      resolvedAdvMode = defaultAdvMode;
+    }
+    const advMode = resolvedAdvMode;
     const isCheque = advMode === 'cheque';
     const advChequeNo = isCheque ? (advance_cheque_no || '').trim() : null;
     const advChequeBank = isCheque ? (advance_cheque_bank || '').trim() : null;
@@ -3904,15 +4080,33 @@ function calculateActualStayAndExtension({
  * Ensures orders are stored with booking_id so folio calculations and checkout reconciliation are 100% accurate.
  */
 async function importCloudRoomChargesToSqlite(dbInstance, roomNumber, roomId, bookingId, guestName) {
-  if (!supabaseService || !roomNumber) return [];
+  if (!roomNumber) return [];
   try {
     const rawNum = String(roomNumber).trim();
     const cleanNum = rawNum.replace(/^(RSCW|RSW|RS)-/i, '').replace(/^Room\s*/i, '').trim();
 
-    // Fetch pending room charges for both rawNum and cleanNum
-    const pendingRaw = await supabaseService.fetchPendingRoomCharges(rawNum);
-    const pendingClean = cleanNum !== rawNum ? await supabaseService.fetchPendingRoomCharges(cleanNum) : [];
-    const pendingCombined = [...(pendingRaw || []), ...(pendingClean || [])];
+    // Fetch pending room charges from Firebase (primary) and Supabase (fallback)
+    let pendingFirebase = [];
+    if (typeof firebaseService !== 'undefined' && typeof firebaseService.fetchPendingRoomCharges === 'function') {
+      try {
+        const allPending = await firebaseService.fetchPendingRoomCharges();
+        pendingFirebase = (allPending || []).filter(c => {
+          const cRoom = String(c.room_number || '').trim();
+          return cRoom === rawNum || cRoom === cleanNum || cRoom === `Room ${cleanNum}`;
+        });
+      } catch (_) {}
+    }
+
+    let pendingSupabase = [];
+    if (typeof supabaseService !== 'undefined' && typeof supabaseService.fetchPendingRoomCharges === 'function') {
+      try {
+        const pRaw = await supabaseService.fetchPendingRoomCharges(rawNum);
+        const pClean = cleanNum !== rawNum ? await supabaseService.fetchPendingRoomCharges(cleanNum) : [];
+        pendingSupabase = [...(pRaw || []), ...(pClean || [])];
+      } catch (_) {}
+    }
+
+    const pendingCombined = [...pendingFirebase, ...pendingSupabase];
 
     // Deduplicate by charge ID
     const pendingMap = new Map();
@@ -4020,11 +4214,147 @@ async function importCloudRoomChargesToSqlite(dbInstance, roomNumber, roomId, bo
     }
 
     if (importedIds.length > 0) {
-      await supabaseService.markChargesImported(importedIds);
+      if (typeof firebaseService !== 'undefined' && typeof firebaseService.markChargesImported === 'function') {
+        try { await firebaseService.markChargesImported(importedIds); } catch (_) {}
+      }
+      if (typeof supabaseService !== 'undefined' && typeof supabaseService.markChargesImported === 'function') {
+        try { await supabaseService.markChargesImported(importedIds); } catch (_) {}
+      }
     }
     return importedIds;
   } catch (err) {
-    console.warn(`[Supabase] importCloudRoomChargesToSqlite notice for Room ${roomNumber}:`, err.message);
+    console.warn(`[Cloud] importCloudRoomChargesToSqlite notice for Room ${roomNumber}:`, err.message);
+    return [];
+  }
+}
+
+/**
+ * Synchronizes ALL pending F&B room charges across ALL rooms from Firebase/Supabase into local SQLite.
+ * Critical for multi-device setups (Hospitality on Device A, Restaurant on Device B).
+ */
+async function syncAllPendingCloudRoomCharges(dbInstance) {
+  try {
+    let pendingFirebase = [];
+    if (typeof firebaseService !== 'undefined' && typeof firebaseService.fetchPendingRoomCharges === 'function') {
+      try {
+        pendingFirebase = (await firebaseService.fetchPendingRoomCharges()) || [];
+      } catch (_) {}
+    }
+
+    let pendingSupabase = [];
+    if (typeof supabaseService !== 'undefined' && typeof supabaseService.fetchPendingRoomCharges === 'function') {
+      try {
+        pendingSupabase = (await supabaseService.fetchPendingRoomCharges()) || [];
+      } catch (_) {}
+    }
+
+    const pendingCombined = [...pendingFirebase, ...pendingSupabase];
+    const pendingMap = new Map();
+    for (const p of pendingCombined) {
+      if (p && p.id && !pendingMap.has(p.id)) pendingMap.set(p.id, p);
+    }
+    const pending = Array.from(pendingMap.values());
+    if (pending.length === 0) return [];
+
+    const importedIds = [];
+    for (const cc of pending) {
+      const orderNum = cc.bill_no || `CLD-${cc.id}`;
+      if (cc.department === 'waiter_kot_order' || cc.department === 'discount_approval' || cc.department === 'fb_live_state' || String(orderNum).startsWith('KOT-')) {
+        continue;
+      }
+
+      const rawNum = String(cc.room_number || '').trim();
+      const cleanNum = rawNum.replace(/^(RSCW|RSW|RS)-/i, '').replace(/^Room\s*/i, '').trim();
+      if (!cleanNum) continue;
+
+      let b = null;
+      try {
+        b = dbInstance.prepare(`
+          SELECT b.id as booking_id, b.room_id, g.name as guest_name
+          FROM rooms r
+          JOIN bookings b ON (r.current_booking_id = b.id OR (b.room_id = r.id AND b.status = 'active'))
+          JOIN guests g ON b.guest_id = g.id
+          WHERE (r.room_number = ? OR r.room_number = ?)
+          ORDER BY b.id DESC LIMIT 1
+        `).get(cleanNum, rawNum);
+      } catch (_) {}
+
+      const curBookingId = b?.booking_id || cc.booking_id || null;
+      const curRoomId = b?.room_id || cc.room_id || null;
+      const curGuestName = b?.guest_name || cc.customer_name || 'In-House Guest';
+
+      let parsedSummary = null;
+      try {
+        parsedSummary = typeof cc.items_summary === 'string' ? JSON.parse(cc.items_summary) : cc.items_summary;
+      } catch (_) {}
+
+      const totalAmt = parseFloat(cc.grand_total) || (parsedSummary ? parseFloat(parsedSummary.grand_total || parsedSummary.total) : 0) || 0;
+      if (totalAmt <= 0) continue;
+
+      let itemsList = [];
+      if (parsedSummary && Array.isArray(parsedSummary.items) && parsedSummary.items.length > 0) {
+        itemsList = parsedSummary.items;
+      } else if (Array.isArray(cc.items) && cc.items.length > 0) {
+        itemsList = cc.items;
+      } else if (typeof cc.items_summary === 'string' && !cc.items_summary.startsWith('{') && !cc.items_summary.startsWith('[')) {
+        itemsList = [{ name: cc.items_summary, quantity: 1, qty: 1, price: totalAmt, total: totalAmt }];
+      } else {
+        itemsList = [{ name: `${cc.department === 'bar' ? 'Bar' : 'Restaurant'} Room Service`, quantity: 1, qty: 1, price: totalAmt, total: totalAmt }];
+      }
+      const itemsJson = JSON.stringify(itemsList);
+
+      const subtotalAmt = parseFloat(cc.subtotal) || (parsedSummary?.subtotal ? parseFloat(parsedSummary.subtotal) : Math.round(totalAmt / 1.05));
+      const taxAmt = parseFloat(cc.gst) || (parsedSummary?.gst ? parseFloat(parsedSummary.gst) : (totalAmt - subtotalAmt));
+      const cashierName = cc.settled_by || (parsedSummary?.waiter_name) || (cc.department === 'bar' ? 'Bar Cashier' : 'Restaurant Cashier');
+      const createdAt = cc.created_at ? cc.created_at.replace('T', ' ').substring(0, 19) : new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+      let paymentMode = cc.payment_mode || (parsedSummary?.payment_mode) || (parsedSummary?.payment_method) || 'room_folio';
+      let isPaid = (cc.is_paid !== undefined) ? Number(cc.is_paid) : (parsedSummary?.is_paid !== undefined ? Number(parsedSummary.is_paid) : 0);
+
+      if (cc.department === 'bar') {
+        const existing = dbInstance.prepare('SELECT id FROM bar_orders WHERE order_number = ?').get(orderNum);
+        if (!existing) {
+          dbInstance.prepare(`
+            INSERT INTO bar_orders (
+              order_number, room_id, customer_name, order_type,
+              items_json, subtotal, tax, discount, total,
+              payment_mode, is_paid, status, cashier_name,
+              booking_id, created_at
+            ) VALUES (?, ?, ?, 'room', ?, ?, ?, 0, ?, ?, ?, 'completed', ?, ?, ?)
+          `).run(orderNum, curRoomId, curGuestName, itemsJson, subtotalAmt, taxAmt, totalAmt, paymentMode, isPaid, cashierName, curBookingId, createdAt);
+          importedIds.push(cc.id);
+        } else {
+          importedIds.push(cc.id);
+        }
+      } else {
+        const existing = dbInstance.prepare('SELECT id FROM restaurant_orders WHERE order_number = ?').get(orderNum);
+        if (!existing) {
+          dbInstance.prepare(`
+            INSERT INTO restaurant_orders (
+              order_number, room_id, customer_name, order_type,
+              items_json, subtotal, tax, discount, total,
+              payment_mode, is_paid, status, cashier_name,
+              booking_id, created_at
+            ) VALUES (?, ?, ?, 'room', ?, ?, ?, 0, ?, ?, ?, 'completed', ?, ?, ?)
+          `).run(orderNum, curRoomId, curGuestName, itemsJson, subtotalAmt, taxAmt, totalAmt, paymentMode, isPaid, cashierName, curBookingId, createdAt);
+          importedIds.push(cc.id);
+        } else {
+          importedIds.push(cc.id);
+        }
+      }
+    }
+
+    if (importedIds.length > 0) {
+      if (typeof firebaseService !== 'undefined' && typeof firebaseService.markChargesImported === 'function') {
+        try { await firebaseService.markChargesImported(importedIds); } catch (_) {}
+      }
+      if (typeof supabaseService !== 'undefined' && typeof supabaseService.markChargesImported === 'function') {
+        try { await supabaseService.markChargesImported(importedIds); } catch (_) {}
+      }
+    }
+    return importedIds;
+  } catch (err) {
+    console.warn('[Cloud] syncAllPendingCloudRoomCharges error:', err.message);
     return [];
   }
 }
@@ -5605,7 +5935,21 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
 
     const isOtaPrepaidInitial = (primaryBooking.booking_source || '').toUpperCase() === 'OTA' && (primaryBooking.is_prepaid === 1 || primaryBooking.is_prepaid === '1' || primaryBooking.rate_type === 'prepaid');
     const defaultCheckoutMode = isOtaPrepaidInitial && computedSettle === 0 ? 'prepaid' : (computedSettle > 0 ? 'split' : 'cash');
-    const final_payment_mode = b.final_payment_mode ?? b.finalPaymentMode ?? defaultCheckoutMode;
+    let resolvedCheckoutMode = (b.final_payment_mode ?? b.finalPaymentMode ?? '').toLowerCase();
+    if (split_online > 0 && split_cash === 0 && split_card === 0 && split_cheque === 0) {
+      resolvedCheckoutMode = 'upi';
+    } else if (split_card > 0 && split_cash === 0 && split_online === 0 && split_cheque === 0) {
+      resolvedCheckoutMode = 'card';
+    } else if (split_cheque > 0 && split_cash === 0 && split_online === 0 && split_card === 0) {
+      resolvedCheckoutMode = 'cheque';
+    } else if (split_cash > 0 && split_online === 0 && split_card === 0 && split_cheque === 0) {
+      resolvedCheckoutMode = 'cash';
+    } else if ((split_cash > 0 ? 1 : 0) + (split_card > 0 ? 1 : 0) + (split_online > 0 ? 1 : 0) + (split_cheque > 0 ? 1 : 0) > 1) {
+      resolvedCheckoutMode = 'split';
+    } else if (!resolvedCheckoutMode) {
+      resolvedCheckoutMode = defaultCheckoutMode;
+    }
+    const final_payment_mode = resolvedCheckoutMode;
 
     const guestId = primaryBooking.guest_id;
     const checkoutTime = new Date().toISOString();
@@ -7458,10 +7802,16 @@ app.get('/api/restaurant/occupied-rooms', async (req, res) => {
       ORDER BY CAST(r.room_number AS INTEGER) ASC, r.room_number ASC
     `).all();
 
-    // If no local occupied rooms found (e.g. running on separate POS machine), fetch live from Supabase cloud
+    // If no local occupied rooms found (e.g. running on separate POS machine), fetch live from Firebase cloud (primary) or Supabase (fallback)
     if (rooms.length === 0) {
       try {
-        const cloudOcc = await supabaseService.fetchActiveOccupancies();
+        let cloudOcc = [];
+        if (typeof firebaseService !== 'undefined' && typeof firebaseService.fetchActiveOccupancies === 'function') {
+          cloudOcc = await firebaseService.fetchActiveOccupancies();
+        }
+        if ((!cloudOcc || cloudOcc.length === 0) && typeof supabaseService !== 'undefined' && typeof supabaseService.fetchActiveOccupancies === 'function') {
+          cloudOcc = await supabaseService.fetchActiveOccupancies();
+        }
         if (cloudOcc && cloudOcc.length > 0) {
           const mapped = cloudOcc.map(co => ({
             id: co.room_id || co.room_number,
@@ -7470,8 +7820,8 @@ app.get('/api/restaurant/occupied-rooms', async (req, res) => {
             status: 'occupied',
             booking_id: co.booking_id,
             checkin_time: co.checkin_time,
-            guest_name: co.guest_name,
-            guest_mobile: co.guest_mobile,
+            guest_name: co.guest_name || 'In-House Guest',
+            guest_mobile: co.guest_mobile || '-',
             guest_address: '',
             guest_doc_type: '',
             is_combined: false,
@@ -7483,7 +7833,7 @@ app.get('/api/restaurant/occupied-rooms', async (req, res) => {
           return res.json({ success: true, rooms: mapped });
         }
       } catch (cloudErr) {
-        console.warn('[Supabase] Fallback fetch failed in occupied-rooms:', cloudErr.message);
+        console.warn('[Cloud] Fallback fetch failed in occupied-rooms:', cloudErr.message);
       }
     }
 

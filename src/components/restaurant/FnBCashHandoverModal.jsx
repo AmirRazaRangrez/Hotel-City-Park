@@ -28,7 +28,7 @@ export default function FnBCashHandoverModal({ isOpen, onClose, currentUser }) {
   const [activeTab, setActiveTab] = useState('statement'); // 'statement' | 'history'
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [toDate, setToDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [shift, setShift] = useState('7am-7pm');
+  const [shift, setShift] = useState('all');
   const [fromTime, setFromTime] = useState('07:00');
   const [toTime, setToTime] = useState('19:00');
   const [staffName, setStaffName] = useState('');
@@ -302,6 +302,33 @@ export default function FnBCashHandoverModal({ isOpen, onClose, currentUser }) {
                   />
                 </div>
               </div>
+
+              {/* Whole Day Quick Select Button (Default Selected) */}
+              <button
+                type="button"
+                id="btn-fnb-shift-whole-day"
+                onClick={() => setShift('all')}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '7px 14px',
+                  borderRadius: '8px',
+                  fontSize: '0.82rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  border: shift === 'all' ? '1.5px solid #d97706' : '1.5px solid #cbd5e1',
+                  background: shift === 'all' ? 'linear-gradient(135deg, #d97706 0%, #b45309 100%)' : '#ffffff',
+                  color: shift === 'all' ? '#ffffff' : '#334155',
+                  boxShadow: shift === 'all' ? '0 2px 6px rgba(217, 119, 6, 0.25)' : 'none'
+                }}
+                title="Whole Day (12:00 AM to 11:59 PM - All 24 Hours)"
+              >
+                <span>☀️</span>
+                <span>Whole Day</span>
+                {shift === 'all' && <span style={{ fontSize: '0.74rem', marginLeft: '2px' }}>✓</span>}
+              </button>
 
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                 <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#92400e' }}>Shift:</span>

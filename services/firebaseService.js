@@ -240,6 +240,33 @@ async function fetchActiveOccupancies() {
     const snap = await withTimeout(firestore.collection('active_occupancies').get());
     const list = [];
     snap.forEach(doc => list.push(doc.data()));
+    if (list.length > 0) return list;
+
+    // Fallback: If active_occupancies collection is empty, extract from active folios in room_charges_inbox
+    const inboxSnap = await withTimeout(
+      firestore.collection('room_charges_inbox')
+        .where('department', '==', 'room_folio')
+        .where('status', '==', 'due')
+        .get()
+    );
+    inboxSnap.forEach(doc => {
+      const d = doc.data();
+      let meta = {};
+      try { meta = JSON.parse(d.items_summary || '{}'); } catch (_) {}
+      const rNum = String(d.room_number || meta.roomNumber || doc.id.replace(/^folio_/, '')).trim();
+      if (rNum && !list.some(x => String(x.room_number) === rNum)) {
+        list.push({
+          room_number: rNum,
+          room_id: d.room_id || meta.id || null,
+          room_type: meta.roomType || 'Standard',
+          guest_name: meta.guestName || meta.guest || 'In-House Guest',
+          guest_mobile: meta.guestMobile || meta.mobile || null,
+          booking_id: meta.bookingId || null,
+          checkin_time: meta.checkinTime || d.created_at || new Date().toISOString(),
+          updated_at: d.updated_at || new Date().toISOString()
+        });
+      }
+    });
     return list;
   } catch (err) {
     console.warn('[Firebase] fetchActiveOccupancies error:', err.message);
@@ -698,7 +725,8 @@ async function syncAllActiveRoomsFromLocal(db) {
       const extraExpenses = db.prepare(`SELECT amount, gst_amount FROM booking_extra_expenses WHERE booking_id = ?`).all(bId);
 
       const payments = db.prepare(`
-        SELECT receipt_no, amount, payment_mode, cashier_name, created_at, notes, payment_type 
+        SELECT receipt_no, amount, payment_mode, cashier_name, created_at, notes, payment_type,
+               split_cash, split_card, split_online, utr_number
         FROM payments 
         WHERE booking_id = ? 
         ORDER BY id ASC
@@ -839,15 +867,37 @@ async function syncAllActiveRoomsFromLocal(db) {
         checkedInBy: room.checked_in_by || 'Front Desk',
         checkinTime: room.checkin_time || '',
         approxCheckout: room.approx_checkout_time || '',
-        payments: payments.map(p => ({
-          receiptNo: p.receipt_no || 'CR52',
-          amount: Number(p.amount || 0),
-          mode: p.payment_mode || 'Cash',
-          cashier: p.cashier_name || 'Staff',
-          date: p.created_at || room.checkin_time,
-          notes: p.notes || '',
-          type: p.payment_type || 'advance'
-        }))
+        payments: payments.map(p => {
+          let resolvedMode = String(p.payment_mode || '').trim();
+          const sOnline = Number(p.split_online || 0);
+          const sCard = Number(p.split_card || 0);
+          const sCash = Number(p.split_cash || 0);
+          if (sOnline > 0 && sCash === 0 && sCard === 0) {
+            resolvedMode = 'UPI';
+          } else if (sCard > 0 && sCash === 0 && sOnline === 0) {
+            resolvedMode = 'Card';
+          } else if (sCash > 0 && (sOnline > 0 || sCard > 0)) {
+            resolvedMode = 'Split';
+          } else if (p.utr_number || (p.notes && /upi|online|gpay|phonepe/i.test(p.notes))) {
+            resolvedMode = 'UPI';
+          } else if (!resolvedMode || resolvedMode.toLowerCase() === 'cash') {
+            resolvedMode = sOnline > 0 ? 'UPI' : (sCard > 0 ? 'Card' : 'Cash');
+          }
+          return {
+            receiptNo: p.receipt_no || 'CR52',
+            amount: Number(p.amount || 0),
+            mode: resolvedMode,
+            payment_mode: resolvedMode,
+            split_cash: sCash,
+            split_card: sCard,
+            split_online: sOnline,
+            utr_number: p.utr_number || '',
+            cashier: p.cashier_name || 'Staff',
+            date: p.created_at || room.checkin_time,
+            notes: p.notes || '',
+            type: p.payment_type || 'advance'
+          };
+        })
       };
 
       const folioRef = firestore.collection('room_charges_inbox').doc(`folio_${roomNum}`);
@@ -891,7 +941,7 @@ async function syncStaffUsersToCloud(db) {
   if (!firestore || !db) return;
   try {
     const staffList = db.prepare(`
-      SELECT id, username, full_name, role, phone, status, can_access_manager, updated_at
+      SELECT id, username, full_name, role, phone, status, can_access_manager, updated_at, plain_password
       FROM staff_users
     `).all();
 
@@ -906,6 +956,7 @@ async function syncStaffUsersToCloud(db) {
         full_name: s.full_name || '',
         role: s.role || 'hospitality',
         phone: s.phone || '',
+        plain_password: s.plain_password || '',
         status: s.status || 'active',
         can_access_manager: Boolean(s.can_access_manager === 1 || s.can_access_manager === true || s.role === 'manager'),
         updated_at: s.updated_at || new Date().toISOString()

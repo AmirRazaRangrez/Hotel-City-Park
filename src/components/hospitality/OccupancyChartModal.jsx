@@ -176,11 +176,11 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
     const occupied = chartData.filter((r) => r.is_occupied);
     const withBreakfast = occupied.filter((r) => String(r.breakfast || '').trim().toLowerCase() === 'yes').length;
     const withoutBreakfast = occupied.filter((r) => String(r.breakfast || '').trim().toLowerCase() !== 'yes').length;
-    const totalBreakfastPax = occupied
+    const totalBreakfastPax = summary?.totalBreakfastPax ?? occupied
       .filter((r) => String(r.breakfast || '').trim().toLowerCase() === 'yes')
-      .reduce((sum, r) => sum + (Number(r.pax) || 0), 0);
+      .reduce((sum, r) => sum + (Number(r.breakfast_pax !== undefined ? r.breakfast_pax : (r.adults !== undefined ? r.adults : r.pax)) || 0), 0);
     return { withBreakfast, withoutBreakfast, totalBreakfastPax };
-  }, [chartData]);
+  }, [chartData, summary]);
 
   // Print Debounce State
   const [isPrinting, setIsPrinting] = useState(false);
@@ -310,9 +310,9 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
     const allTotal = summary?.totalRooms || chartData.length;
     const occupancyPercentage = allTotal > 0 ? Math.round((occupiedTotal / allTotal) * 100) : 0;
     const totalGuestsPax = summary?.totalPax || rowsToPrint.filter((r) => r.is_occupied).reduce((sum, r) => sum + (Number(r.pax) || 0), 0);
-    const totalBreakfastPax = rowsToPrint
+    const totalBreakfastPax = summary?.totalBreakfastPax ?? rowsToPrint
       .filter((r) => r.is_occupied && String(r.breakfast || '').trim().toLowerCase() === 'yes')
-      .reduce((sum, r) => sum + (Number(r.pax) || 0), 0);
+      .reduce((sum, r) => sum + (Number(r.breakfast_pax !== undefined ? r.breakfast_pax : (r.adults !== undefined ? r.adults : r.pax)) || 0), 0);
 
     const rowsHtml = rowsToPrint
       .map((r) => {
