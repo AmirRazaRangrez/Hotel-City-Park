@@ -800,10 +800,24 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
 });
 
 // 1c. CASH HANDOVER STATEMENTS (Front Office & F&B Cash Handover)
+function normalizeDateIso(str) {
+  if (!str) return new Date().toISOString().slice(0, 10);
+  const s = String(str).trim();
+  const dmy = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmy) {
+    return `${dmy[3]}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+  }
+  const ymd = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (ymd) {
+    return `${ymd[1]}-${String(ymd[2]).padStart(2, '0')}-${String(ymd[3]).padStart(2, '0')}`;
+  }
+  return s.slice(0, 10);
+}
+
 function getCashHandoverShiftRange(dateStr, shift, options = {}) {
-  const d = dateStr || new Date().toISOString().slice(0, 10);
+  const d = normalizeDateIso(dateStr);
   const s = String(shift || '7am-7pm').toLowerCase().replace(/\s+/g, '');
-  const toD = options.toDate || d;
+  const toD = options.toDate ? normalizeDateIso(options.toDate) : d;
   const nextDate = new Date(new Date(d).getTime() + 86400000).toISOString().slice(0, 10);
 
   if (options.fromTime && options.toTime) {
@@ -833,6 +847,144 @@ function getCashHandoverShiftRange(dateStr, shift, options = {}) {
   return { start: `${d} 07:00:00`, end: `${d} 18:59:59`, label: '7:00 AM - 7:00 PM' };
 }
 
+// Helper: Reconciles all F&B room orders & room charges for a shift across Restaurant, Bar, and Front Office
+function getFnbRoomFolioCollectionsForShift(start, end) {
+  // Step 1: Direct F&B room orders billed during this shift (active stays + room service across all devices)
+  const shiftFnbOrders = db.prepare(`
+    SELECT ro.id, ro.order_number, ro.table_number, ro.room_id, ro.booking_id, ro.total, ro.payment_mode, ro.is_paid, ro.created_at, ro.room_service_for,
+           'restaurant' as dept, r.room_number, b.voucher_number, g.name as guest_name
+    FROM restaurant_orders ro
+    LEFT JOIN rooms r ON ro.room_id = r.id
+    LEFT JOIN bookings b ON ro.booking_id = b.id
+    LEFT JOIN guests g ON b.guest_id = g.id
+    WHERE ((LOWER(ro.payment_mode) IN ('room_folio', 'room', 'folio'))
+         OR (ro.is_paid = 0 AND (ro.table_number LIKE 'RS-%' OR ro.table_number LIKE 'Room %' OR ro.order_type = 'room' OR ro.room_service_for LIKE 'Room %')))
+      AND LOWER(COALESCE(ro.payment_mode, '')) NOT IN ('cash', 'card', 'online', 'upi')
+      AND (ro.status IS NULL OR ro.status NOT IN ('cancelled', 'void'))
+      AND datetime(COALESCE(ro.settled_at, ro.created_at), 'localtime') >= datetime(?)
+      AND datetime(COALESCE(ro.settled_at, ro.created_at), 'localtime') <= datetime(?)
+  `).all(start, end);
+
+  const shiftBarOrders = db.prepare(`
+    SELECT bo.id, bo.order_number, bo.table_number, bo.room_id, bo.booking_id, bo.total, bo.payment_mode, bo.is_paid, bo.created_at, bo.room_service_for,
+           'bar' as dept, r.room_number, b.voucher_number, g.name as guest_name
+    FROM bar_orders bo
+    LEFT JOIN rooms r ON bo.room_id = r.id
+    LEFT JOIN bookings b ON bo.booking_id = b.id
+    LEFT JOIN guests g ON b.guest_id = g.id
+    WHERE ((LOWER(bo.payment_mode) IN ('room_folio', 'room', 'folio'))
+         OR (bo.is_paid = 0 AND (bo.table_number LIKE 'RS-%' OR bo.table_number LIKE 'Room %' OR bo.order_type = 'room' OR bo.room_service_for LIKE 'Room %')))
+      AND LOWER(COALESCE(bo.payment_mode, '')) NOT IN ('cash', 'card', 'online', 'upi')
+      AND (bo.status IS NULL OR bo.status NOT IN ('cancelled', 'void'))
+      AND datetime(COALESCE(bo.settled_at, bo.created_at), 'localtime') >= datetime(?)
+      AND datetime(COALESCE(bo.settled_at, bo.created_at), 'localtime') <= datetime(?)
+  `).all(start, end);
+
+  const seenOrderKeys = new Set();
+  const collectionDetails = [];
+  let fbTotal = 0;
+
+  const resolveOrderMeta = (o) => {
+    let roomNum = o.room_number;
+    let guestName = o.guest_name;
+    let vch = o.voucher_number;
+    let bId = o.booking_id;
+
+    if (!roomNum && o.table_number) {
+      roomNum = o.table_number.replace(/^(RSCW|RSW|RS)-/i, '').replace(/^Room\s*/i, '').trim();
+    }
+    if (!roomNum && o.room_service_for) {
+      roomNum = o.room_service_for.replace(/^(RSCW|RSW|RS)-/i, '').replace(/^Room\s*/i, '').trim();
+    }
+    if (roomNum && (!guestName || !vch || !bId)) {
+      try {
+        const activeB = db.prepare(`
+          SELECT b.id as booking_id, b.voucher_number, g.name as guest_name
+          FROM rooms r
+          JOIN bookings b ON (r.current_booking_id = b.id OR (b.room_id = r.id AND b.status = 'active'))
+          JOIN guests g ON b.guest_id = g.id
+          WHERE r.room_number = ?
+          ORDER BY b.id DESC LIMIT 1
+        `).get(roomNum);
+        if (activeB) {
+          guestName = guestName || activeB.guest_name;
+          vch = vch || activeB.voucher_number;
+          bId = bId || activeB.booking_id;
+        }
+      } catch (_) {}
+    }
+    return {
+      room_number: roomNum || '-',
+      guest_name: guestName || 'In-House Guest',
+      voucher_number: vch || '-',
+      booking_id: bId || null
+    };
+  };
+
+  [...shiftFnbOrders, ...shiftBarOrders].forEach(o => {
+    const key = `${o.dept}_${o.id}`;
+    if (!seenOrderKeys.has(key)) {
+      seenOrderKeys.add(key);
+      const amt = parseFloat(o.total) || 0;
+      fbTotal += amt;
+      const meta = resolveOrderMeta(o);
+      collectionDetails.push({
+        booking_id: meta.booking_id,
+        voucher_number: meta.voucher_number,
+        room_number: meta.room_number,
+        guest_name: meta.guest_name,
+        totalRoomFnb: amt,
+        fnbCashPortion: amt,
+        orders: [o]
+      });
+    }
+  });
+
+  // Step 2: Plus bookings checked out in cash during this shift with prior F&B orders
+  const checkedOutBookings = db.prepare(`
+    SELECT b.id, b.voucher_number, b.actual_checkout_time, b.final_settlement_mode, b.split_cash, b.total_paid, r.room_number, g.name as guest_name
+    FROM bookings b
+    LEFT JOIN rooms r ON b.room_id = r.id
+    LEFT JOIN guests g ON b.guest_id = g.id
+    WHERE b.actual_checkout_time IS NOT NULL
+      AND (LOWER(b.final_settlement_mode) = 'cash' OR (b.split_cash IS NOT NULL AND b.split_cash > 0))
+      AND datetime(b.actual_checkout_time, 'localtime') >= datetime(?) AND datetime(b.actual_checkout_time, 'localtime') <= datetime(?)
+  `).all(start, end);
+
+  checkedOutBookings.forEach(b => {
+    const restOrders = db.prepare(`
+      SELECT id, order_number, total, created_at, 'restaurant' as dept
+      FROM restaurant_orders
+      WHERE booking_id = ? AND (payment_mode = 'room_folio' OR payment_mode = 'room')
+    `).all(b.id);
+    const barOrders = db.prepare(`
+      SELECT id, order_number, total, created_at, 'bar' as dept
+      FROM bar_orders
+      WHERE booking_id = ? AND (payment_mode = 'room_folio' OR payment_mode = 'room')
+    `).all(b.id);
+
+    const uncollectedOrders = [...restOrders, ...barOrders].filter(o => !seenOrderKeys.has(`${o.dept}_${o.id}`));
+    if (uncollectedOrders.length > 0) {
+      uncollectedOrders.forEach(o => seenOrderKeys.add(`${o.dept}_${o.id}`));
+      const totalRoomFnb = uncollectedOrders.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
+      const cashPaid = parseFloat(b.split_cash || b.total_paid) || 0;
+      const fnbCashPortion = Math.min(totalRoomFnb, cashPaid);
+      fbTotal += fnbCashPortion;
+      collectionDetails.push({
+        booking_id: b.id,
+        voucher_number: b.voucher_number,
+        room_number: b.room_number,
+        guest_name: b.guest_name,
+        totalRoomFnb,
+        fnbCashPortion,
+        orders: uncollectedOrders
+      });
+    }
+  });
+
+  return { fbTotal: Math.round(fbTotal * 100) / 100, collectionDetails };
+}
+
 function computeFoCashHandover(dateStr, shift, options = {}) {
   const { start, end, label } = getCashHandoverShiftRange(dateStr, shift, options);
 
@@ -847,8 +999,8 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     WHERE p.department = 'hospitality'
       AND p.payment_type IN ('advance', 'bill_settlement', 'extension')
       AND (LOWER(p.payment_mode) = 'cash' OR (p.split_cash IS NOT NULL AND p.split_cash > 0))
-      AND datetime(p.created_at) >= datetime(?) AND datetime(p.created_at) <= datetime(?)
-    ORDER BY datetime(p.created_at) ASC
+      AND datetime(p.created_at, 'localtime') >= datetime(?) AND datetime(p.created_at, 'localtime') <= datetime(?)
+    ORDER BY datetime(p.created_at, 'localtime') ASC
   `).all(start, end);
 
   let foCashSales = 0;
@@ -864,8 +1016,8 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     SELECT id, booking_number, customer_name, room_number, advance_amount, payment_mode, created_at
     FROM advance_bookings
     WHERE (LOWER(payment_mode) = 'cash' OR LOWER(payment_mode) LIKE '%cash%')
-      AND datetime(created_at) >= datetime(?) AND datetime(created_at) <= datetime(?)
-    ORDER BY datetime(created_at) ASC
+      AND datetime(created_at, 'localtime') >= datetime(?) AND datetime(created_at, 'localtime') <= datetime(?)
+    ORDER BY datetime(created_at, 'localtime') ASC
   `).all(start, end);
 
   let foDeposits = 0;
@@ -878,7 +1030,7 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     FROM payments p
     WHERE p.payment_type = 'advance_booking'
       AND (LOWER(p.payment_mode) = 'cash' OR (p.split_cash IS NOT NULL AND p.split_cash > 0))
-      AND datetime(p.created_at) >= datetime(?) AND datetime(p.created_at) <= datetime(?)
+      AND datetime(p.created_at, 'localtime') >= datetime(?) AND datetime(p.created_at, 'localtime') <= datetime(?)
   `).all(start, end);
 
   paymentDepositRows.forEach(p => {
@@ -896,8 +1048,8 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     FROM booking_extra_expenses be
     LEFT JOIN bookings b ON be.booking_id = b.id
     LEFT JOIN rooms r ON be.room_id = r.id
-    WHERE datetime(be.created_at) >= datetime(?) AND datetime(be.created_at) <= datetime(?)
-    ORDER BY datetime(be.created_at) ASC
+    WHERE datetime(be.created_at, 'localtime') >= datetime(?) AND datetime(be.created_at, 'localtime') <= datetime(?)
+    ORDER BY datetime(be.created_at, 'localtime') ASC
   `).all(start, end);
 
   let otherIncome = 0;
@@ -905,51 +1057,8 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     otherIncome += (parseFloat(e.total_amount) || 0);
   });
 
-  // 4. B. To Pay F&B: Total F&B Cash Collected at Front Desk Checkout
-  const checkedOutBookings = db.prepare(`
-    SELECT b.id, b.voucher_number, b.actual_checkout_time, b.final_settlement_mode, b.split_cash, b.total_paid, r.room_number, g.name as guest_name
-    FROM bookings b
-    LEFT JOIN rooms r ON b.room_id = r.id
-    LEFT JOIN guests g ON b.guest_id = g.id
-    WHERE b.actual_checkout_time IS NOT NULL
-      AND (LOWER(b.final_settlement_mode) = 'cash' OR (b.split_cash IS NOT NULL AND b.split_cash > 0))
-      AND datetime(b.actual_checkout_time) >= datetime(?) AND datetime(b.actual_checkout_time) <= datetime(?)
-  `).all(start, end);
-
-  let fbCashCollected = 0;
-  const fnbCollectionDetails = [];
-
-  checkedOutBookings.forEach(b => {
-    const restOrders = db.prepare(`
-      SELECT id, order_number, total, created_at, 'restaurant' as dept
-      FROM restaurant_orders
-      WHERE booking_id = ? AND payment_mode = 'room_folio'
-    `).all(b.id);
-
-    const barOrders = db.prepare(`
-      SELECT id, order_number, total, created_at, 'bar' as dept
-      FROM bar_orders
-      WHERE booking_id = ? AND payment_mode = 'room_folio'
-    `).all(b.id);
-
-    const allRoomFnb = [...restOrders, ...barOrders];
-    const totalRoomFnb = allRoomFnb.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
-
-    if (totalRoomFnb > 0) {
-      const cashPaid = parseFloat(b.split_cash || b.total_paid) || 0;
-      const fnbCashPortion = Math.min(totalRoomFnb, cashPaid);
-      fbCashCollected += fnbCashPortion;
-      fnbCollectionDetails.push({
-        booking_id: b.id,
-        voucher_number: b.voucher_number,
-        room_number: b.room_number,
-        guest_name: b.guest_name,
-        totalRoomFnb,
-        fnbCashPortion,
-        orders: allRoomFnb
-      });
-    }
-  });
+  // 4. B. To Pay F&B: Total F&B Room Folio Orders & Realized F&B Cash
+  const { fbTotal: fbCashCollected, collectionDetails: fnbCollectionDetails } = getFnbRoomFolioCollectionsForShift(start, end);
 
   // 5. Total Refund Rs.
   const refundRows = db.prepare(`
@@ -960,7 +1069,7 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     LEFT JOIN guests g ON b.guest_id = g.id
     WHERE p.payment_type = 'refund'
       AND (LOWER(p.payment_mode) = 'cash' OR (p.split_cash IS NOT NULL AND p.split_cash > 0))
-      AND datetime(p.created_at) >= datetime(?) AND datetime(p.created_at) <= datetime(?)
+      AND datetime(p.created_at, 'localtime') >= datetime(?) AND datetime(p.created_at, 'localtime') <= datetime(?)
   `).all(start, end);
 
   let totalRefund = 0;
@@ -975,8 +1084,8 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     FROM expenses
     WHERE (category != 'refund' OR category IS NULL)
       AND (LOWER(payment_mode) = 'cash' OR payment_mode IS NULL OR payment_mode = '')
-      AND datetime(created_at) >= datetime(?) AND datetime(created_at) <= datetime(?)
-    ORDER BY datetime(created_at) ASC
+      AND datetime(created_at, 'localtime') >= datetime(?) AND datetime(created_at, 'localtime') <= datetime(?)
+    ORDER BY datetime(created_at, 'localtime') ASC
   `).all(start, end);
 
   let totalExpenses = 0;
@@ -988,7 +1097,7 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     totalExpenses += amt;
     const catName = exp.category || exp.purpose_category || 'Other';
     const isOwner = catName.toLowerCase().includes('owner') || (exp.owner_name && exp.owner_name.trim() !== '');
-    const displayCat = isOwner ? `Owner Expenses (${exp.owner_name || 'Owner'})` : catName;
+    const displayCat = isOwner ? (exp.owner_name ? `Owner: ${exp.owner_name}` : 'Owner') : catName;
     categoryTotals[displayCat] = (categoryTotals[displayCat] || 0) + amt;
     categoryDetails.push({
       ...exp,
@@ -1003,8 +1112,7 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
   }));
 
   // In Front Office Handover: Receipts A (1+2+3) minus Total Refund minus Expenses = Net Handover to Accounts!
-  const pureFoCashSales = Math.max(0, Math.round((foCashSales - fbCashCollected) * 100) / 100);
-  const toHandoverA = Math.round((pureFoCashSales + foDeposits + otherIncome) * 100) / 100;
+  const toHandoverA = Math.round((foCashSales + foDeposits + otherIncome) * 100) / 100;
   const netHandover = Math.max(0, Math.round((toHandoverA - totalRefund - totalExpenses) * 100) / 100);
 
   return {
@@ -1015,7 +1123,7 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     shiftKey: shift,
     start,
     end,
-    foCashSales: pureFoCashSales,
+    foCashSales: Math.round(foCashSales * 100) / 100,
     grossFoCashCollected: Math.round(foCashSales * 100) / 100,
     foDeposits: Math.round(foDeposits * 100) / 100,
     otherIncome: Math.round(otherIncome * 100) / 100,
@@ -1048,8 +1156,8 @@ function computeFnbCashHandover(dateStr, shift, options = {}) {
     FROM restaurant_orders
     WHERE is_paid = 1
       AND (LOWER(payment_mode) = 'cash' OR (payment_mode = 'split' AND split_details_json LIKE '%cash%'))
-      AND datetime(COALESCE(settled_at, created_at)) >= datetime(?) AND datetime(COALESCE(settled_at, created_at)) <= datetime(?)
-    ORDER BY datetime(COALESCE(settled_at, created_at)) ASC
+      AND datetime(COALESCE(settled_at, created_at), 'localtime') >= datetime(?) AND datetime(COALESCE(settled_at, created_at), 'localtime') <= datetime(?)
+    ORDER BY datetime(COALESCE(settled_at, created_at), 'localtime') ASC
   `).all(start, end);
 
   const barCashOrders = db.prepare(`
@@ -1057,8 +1165,8 @@ function computeFnbCashHandover(dateStr, shift, options = {}) {
     FROM bar_orders
     WHERE is_paid = 1
       AND (LOWER(payment_mode) = 'cash' OR (payment_mode = 'split' AND split_details_json LIKE '%cash%'))
-      AND datetime(COALESCE(settled_at, created_at)) >= datetime(?) AND datetime(COALESCE(settled_at, created_at)) <= datetime(?)
-    ORDER BY datetime(COALESCE(settled_at, created_at)) ASC
+      AND datetime(COALESCE(settled_at, created_at), 'localtime') >= datetime(?) AND datetime(COALESCE(settled_at, created_at), 'localtime') <= datetime(?)
+    ORDER BY datetime(COALESCE(settled_at, created_at), 'localtime') ASC
   `).all(start, end);
 
   let fnbCashSales = 0;
@@ -1080,51 +1188,8 @@ function computeFnbCashHandover(dateStr, shift, options = {}) {
   // 2. F&B Deposits (Advance bookings in restaurant/banquet in cash)
   let fnbDeposits = 0;
 
-  // 3. To Collect From Reception
-  const checkedOutBookings = db.prepare(`
-    SELECT b.id, b.voucher_number, b.actual_checkout_time, b.final_settlement_mode, b.split_cash, b.total_paid, r.room_number, g.name as guest_name
-    FROM bookings b
-    LEFT JOIN rooms r ON b.room_id = r.id
-    LEFT JOIN guests g ON b.guest_id = g.id
-    WHERE b.actual_checkout_time IS NOT NULL
-      AND (LOWER(b.final_settlement_mode) = 'cash' OR (b.split_cash IS NOT NULL AND b.split_cash > 0))
-      AND datetime(b.actual_checkout_time) >= datetime(?) AND datetime(b.actual_checkout_time) <= datetime(?)
-  `).all(start, end);
-
-  let fbFromReception = 0;
-  const receptionCollectionDetails = [];
-
-  checkedOutBookings.forEach(b => {
-    const restOrders = db.prepare(`
-      SELECT id, order_number, total, created_at, 'restaurant' as dept
-      FROM restaurant_orders
-      WHERE booking_id = ? AND payment_mode = 'room_folio'
-    `).all(b.id);
-
-    const barOrders = db.prepare(`
-      SELECT id, order_number, total, created_at, 'bar' as dept
-      FROM bar_orders
-      WHERE booking_id = ? AND payment_mode = 'room_folio'
-    `).all(b.id);
-
-    const allRoomFnb = [...restOrders, ...barOrders];
-    const totalRoomFnb = allRoomFnb.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
-
-    if (totalRoomFnb > 0) {
-      const cashPaid = parseFloat(b.split_cash || b.total_paid) || 0;
-      const fnbCashPortion = Math.min(totalRoomFnb, cashPaid);
-      fbFromReception += fnbCashPortion;
-      receptionCollectionDetails.push({
-        booking_id: b.id,
-        voucher_number: b.voucher_number,
-        room_number: b.room_number,
-        guest_name: b.guest_name,
-        totalRoomFnb,
-        fnbCashPortion,
-        orders: allRoomFnb
-      });
-    }
-  });
+  // 3. To Collect From Reception: Total F&B Room Folio Orders & Realized F&B Cash from Reception
+  const { fbTotal: fbFromReception, collectionDetails: receptionCollectionDetails } = getFnbRoomFolioCollectionsForShift(start, end);
 
   // User requirement: In F&B Cash Handover, Refund is completely removed
   let totalRefund = 0;
@@ -1150,14 +1215,25 @@ function computeFnbCashHandover(dateStr, shift, options = {}) {
     breakdowns: {
       restCashOrders,
       barCashOrders,
-      receptionCollectionDetails
+      fnbCashRows: [...restCashOrders, ...barCashOrders],
+      receptionCollectionDetails,
+      fnbRoomFolioRows: receptionCollectionDetails
     },
     generatedAt: new Date().toISOString()
   };
 }
 
-app.get('/api/hospitality/cash-handover-data', (req, res) => {
+app.get('/api/hospitality/cash-handover-data', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   try {
+    if (typeof firebaseService !== 'undefined' && typeof firebaseService.pollPendingCloudOrders === 'function') {
+      try {
+        await Promise.race([
+          firebaseService.pollPendingCloudOrders(db),
+          new Promise(r => setTimeout(r, 600))
+        ]);
+      } catch (_) {}
+    }
     const dateStr = (req.query.date || new Date().toISOString().slice(0, 10)).trim();
     const shift = (req.query.shift || 'all').trim();
     const toDate = req.query.toDate ? req.query.toDate.trim() : null;
@@ -1179,8 +1255,8 @@ app.get('/api/hospitality/cash-handover-history', (req, res) => {
     const defaultEnd = today.toISOString().slice(0, 10);
     const defaultStart = new Date(today.getTime() - 6 * 86400000).toISOString().slice(0, 10);
 
-    const startDate = (req.query.startDate || defaultStart).trim();
-    const endDate = (req.query.endDate || defaultEnd).trim();
+    const startDate = normalizeDateIso(req.query.startDate || defaultStart);
+    const endDate = normalizeDateIso(req.query.endDate || defaultEnd);
     const filterShift = (req.query.shift || 'all').trim();
 
     const shiftsToQuery = filterShift === 'all'
@@ -1228,8 +1304,17 @@ app.get('/api/hospitality/cash-handover-history', (req, res) => {
   }
 });
 
-app.get('/api/restaurant/cash-handover-data', (req, res) => {
+app.get('/api/restaurant/cash-handover-data', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   try {
+    if (typeof firebaseService !== 'undefined' && typeof firebaseService.pollPendingCloudOrders === 'function') {
+      try {
+        await Promise.race([
+          firebaseService.pollPendingCloudOrders(db),
+          new Promise(r => setTimeout(r, 600))
+        ]);
+      } catch (_) {}
+    }
     const dateStr = (req.query.date || new Date().toISOString().slice(0, 10)).trim();
     const shift = (req.query.shift || 'all').trim();
     const toDate = req.query.toDate ? req.query.toDate.trim() : null;
