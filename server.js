@@ -861,8 +861,19 @@ function getFnbRoomFolioCollectionsForShift(start, end) {
          OR (ro.is_paid = 0 AND (ro.table_number LIKE 'RS-%' OR ro.table_number LIKE 'Room %' OR ro.order_type = 'room' OR ro.room_service_for LIKE 'Room %')))
       AND LOWER(COALESCE(ro.payment_mode, '')) NOT IN ('cash', 'card', 'online', 'upi')
       AND (ro.status IS NULL OR ro.status NOT IN ('cancelled', 'void'))
-      AND datetime(COALESCE(ro.settled_at, ro.created_at), 'localtime') >= datetime(?)
-      AND datetime(COALESCE(ro.settled_at, ro.created_at), 'localtime') <= datetime(?)
+      AND (
+        CASE 
+          WHEN COALESCE(ro.settled_at, ro.created_at) LIKE '%Z' OR COALESCE(ro.settled_at, ro.created_at) LIKE '%T%'
+          THEN datetime(COALESCE(ro.settled_at, ro.created_at), 'localtime')
+          ELSE datetime(COALESCE(ro.settled_at, ro.created_at))
+        END >= datetime(?)
+        AND
+        CASE 
+          WHEN COALESCE(ro.settled_at, ro.created_at) LIKE '%Z' OR COALESCE(ro.settled_at, ro.created_at) LIKE '%T%'
+          THEN datetime(COALESCE(ro.settled_at, ro.created_at), 'localtime')
+          ELSE datetime(COALESCE(ro.settled_at, ro.created_at))
+        END <= datetime(?)
+      )
   `).all(start, end);
 
   const shiftBarOrders = db.prepare(`
@@ -876,8 +887,19 @@ function getFnbRoomFolioCollectionsForShift(start, end) {
          OR (bo.is_paid = 0 AND (bo.table_number LIKE 'RS-%' OR bo.table_number LIKE 'Room %' OR bo.order_type = 'room' OR bo.room_service_for LIKE 'Room %')))
       AND LOWER(COALESCE(bo.payment_mode, '')) NOT IN ('cash', 'card', 'online', 'upi')
       AND (bo.status IS NULL OR bo.status NOT IN ('cancelled', 'void'))
-      AND datetime(COALESCE(bo.settled_at, bo.created_at), 'localtime') >= datetime(?)
-      AND datetime(COALESCE(bo.settled_at, bo.created_at), 'localtime') <= datetime(?)
+      AND (
+        CASE 
+          WHEN COALESCE(bo.settled_at, bo.created_at) LIKE '%Z' OR COALESCE(bo.settled_at, bo.created_at) LIKE '%T%'
+          THEN datetime(COALESCE(bo.settled_at, bo.created_at), 'localtime')
+          ELSE datetime(COALESCE(bo.settled_at, bo.created_at))
+        END >= datetime(?)
+        AND
+        CASE 
+          WHEN COALESCE(bo.settled_at, bo.created_at) LIKE '%Z' OR COALESCE(bo.settled_at, bo.created_at) LIKE '%T%'
+          THEN datetime(COALESCE(bo.settled_at, bo.created_at), 'localtime')
+          ELSE datetime(COALESCE(bo.settled_at, bo.created_at))
+        END <= datetime(?)
+      )
   `).all(start, end);
 
   const seenOrderKeys = new Set();
@@ -1160,8 +1182,26 @@ function computeFnbCashHandover(dateStr, shift, options = {}) {
     FROM restaurant_orders
     WHERE is_paid = 1
       AND (LOWER(payment_mode) = 'cash' OR (payment_mode = 'split' AND split_details_json LIKE '%cash%'))
-      AND datetime(COALESCE(settled_at, created_at), 'localtime') >= datetime(?) AND datetime(COALESCE(settled_at, created_at), 'localtime') <= datetime(?)
-    ORDER BY datetime(COALESCE(settled_at, created_at), 'localtime') ASC
+      AND (
+        CASE 
+          WHEN COALESCE(settled_at, created_at) LIKE '%Z' OR COALESCE(settled_at, created_at) LIKE '%T%'
+          THEN datetime(COALESCE(settled_at, created_at), 'localtime')
+          ELSE datetime(COALESCE(settled_at, created_at))
+        END >= datetime(?)
+        AND
+        CASE 
+          WHEN COALESCE(settled_at, created_at) LIKE '%Z' OR COALESCE(settled_at, created_at) LIKE '%T%'
+          THEN datetime(COALESCE(settled_at, created_at), 'localtime')
+          ELSE datetime(COALESCE(settled_at, created_at))
+        END <= datetime(?)
+      )
+    ORDER BY (
+      CASE 
+        WHEN COALESCE(settled_at, created_at) LIKE '%Z' OR COALESCE(settled_at, created_at) LIKE '%T%'
+        THEN datetime(COALESCE(settled_at, created_at), 'localtime')
+        ELSE datetime(COALESCE(settled_at, created_at))
+      END
+    ) ASC
   `).all(start, end);
 
   const barCashOrders = db.prepare(`
@@ -1169,8 +1209,26 @@ function computeFnbCashHandover(dateStr, shift, options = {}) {
     FROM bar_orders
     WHERE is_paid = 1
       AND (LOWER(payment_mode) = 'cash' OR (payment_mode = 'split' AND split_details_json LIKE '%cash%'))
-      AND datetime(COALESCE(settled_at, created_at), 'localtime') >= datetime(?) AND datetime(COALESCE(settled_at, created_at), 'localtime') <= datetime(?)
-    ORDER BY datetime(COALESCE(settled_at, created_at), 'localtime') ASC
+      AND (
+        CASE 
+          WHEN COALESCE(settled_at, created_at) LIKE '%Z' OR COALESCE(settled_at, created_at) LIKE '%T%'
+          THEN datetime(COALESCE(settled_at, created_at), 'localtime')
+          ELSE datetime(COALESCE(settled_at, created_at))
+        END >= datetime(?)
+        AND
+        CASE 
+          WHEN COALESCE(settled_at, created_at) LIKE '%Z' OR COALESCE(settled_at, created_at) LIKE '%T%'
+          THEN datetime(COALESCE(settled_at, created_at), 'localtime')
+          ELSE datetime(COALESCE(settled_at, created_at))
+        END <= datetime(?)
+      )
+    ORDER BY (
+      CASE 
+        WHEN COALESCE(settled_at, created_at) LIKE '%Z' OR COALESCE(settled_at, created_at) LIKE '%T%'
+        THEN datetime(COALESCE(settled_at, created_at), 'localtime')
+        ELSE datetime(COALESCE(settled_at, created_at))
+      END
+    ) ASC
   `).all(start, end);
 
   let fnbCashSales = 0;
