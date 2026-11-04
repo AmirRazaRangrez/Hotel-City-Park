@@ -7178,29 +7178,56 @@ export function printFrontOfficeCashHandover(data = {}, options = {}) {
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td style="padding: 2.5px 6px; font-weight: 800; border-right: 1px solid #000;">A. Front Office</td>
-              <td style="padding: 2.5px 6px; border-right: 1.5px solid #000;"></td>
-              <td style="padding: 2.5px 6px; font-weight: 800; border-right: 1px solid #000;">Total Cash Receipts Rs.</td>
-              <td style="padding: 2.5px 6px; text-align: right; font-weight: 850;">${toHandoverA.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            </tr>
-            <tr>
-              <td style="padding: 2px 6px; padding-left: 14px; border-right: 1px solid #000;">1) F. O. Cash Sales</td>
-              <td style="padding: 2px 6px; text-align: right; border-right: 1.5px solid #000; font-weight: 750;">${foCashSales.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              <td style="padding: 2px 6px; font-weight: 800; border-right: 1px solid #000; color: #b91c1c;">Expenses${data.expensesByCategory && data.expensesByCategory.length === 1 ? ` (${escapeHtml(data.expensesByCategory[0].category)})` : ''}</td>
-              <td style="padding: 2px 6px; text-align: right; font-weight: 850; color: #b91c1c;">${totalExpenses.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            </tr>
-            <tr>
-              <td style="padding: 2px 6px; padding-left: 14px; border-right: 1px solid #000;">2) F. O. Deposits-Advance Booking</td>
-              <td style="padding: 2px 6px; text-align: right; border-right: 1.5px solid #000; font-weight: 750;">${foDeposits.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              <td style="padding: 2px 6px; font-weight: 800; border-right: 1px solid #000; color: #dc2626;">Total Refund Rs.</td>
-              <td style="padding: 2px 6px; text-align: right; font-weight: 850; color: #dc2626;">${totalRefund.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            </tr>
-            <tr>
-              <td style="padding: 2px 6px; padding-left: 14px; border-right: 1px solid #000;">3) Other Income</td>
-              <td style="padding: 2px 6px; text-align: right; border-right: 1.5px solid #000; font-weight: 750;">${otherIncome.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              <td style="padding: 2px 6px; border-right: 1px solid #000;" colspan="2"></td>
-            </tr>
+            ${(() => {
+              const leftRows = [
+                { label: 'A. Front Office', amount: '', isHeader: true },
+                { label: '1) F. O. Cash Sales', amount: foCashSales, indent: true },
+                { label: '2) F. O. Deposits-Advance Booking', amount: foDeposits, indent: true },
+                { label: '3) Other Income', amount: otherIncome, indent: true }
+              ];
+
+              const rightRows = [
+                { label: 'Total Cash Receipts Rs.', amount: toHandoverA, isBold: true }
+              ];
+
+              if (data.expensesByCategory && data.expensesByCategory.length > 0) {
+                data.expensesByCategory.forEach(exp => {
+                  rightRows.push({
+                    label: `Expenses (${exp.category})`,
+                    amount: Number(exp.amount) || 0,
+                    color: '#b91c1c'
+                  });
+                });
+              } else {
+                rightRows.push({
+                  label: 'Expenses',
+                  amount: totalExpenses,
+                  color: '#b91c1c'
+                });
+              }
+
+              rightRows.push({
+                label: 'Total Refund Rs.',
+                amount: totalRefund,
+                color: '#dc2626'
+              });
+
+              const maxUpper = Math.max(leftRows.length, rightRows.length);
+              let upperHtml = '';
+              for (let i = 0; i < maxUpper; i++) {
+                const l = leftRows[i] || null;
+                const r = rightRows[i] || null;
+                upperHtml += `
+                  <tr style="${l && l.isHeader ? 'background: #fdfdfe;' : ''}">
+                    <td style="padding: ${l && l.isHeader ? '2.5px 6px' : '2px 6px'}; ${l && l.indent ? 'padding-left: 14px;' : ''} ${l && l.isHeader ? 'font-weight: 800;' : ''} border-right: 1px solid #000;">${l ? escapeHtml(l.label) : ''}</td>
+                    <td style="padding: 2px 6px; text-align: right; border-right: 1.5px solid #000; font-weight: 750;">${l && l.amount !== '' ? Number(l.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}</td>
+                    <td style="padding: 2px 6px; font-weight: 800; border-right: 1px solid #000; ${r && r.color ? `color: ${r.color};` : ''}">${r ? escapeHtml(r.label) : ''}</td>
+                    <td style="padding: 2px 6px; text-align: right; font-weight: 850; ${r && r.color ? `color: ${r.color};` : ''}">${r ? Number(r.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}</td>
+                  </tr>
+                `;
+              }
+              return upperHtml;
+            })()}
             <tr style="border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; background: #f8fafc;">
               <td style="padding: 3px 6px; font-weight: 900; border-right: 1px solid #000;">To Handover Rs.</td>
               <td style="padding: 3px 6px; text-align: right; font-weight: 950; border-right: 1.5px solid #000;">${toHandoverA.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>

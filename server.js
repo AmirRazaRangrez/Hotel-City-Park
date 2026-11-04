@@ -1002,7 +1002,7 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     totalExpenses += amt;
     const catName = exp.category || exp.purpose_category || 'Other';
     const isOwner = catName.toLowerCase().includes('owner') || (exp.owner_name && exp.owner_name.trim() !== '');
-    const displayCat = isOwner ? `Owner Expenses (${exp.owner_name || 'Owner'})` : catName;
+    const displayCat = isOwner ? (exp.owner_name ? `Owner: ${exp.owner_name}` : 'Owner') : catName;
     categoryTotals[displayCat] = (categoryTotals[displayCat] || 0) + amt;
     categoryDetails.push({
       ...exp,

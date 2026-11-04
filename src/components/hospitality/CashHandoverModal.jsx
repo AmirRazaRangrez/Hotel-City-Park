@@ -419,62 +419,85 @@ export default function CashHandoverModal({ isOpen, onClose, currentUser }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {/* Row 1: A. Front Office | Total Cash Receipts Rs. */}
-                        <tr style={{ background: '#fdfdfe' }}>
-                          <td style={{ padding: '6px 12px', fontWeight: 800, borderRight: '1px solid #cbd5e1', color: '#0f172a' }}>
-                            A. Front Office
-                          </td>
-                          <td style={{ padding: '6px 12px', borderRight: '1.5px solid #0f172a' }}></td>
-                          <td style={{ padding: '6px 12px', fontWeight: 800, borderRight: '1px solid #cbd5e1' }}>
-                            Total Cash Receipts Rs.
-                          </td>
-                          <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 850, color: '#0f172a' }}>
-                            ₹ {toHandoverA.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                        </tr>
+                        {(() => {
+                          const leftRows = [
+                            { label: 'A. Front Office', amount: null, isHeader: true },
+                            { label: '1) F. O. Cash Sales', amount: foCashSales, indent: true },
+                            { label: '2) F. O. Deposits-Advance Booking', amount: foDeposits, indent: true },
+                            { label: '3) Other Income', amount: otherIncome, indent: true }
+                          ];
 
-                        {/* Row 2: 1) F. O. Cash Sales | Expenses */}
-                        <tr>
-                          <td style={{ padding: '5px 12px', paddingLeft: '24px', borderRight: '1px solid #cbd5e1' }}>
-                            1) F. O. Cash Sales
-                          </td>
-                          <td style={{ padding: '5px 12px', textAlign: 'right', borderRight: '1.5px solid #0f172a', fontWeight: 700 }}>
-                            ₹ {foCashSales.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td style={{ padding: '5px 12px', fontWeight: 800, borderRight: '1px solid #cbd5e1', color: '#b91c1c' }}>
-                            Expenses{expensesByCategory.length === 1 ? ` (${expensesByCategory[0].category})` : ''}
-                          </td>
-                          <td style={{ padding: '5px 12px', textAlign: 'right', fontWeight: 800, color: '#b91c1c' }}>
-                            ₹ {totalExpenses.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                        </tr>
+                          const rightRows = [
+                            { label: 'Total Cash Receipts Rs.', amount: toHandoverA, isHeader: true, isBold: true }
+                          ];
 
-                        {/* Row 3: 2) F. O. Deposits-Advance Booking | Total Refund Rs. */}
-                        <tr>
-                          <td style={{ padding: '5px 12px', paddingLeft: '24px', borderRight: '1px solid #cbd5e1' }}>
-                            2) F. O. Deposits-Advance Booking
-                          </td>
-                          <td style={{ padding: '5px 12px', textAlign: 'right', borderRight: '1.5px solid #0f172a', fontWeight: 700 }}>
-                            ₹ {foDeposits.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td style={{ padding: '5px 12px', fontWeight: 800, borderRight: '1px solid #cbd5e1', color: '#dc2626' }}>
-                            Total Refund Rs.
-                          </td>
-                          <td style={{ padding: '5px 12px', textAlign: 'right', fontWeight: 800, color: '#dc2626' }}>
-                            ₹ {totalRefund.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                        </tr>
+                          if (expensesByCategory && expensesByCategory.length > 0) {
+                            expensesByCategory.forEach(exp => {
+                              rightRows.push({
+                                label: `Expenses (${exp.category})`,
+                                amount: exp.amount,
+                                color: '#b91c1c'
+                              });
+                            });
+                          } else {
+                            rightRows.push({
+                              label: 'Expenses',
+                              amount: totalExpenses,
+                              color: '#b91c1c'
+                            });
+                          }
 
-                        {/* Row 4: 3) Other Income | (blank) */}
-                        <tr>
-                          <td style={{ padding: '5px 12px', paddingLeft: '24px', borderRight: '1px solid #cbd5e1' }}>
-                            3) Other Income
-                          </td>
-                          <td style={{ padding: '5px 12px', textAlign: 'right', borderRight: '1.5px solid #0f172a', fontWeight: 700 }}>
-                            ₹ {otherIncome.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td style={{ padding: '5px 12px', borderRight: '1px solid #cbd5e1' }} colSpan={2}></td>
-                        </tr>
+                          rightRows.push({
+                            label: 'Total Refund Rs.',
+                            amount: totalRefund,
+                            color: '#dc2626'
+                          });
+
+                          const maxUpper = Math.max(leftRows.length, rightRows.length);
+                          const rows = [];
+                          for (let i = 0; i < maxUpper; i++) {
+                            const l = leftRows[i] || null;
+                            const r = rightRows[i] || null;
+                            rows.push(
+                              <tr key={i} style={l?.isHeader ? { background: '#fdfdfe' } : {}}>
+                                <td style={{
+                                  padding: l?.isHeader ? '6px 12px' : '5px 12px',
+                                  paddingLeft: l?.indent ? '24px' : '12px',
+                                  fontWeight: l?.isHeader ? 800 : 500,
+                                  borderRight: '1px solid #cbd5e1',
+                                  color: l?.isHeader ? '#0f172a' : 'inherit'
+                                }}>
+                                  {l?.label || ''}
+                                </td>
+                                <td style={{
+                                  padding: '5px 12px',
+                                  textAlign: 'right',
+                                  borderRight: '1.5px solid #0f172a',
+                                  fontWeight: 700
+                                }}>
+                                  {l?.amount !== null && l?.amount !== undefined ? `₹ ${Number(l.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : ''}
+                                </td>
+                                <td style={{
+                                  padding: r?.isHeader ? '6px 12px' : '5px 12px',
+                                  fontWeight: 800,
+                                  borderRight: '1px solid #cbd5e1',
+                                  color: r?.color || '#0f172a'
+                                }}>
+                                  {r?.label || ''}
+                                </td>
+                                <td style={{
+                                  padding: '5px 12px',
+                                  textAlign: 'right',
+                                  fontWeight: 800,
+                                  color: r?.color || '#0f172a'
+                                }}>
+                                  {r ? `₹ ${Number(r.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : ''}
+                                </td>
+                              </tr>
+                            );
+                          }
+                          return rows;
+                        })()}
 
                         {/* Row 5: To Handover Rs. (LEFT) | Net Handover to A/c.'s Rs. (RIGHT - EXACT EQUAL LEVEL) */}
                         <tr style={{ borderTop: '1.5px solid #0f172a', borderBottom: '1.5px solid #0f172a', background: '#f8fafc' }}>
