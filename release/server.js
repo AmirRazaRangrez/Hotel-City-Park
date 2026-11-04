@@ -935,6 +935,10 @@ function getFnbRoomFolioCollectionsForShift(start, end) {
         guest_name: meta.guest_name,
         totalRoomFnb: amt,
         fnbCashPortion: amt,
+        order_number: o.order_number,
+        order_id: o.id,
+        dept: o.dept,
+        created_at: o.created_at,
         orders: [o]
       });
     }
