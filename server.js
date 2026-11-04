@@ -800,10 +800,24 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
 });
 
 // 1c. CASH HANDOVER STATEMENTS (Front Office & F&B Cash Handover)
+function normalizeDateIso(str) {
+  if (!str) return new Date().toISOString().slice(0, 10);
+  const s = String(str).trim();
+  const dmy = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmy) {
+    return `${dmy[3]}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+  }
+  const ymd = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (ymd) {
+    return `${ymd[1]}-${String(ymd[2]).padStart(2, '0')}-${String(ymd[3]).padStart(2, '0')}`;
+  }
+  return s.slice(0, 10);
+}
+
 function getCashHandoverShiftRange(dateStr, shift, options = {}) {
-  const d = dateStr || new Date().toISOString().slice(0, 10);
+  const d = normalizeDateIso(dateStr);
   const s = String(shift || '7am-7pm').toLowerCase().replace(/\s+/g, '');
-  const toD = options.toDate || d;
+  const toD = options.toDate ? normalizeDateIso(options.toDate) : d;
   const nextDate = new Date(new Date(d).getTime() + 86400000).toISOString().slice(0, 10);
 
   if (options.fromTime && options.toTime) {
@@ -847,8 +861,8 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     WHERE p.department = 'hospitality'
       AND p.payment_type IN ('advance', 'bill_settlement', 'extension')
       AND (LOWER(p.payment_mode) = 'cash' OR (p.split_cash IS NOT NULL AND p.split_cash > 0))
-      AND datetime(p.created_at) >= datetime(?) AND datetime(p.created_at) <= datetime(?)
-    ORDER BY datetime(p.created_at) ASC
+      AND datetime(p.created_at, 'localtime') >= datetime(?) AND datetime(p.created_at, 'localtime') <= datetime(?)
+    ORDER BY datetime(p.created_at, 'localtime') ASC
   `).all(start, end);
 
   let foCashSales = 0;
@@ -864,8 +878,8 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     SELECT id, booking_number, customer_name, room_number, advance_amount, payment_mode, created_at
     FROM advance_bookings
     WHERE (LOWER(payment_mode) = 'cash' OR LOWER(payment_mode) LIKE '%cash%')
-      AND datetime(created_at) >= datetime(?) AND datetime(created_at) <= datetime(?)
-    ORDER BY datetime(created_at) ASC
+      AND datetime(created_at, 'localtime') >= datetime(?) AND datetime(created_at, 'localtime') <= datetime(?)
+    ORDER BY datetime(created_at, 'localtime') ASC
   `).all(start, end);
 
   let foDeposits = 0;
@@ -878,7 +892,7 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     FROM payments p
     WHERE p.payment_type = 'advance_booking'
       AND (LOWER(p.payment_mode) = 'cash' OR (p.split_cash IS NOT NULL AND p.split_cash > 0))
-      AND datetime(p.created_at) >= datetime(?) AND datetime(p.created_at) <= datetime(?)
+      AND datetime(p.created_at, 'localtime') >= datetime(?) AND datetime(p.created_at, 'localtime') <= datetime(?)
   `).all(start, end);
 
   paymentDepositRows.forEach(p => {
@@ -896,8 +910,8 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     FROM booking_extra_expenses be
     LEFT JOIN bookings b ON be.booking_id = b.id
     LEFT JOIN rooms r ON be.room_id = r.id
-    WHERE datetime(be.created_at) >= datetime(?) AND datetime(be.created_at) <= datetime(?)
-    ORDER BY datetime(be.created_at) ASC
+    WHERE datetime(be.created_at, 'localtime') >= datetime(?) AND datetime(be.created_at, 'localtime') <= datetime(?)
+    ORDER BY datetime(be.created_at, 'localtime') ASC
   `).all(start, end);
 
   let otherIncome = 0;
@@ -913,7 +927,7 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     LEFT JOIN guests g ON b.guest_id = g.id
     WHERE b.actual_checkout_time IS NOT NULL
       AND (LOWER(b.final_settlement_mode) = 'cash' OR (b.split_cash IS NOT NULL AND b.split_cash > 0))
-      AND datetime(b.actual_checkout_time) >= datetime(?) AND datetime(b.actual_checkout_time) <= datetime(?)
+      AND datetime(b.actual_checkout_time, 'localtime') >= datetime(?) AND datetime(b.actual_checkout_time, 'localtime') <= datetime(?)
   `).all(start, end);
 
   let fbCashCollected = 0;
@@ -960,7 +974,7 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     LEFT JOIN guests g ON b.guest_id = g.id
     WHERE p.payment_type = 'refund'
       AND (LOWER(p.payment_mode) = 'cash' OR (p.split_cash IS NOT NULL AND p.split_cash > 0))
-      AND datetime(p.created_at) >= datetime(?) AND datetime(p.created_at) <= datetime(?)
+      AND datetime(p.created_at, 'localtime') >= datetime(?) AND datetime(p.created_at, 'localtime') <= datetime(?)
   `).all(start, end);
 
   let totalRefund = 0;
@@ -975,8 +989,8 @@ function computeFoCashHandover(dateStr, shift, options = {}) {
     FROM expenses
     WHERE (category != 'refund' OR category IS NULL)
       AND (LOWER(payment_mode) = 'cash' OR payment_mode IS NULL OR payment_mode = '')
-      AND datetime(created_at) >= datetime(?) AND datetime(created_at) <= datetime(?)
-    ORDER BY datetime(created_at) ASC
+      AND datetime(created_at, 'localtime') >= datetime(?) AND datetime(created_at, 'localtime') <= datetime(?)
+    ORDER BY datetime(created_at, 'localtime') ASC
   `).all(start, end);
 
   let totalExpenses = 0;
@@ -1048,8 +1062,8 @@ function computeFnbCashHandover(dateStr, shift, options = {}) {
     FROM restaurant_orders
     WHERE is_paid = 1
       AND (LOWER(payment_mode) = 'cash' OR (payment_mode = 'split' AND split_details_json LIKE '%cash%'))
-      AND datetime(COALESCE(settled_at, created_at)) >= datetime(?) AND datetime(COALESCE(settled_at, created_at)) <= datetime(?)
-    ORDER BY datetime(COALESCE(settled_at, created_at)) ASC
+      AND datetime(COALESCE(settled_at, created_at), 'localtime') >= datetime(?) AND datetime(COALESCE(settled_at, created_at), 'localtime') <= datetime(?)
+    ORDER BY datetime(COALESCE(settled_at, created_at), 'localtime') ASC
   `).all(start, end);
 
   const barCashOrders = db.prepare(`
@@ -1057,8 +1071,8 @@ function computeFnbCashHandover(dateStr, shift, options = {}) {
     FROM bar_orders
     WHERE is_paid = 1
       AND (LOWER(payment_mode) = 'cash' OR (payment_mode = 'split' AND split_details_json LIKE '%cash%'))
-      AND datetime(COALESCE(settled_at, created_at)) >= datetime(?) AND datetime(COALESCE(settled_at, created_at)) <= datetime(?)
-    ORDER BY datetime(COALESCE(settled_at, created_at)) ASC
+      AND datetime(COALESCE(settled_at, created_at), 'localtime') >= datetime(?) AND datetime(COALESCE(settled_at, created_at), 'localtime') <= datetime(?)
+    ORDER BY datetime(COALESCE(settled_at, created_at), 'localtime') ASC
   `).all(start, end);
 
   let fnbCashSales = 0;
@@ -1088,7 +1102,7 @@ function computeFnbCashHandover(dateStr, shift, options = {}) {
     LEFT JOIN guests g ON b.guest_id = g.id
     WHERE b.actual_checkout_time IS NOT NULL
       AND (LOWER(b.final_settlement_mode) = 'cash' OR (b.split_cash IS NOT NULL AND b.split_cash > 0))
-      AND datetime(b.actual_checkout_time) >= datetime(?) AND datetime(b.actual_checkout_time) <= datetime(?)
+      AND datetime(b.actual_checkout_time, 'localtime') >= datetime(?) AND datetime(b.actual_checkout_time, 'localtime') <= datetime(?)
   `).all(start, end);
 
   let fbFromReception = 0;
@@ -1179,8 +1193,8 @@ app.get('/api/hospitality/cash-handover-history', (req, res) => {
     const defaultEnd = today.toISOString().slice(0, 10);
     const defaultStart = new Date(today.getTime() - 6 * 86400000).toISOString().slice(0, 10);
 
-    const startDate = (req.query.startDate || defaultStart).trim();
-    const endDate = (req.query.endDate || defaultEnd).trim();
+    const startDate = normalizeDateIso(req.query.startDate || defaultStart);
+    const endDate = normalizeDateIso(req.query.endDate || defaultEnd);
     const filterShift = (req.query.shift || 'all').trim();
 
     const shiftsToQuery = filterShift === 'all'
