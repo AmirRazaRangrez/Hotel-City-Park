@@ -381,8 +381,16 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
           ((summary.stayCalcNow?.extensionCharge || 0) > 0))
       );
 
-      // User rule: till declared time pass => Checkout @ Declared Time; if passed => Checkout Right Now (due according to slabs, entire day)
-      const activeStayCalc = hasOverstayed
+      const isCheckedOutStay = Boolean(
+        raw.is_checked_out ||
+        r.booking_status === 'checked_out' ||
+        r.status === 'checked_out' ||
+        (r.status && r.status !== 'occupied') ||
+        r.actual_checkout_time
+      );
+
+      // User rule: till declared time pass => Checkout @ Declared Time; if passed or already checked out / early checkout => Checkout Right Now (due according to slabs, entire day)
+      const activeStayCalc = (hasOverstayed || isCheckedOutStay || summary.isEarlyCheckout)
         ? (summary.stayCalcNow || summary)
         : (summary.stayCalcDeclared || summary);
 
@@ -480,6 +488,8 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
         children: r.children !== undefined && r.children !== null ? r.children : 0,
         extraBeds: r.extra_beds !== undefined && r.extra_beds !== null ? r.extra_beds : (r.extraBeds || 0),
         extraBedCharge: r.extra_bed_charge !== undefined && r.extra_bed_charge !== null ? r.extra_bed_charge : (r.extraBedCharge || 0),
+        baseRoomTariff: Number(activeStayCalc.baseRoomTariff ?? summary.baseRoomTariff ?? (r.room_rate || 2000)),
+        breakfastCost: Number(activeStayCalc.breakfastCost ?? summary.breakfastCost ?? 0),
         roomCharge,
         grossTariff,
         roomGrossTariff,
@@ -1453,7 +1463,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
       expensesTotal: Number(folioData.expensesTotal || 0),
       foodPending: fnbPendingTotal,
       fnbPendingTotal,
-      roomTariffNet: Number(summary.roomCharge ?? folioData.roomCharge ?? r.total_room_charge ?? 0),
+      roomTariffNet: Number(summary.roomGrossTariff ?? summary.grossTariff ?? folioData.roomGrossTariff ?? folioData.grossTariff ?? r.room_rate ?? r.price ?? 0),
       netCharge: Number(summary.roomCharge ?? folioData.roomCharge ?? r.total_room_charge ?? 0),
       discountPct: Number(summary.discountPct ?? folioData.discountPct ?? r.discount_pct ?? 0),
       discountAmount: Number(summary.discountAmount ?? folioData.discountAmount ?? r.discount_amount ?? 0),
@@ -4355,7 +4365,10 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                 const effectiveGstPct = Number(folioData.stayCalcNow?.gstPct ?? folioData.room?.gst_pct ?? 5);
 
                 const dailyBaseRate = Number(folioData.stayCalcNow?.dailyBaseRate ?? folioData.room?.price ?? folioData.room?.room_rate ?? 0);
-                const extraBedDaily = Number(folioData.stayCalcNow?.extraMattressDaily ?? folioData.extraBedCharge ?? 0);
+                const extraBedDaily = Number(
+                  folioData.stayCalcNow?.extraMattressDaily ??
+                  (folioData.extraBedCharge && decDays > 0 ? Math.round(folioData.extraBedCharge / decDays) : (folioData.extraBedCharge || 0))
+                );
                 const extraBedsCount = Number(folioData.stayCalcNow?.extraMattressBeds ?? folioData.extraBeds ?? 0);
 
                 const hasBreakfast = folioData.mealPlan === 'with_breakfast' || folioData.room?.meal_plan === 'with_breakfast' || (folioData.stayCalcNow?.breakfastCost > 0);
@@ -5362,6 +5375,8 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                         settleAmt: 0,
                         refundAmt: folioData?.refund_amount || 0,
                         settled_at: folioData?.actual_checkout_time || new Date(),
+                        isReprint: true,
+                        isCheckoutSettlement: false,
                         discount_amount: folioData?.discount_amount || folioData?.room?.discount_amount || folioData?.booking?.discount_amount || 0,
                         discount_pct: folioData?.discount_pct || folioData?.room?.discount_pct || folioData?.booking?.discount_pct || 0,
                         discount: folioData?.discount_amount || folioData?.room?.discount_amount || folioData?.booking?.discount_amount || 0,

@@ -606,7 +606,8 @@ app.get('/api/hospitality/cleaner-history', (req, res) => {
 
 app.get('/api/hospitality/occupancy-chart', (req, res) => {
   try {
-    const queryDate = req.query.date ? String(req.query.date).trim() : null;
+    const rawDate = req.query.date ? String(req.query.date).trim() : null;
+    const queryDate = (rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate)) ? rawDate : null;
     const todayStr = new Date().toLocaleDateString('en-CA');
     const isTodayOrFuture = !queryDate || queryDate >= todayStr;
     let rooms;
@@ -2811,7 +2812,11 @@ app.post('/api/checkin', requireAuth, requireRole('manager', 'hospitality'), (re
     const guestId = guestResult.lastInsertRowid;
 
     // 2. Calculate Pricing & Discount (OTA Manual Tariff or Standard calculation)
-    const combinedBaseRate = allRooms.reduce((sum, r) => sum + r.price, 0);
+    const isSinglePaxCheckin = ((parseInt(adults_male) || 0) + (parseInt(adults_female) || 0)) <= 1;
+    const combinedBaseRate = allRooms.reduce((sum, r) => {
+      const singleP = isSinglePaxCheckin && Number(r.price_single) > 0 ? Number(r.price_single) : 0;
+      return sum + (singleP > 0 ? singleP : Number(r.price || 0));
+    }, 0);
     const manualOtaAmount = (ota_bill_amount !== undefined && ota_bill_amount !== null && ota_bill_amount !== '') ? parseFloat(ota_bill_amount) : null;
     
     const cleanBookingSource = (booking_source || 'Walk-in').trim();
@@ -3151,9 +3156,10 @@ app.post('/api/checkin', requireAuth, requireRole('manager', 'hospitality'), (re
         advance_card_surcharge, advance_upi_tax,
         ota_booked_adults, ota_booked_children, ota_booked_extra_beds, extra_adults, extra_children,
         extra_rooms_charge, extra_breakfast_charge, extra_meal_plan,
+        rate_type,
         company_name, gst_number, company_address, tax_type, is_igst,
         advance_booking_id, prebooked_amount, prebooked_receipt_no, prebooked_mode, prebooked_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const bookingIds = [];
@@ -3163,7 +3169,7 @@ app.post('/api/checkin', requireAuth, requireRole('manager', 'hospitality'), (re
     let remainingDiscAmt = discountAmount;
 
     allRooms.forEach((r, idx) => {
-      const rBase = r.price;
+      const rBase = (isSinglePaxCheckin && Number(r.price_single) > 0) ? Number(r.price_single) : r.price;
       const isLast = idx === allRooms.length - 1;
       const fraction = rBase / (combinedBaseRate || 1);
       const rDiscAmt = isLast ? remainingDiscAmt : Math.round(discountAmount * fraction);
@@ -3232,6 +3238,7 @@ app.post('/api/checkin', requireAuth, requireRole('manager', 'hospitality'), (re
         idx === 0 ? extra_rooms_charge : 0,
         idx === 0 ? extra_breakfast_charge : 0,
         idx === 0 ? extra_meal_plan : null,
+        checkinRateType,
         cleanCompanyName,
         cleanGstNumber,
         cleanCompanyAddress,
@@ -3583,6 +3590,19 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
 
     if (!booking) return res.status(404).json({ success: false, error: 'Booking not found' });
 
+    const inTime = booking.checkin_time ? String(booking.checkin_time).trim() : null;
+    const vNo = booking.voucher_number ? String(booking.voucher_number).trim() : null;
+    const linkedGroupBookings = (inTime && booking.guest_id)
+      ? db.prepare(`
+          SELECT b.id as booking_id, b.room_id, r.room_number, r.room_type, r.price as base_room_price, b.room_rate, b.total_room_charge
+          FROM bookings b
+          JOIN rooms r ON b.room_id = r.id
+          WHERE (b.guest_id = ? AND b.checkin_time = ?)
+             OR (? IS NOT NULL AND ? != '' AND b.voucher_number = ?)
+          ORDER BY CAST(r.room_number AS INTEGER) ASC, r.room_number ASC
+        `).all(booking.guest_id, inTime, vNo, vNo, vNo)
+      : [];
+
     let memberDocs = [];
     try {
       memberDocs = booking.member_documents_json ? JSON.parse(booking.member_documents_json) : [];
@@ -3658,7 +3678,10 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
       payments: payments || [],
       restaurantOrders: restaurantOrders || [],
       barOrders: barOrders || [],
-      orders: [...restaurantOrders.map(o => ({ ...o, dept: 'Restaurant' })), ...barOrders.map(o => ({ ...o, dept: 'Bar Lounge' }))]
+      orders: [...restaurantOrders.map(o => ({ ...o, dept: 'Restaurant' })), ...barOrders.map(o => ({ ...o, dept: 'Bar Lounge' }))],
+      all_group_rooms: linkedGroupBookings.map(gb => ({ room_number: gb.room_number, room_type: gb.room_type, room_id: gb.room_id })),
+      all_group_room_numbers: linkedGroupBookings.map(gb => gb.room_number),
+      group_room_details: linkedGroupBookings
     };
 
     res.json({
@@ -4025,7 +4048,10 @@ function calculateActualStayAndExtension({
   const totalAdults = Math.max(1, (Number(adults_male) || 0) + (Number(adults_female) || 0));
   const bfRate = room.breakfast_price !== undefined ? Number(room.breakfast_price) : 250;
   const dailyMealFee = meal_plan === 'with_breakfast' ? (totalAdults * bfRate) : 0;
-  const dailyBedFee = Number(extra_bed_charge) || 0;
+  let dailyBedFee = Number(extra_bed_charge) || 0;
+  if (expectedNights > 1 && dailyBedFee >= expectedNights * 300) {
+    dailyBedFee = Math.round(dailyBedFee / expectedNights);
+  }
 
   // Recalculated total room charge for actual stay
   let recalculatedRoomCharge = (chargedDays * unitDailyRate) + extensionCharge + (chargedDays * dailyMealFee) + (chargedDays * dailyBedFee);
@@ -4373,6 +4399,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
         b.room_rate,
         b.discount_pct,
         b.discount_amount,
+        b.checkout_discount_amount,
         b.total_room_charge,
         b.split_cash,
         b.split_card,
@@ -4386,6 +4413,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
         b.btc_company_id,
         b.btc_company_name,
         b.btc_approval_ref,
+        b.rate_type,
         b.is_prepaid,
         b.is_early_checkin,
         b.original_checkin_time,
@@ -4492,6 +4520,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
           b.btc_company_id,
           b.btc_company_name,
           b.btc_approval_ref,
+          b.rate_type,
           b.is_prepaid,
           b.is_early_checkin,
           b.original_checkin_time,
@@ -4603,10 +4632,12 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
         r.room_number,
         r.room_type,
         r.price as base_room_price,
+        r.price_single,
         b.id as booking_id,
         b.room_rate,
         b.discount_pct,
         b.discount_amount,
+        b.checkout_discount_amount,
         b.total_room_charge,
         b.total_paid as initial_paid,
         b.split_cash,
@@ -4630,6 +4661,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
         b.checked_in_by,
         b.checked_out_by,
         b.ota_bill_amount,
+        b.rate_type,
         b.is_prepaid,
         b.is_early_checkin,
         b.original_checkin_time,
@@ -4637,26 +4669,40 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
         b.early_checkin_charge,
         b.early_checkin_gst,
         b.checkin_time,
-        b.approx_checkout_time
+        b.approx_checkout_time,
+        b.actual_checkout_time,
+        b.status as booking_status
       FROM rooms r 
       JOIN bookings b ON (r.current_booking_id = b.id OR r.id = b.room_id) 
-      WHERE b.guest_id = ? AND (b.id = ? OR (b.status = 'active' AND b.checkin_time = ?))
+      WHERE (b.guest_id = ? AND (b.id = ? OR (b.checkin_time IS NOT NULL AND b.checkin_time = ?)))
+         OR (? IS NOT NULL AND ? != '' AND b.voucher_number = ?)
       ORDER BY CAST(r.room_number AS INTEGER) ASC, r.room_number ASC
-    `).all(room.guest_id, room.booking_id, room.checkin_time);
+    `).all(room.guest_id, room.booking_id, room.checkin_time, room.voucher_number, room.voucher_number, room.voucher_number);
 
     const groupRoomIds = groupBookings.map(gb => gb.room_id);
     const isCombined = groupBookings.length > 1;
 
     // Combined financial & occupancy aggregates across all group rooms
+    const totalGroupPax = groupBookings.reduce((sum, gb) => sum + (Number(gb.adults_male) || 0) + (Number(gb.adults_female) || 0), 0);
     const combinedBaseRate = groupBookings.reduce((sum, gb) => {
+      const isSinglePax = !isCombined && totalGroupPax <= 1;
+      const singleRate = isSinglePax && Number(gb.price_single) > 0 ? Number(gb.price_single) : 0;
       const rRate = Number(gb.room_rate || 0);
-      const safeRate = (rRate > 0 && rRate < 50000) ? rRate : (Number(gb.base_room_price) || 2400);
+      const safeRate = (rRate > 0 && rRate < 50000)
+        ? (singleRate > 0 && rRate === Number(gb.base_room_price) ? singleRate : rRate)
+        : (singleRate > 0 ? singleRate : (Number(gb.base_room_price) || 2400));
       return sum + safeRate;
     }, 0);
     const combinedTotalRoomCharge = groupBookings.reduce((sum, gb) => sum + (gb.total_room_charge || 0), 0);
     const combinedInitialPaid = groupBookings.reduce((sum, gb) => sum + (gb.initial_paid || 0), 0);
     const combinedDiscountAmount = groupBookings.reduce((sum, gb) => sum + (gb.discount_amount || 0), 0);
-    const combinedDiscountPct = groupBookings.length === 1 ? (groupBookings[0].discount_pct || 0) : 0;
+    const firstDiscPct = Number(groupBookings[0]?.discount_pct || 0);
+    const allSameDiscPct = groupBookings.length > 0 && groupBookings.every(gb => Number(gb.discount_pct || 0) === firstDiscPct);
+    const combinedDiscountPct = allSameDiscPct
+      ? firstDiscPct
+      : (combinedBaseRate > 0 && combinedDiscountAmount > 0
+          ? Math.round((combinedDiscountAmount / combinedBaseRate) * 100)
+          : (groupBookings.length === 1 ? (groupBookings[0].discount_pct || 0) : 0));
     const combinedSplitCash = groupBookings.reduce((sum, gb) => sum + (gb.split_cash || 0), 0);
     const combinedSplitCard = groupBookings.reduce((sum, gb) => sum + (gb.split_card || 0), 0);
     const combinedSplitOnline = groupBookings.reduce((sum, gb) => sum + (gb.split_online || 0), 0);
@@ -4683,6 +4729,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     room.room_rate = combinedBaseRate;
     room.discount_amount = combinedDiscountAmount;
     room.discount_pct = combinedDiscountPct;
+    room.checkout_discount_amount = groupBookings.reduce((sum, gb) => sum + (gb.checkout_discount_amount || 0), 0);
     room.total_room_charge = combinedTotalRoomCharge;
     room.initial_paid = combinedInitialPaid;
     room.split_cash = combinedSplitCash;
@@ -4695,6 +4742,15 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     room.adults_other = isCombined ? groupAdultsOther : (room.adults_other || 0);
     room.children = isCombined ? groupChildren : (room.children || 0);
     room.extra_beds = isCombined ? groupExtraBeds : (room.extra_beds || 0);
+    room.extra_bed_charge = isCombined ? groupExtraBedCharge : (room.extra_bed_charge || 0);
+    if (!room.actual_checkout_time) {
+      const anyActual = groupBookings.find(gb => gb.actual_checkout_time)?.actual_checkout_time;
+      if (anyActual) room.actual_checkout_time = anyActual;
+    }
+    if (!room.booking_status) {
+      const anyStatus = groupBookings.find(gb => gb.booking_status)?.booking_status;
+      if (anyStatus) room.booking_status = anyStatus;
+    }
     room.ota_booked_adults = isCombined ? (groupOtaBookedAdults || room.ota_booked_adults) : room.ota_booked_adults;
     room.ota_booked_children = isCombined ? (groupOtaBookedChildren || room.ota_booked_children) : room.ota_booked_children;
     room.ota_booked_extra_beds = isCombined ? (groupOtaBookedExtraBeds || room.ota_booked_extra_beds) : room.ota_booked_extra_beds;
@@ -4898,7 +4954,10 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     const isOta = String(room.booking_source || '').toUpperCase() === 'OTA';
     const isOtaPayAtHotel = isOta && (
       room.rate_type === 'pay_at_hotel' ||
-      String(room.rate_type || '').toLowerCase().includes('hotel')
+      String(room.rate_type || '').toLowerCase().includes('hotel') ||
+      parseInt(room.is_prepaid) === 0 ||
+      room.is_prepaid === false ||
+      room.is_prepaid === '0'
     );
     const isOtaPrepaid = isOta && !isOtaPayAtHotel && (
       parseInt(room.is_prepaid) === 1 ||
@@ -4912,7 +4971,14 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     const hotelExtrasCharge = groupExtraBedCharge + groupExtraRoomsCharge + groupExtraBreakfastCharge + (isOta ? groupEarlyCheckinCharge : 0);
 
     // Dynamic Early Checkout Recalculation (enforces 1-day min, calculates extra hours via room extension rates)
-    let stayCalc = { isEarlyCheckout: false, recalculatedRoomCharge: combinedTotalRoomCharge, extensionCharge: 0, chargedDays: 1, extraHours: 0 };
+    const expectedStayNights = (room.approx_checkout_time && room.checkin_time)
+      ? Math.max(1, Math.round((new Date(room.approx_checkout_time) - new Date(room.checkin_time)) / (1000 * 60 * 60 * 24)))
+      : (room.stay_nights || 1);
+    const dailyExtraBedRate = groupExtraBeds > 0
+      ? (expectedStayNights > 0 ? Math.round(groupExtraBedCharge / expectedStayNights) : groupExtraBedCharge)
+      : 0;
+
+    let stayCalc = { isEarlyCheckout: false, recalculatedRoomCharge: combinedTotalRoomCharge, extensionCharge: 0, chargedDays: 1, extraHours: 0, expectedNights: expectedStayNights };
     if (!isOtaPrepaid) {
       stayCalc = calculateActualStayAndExtension({
         checkin_time: room.checkin_time,
@@ -4922,7 +4988,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
         daily_rate: combinedBaseRate,
         total_room_charge: combinedTotalRoomCharge,
         meal_plan: room.meal_plan,
-        extra_bed_charge: groupExtraBedCharge,
+        extra_bed_charge: dailyExtraBedRate,
         adults_male: groupAdultsMale,
         adults_female: groupAdultsFemale
       });
@@ -4945,7 +5011,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
       nowBaseRoomTariff = Math.round((nowDays * combinedBaseRate) / (1 + effectiveGstPct / 100));
       nowBaseRoomTariffGst = (nowDays * combinedBaseRate) - nowBaseRoomTariff;
     }
-    const nowExtraMattressCost = nowDays * groupExtraBedCharge;
+    const nowExtraMattressCost = nowDays * dailyExtraBedRate;
     const nowExtraMattressGst = Math.round((nowExtraMattressCost * effectiveGstPct) / 100);
     const nowBreakfastCost = nowDays * breakfastPax * breakfastDailyRate;
     const nowBreakfastGst = Math.round((nowBreakfastCost * effectiveGstPct) / 100);
@@ -4981,8 +5047,8 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
       const otaBase = isOtaPayAtHotel ? otaBillAmount : 0;
       finalNowBaseRoomTariff = Math.round((otaBase * 0.95) * 100) / 100;
       finalNowBaseRoomTariffGst = Math.max(0, Number((otaBase - finalNowBaseRoomTariff).toFixed(2)));
-      finalNowExtraMattressCost = Math.round((groupExtraBedCharge * 0.95) * 100) / 100;
-      finalNowExtraMattressGst = Math.max(0, Number((groupExtraBedCharge - finalNowExtraMattressCost).toFixed(2)));
+      finalNowExtraMattressCost = Math.round((nowExtraMattressCost * 0.95) * 100) / 100;
+      finalNowExtraMattressGst = Math.max(0, Number((nowExtraMattressCost - finalNowExtraMattressCost).toFixed(2)));
     }
 
     // Itemized Declared (Expected Departure Time)
@@ -4993,7 +5059,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
       decBaseRoomTariff = Math.round((decDays * combinedBaseRate) / (1 + effectiveGstPct / 100));
       decBaseRoomTariffGst = (decDays * combinedBaseRate) - decBaseRoomTariff;
     }
-    const decExtraMattressCost = decDays * groupExtraBedCharge;
+    const decExtraMattressCost = decDays * dailyExtraBedRate;
     const decExtraMattressGst = Math.round((decExtraMattressCost * effectiveGstPct) / 100);
     const decBreakfastCost = decDays * breakfastPax * breakfastDailyRate;
     const decBreakfastGst = Math.round((decBreakfastCost * effectiveGstPct) / 100);
@@ -5018,14 +5084,16 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
           : decRoomChargeCalc);
 
     // Primary running totals reflect DECLARED checkout time till declared checkout passes;
-    // once declared checkout time has passed, reflect right now calculation (with extension slabs/full day)
+    // once declared checkout time has passed, or when checking out early/completed, reflect actual stay
     const dExpected = room.approx_checkout_time ? new Date(room.approx_checkout_time) : null;
     const isPastDeclaredTime = Boolean(dExpected && !isNaN(dExpected.getTime()) && Date.now() > dExpected.getTime());
     const hasOverstayed = isPastDeclaredTime || (nowDays > decDays) || (nowExtensionCharge > 0 && nowDays >= decDays);
-    const targetRoomCharge = hasOverstayed ? Math.max(decRoomCharge, nowRoomCharge) : decRoomCharge;
-    const targetDiscountAmount = hasOverstayed ? nowDiscountAmount : decDiscountAmount;
-    const targetPreTaxRoom = hasOverstayed ? nowRoomPreTax : decRoomPreTax;
-    const targetGrossTariff = hasOverstayed ? nowPreTaxGross : decPreTaxGross;
+    const isCompletedStay = Boolean(room.booking_status === 'checked_out' || room.status === 'checked_out' || (room.status && room.status !== 'occupied') || room.actual_checkout_time);
+    const shouldUseNowTotals = hasOverstayed || isCompletedStay || Boolean(stayCalc.isEarlyCheckout);
+    const targetRoomCharge = shouldUseNowTotals ? Math.max(isCompletedStay ? 0 : decRoomCharge, nowRoomCharge) : decRoomCharge;
+    const targetDiscountAmount = shouldUseNowTotals ? nowDiscountAmount : decDiscountAmount;
+    const targetPreTaxRoom = shouldUseNowTotals ? nowRoomPreTax : decRoomPreTax;
+    const targetGrossTariff = shouldUseNowTotals ? nowPreTaxGross : decPreTaxGross;
 
     // Running totals tailored by booking source & prepaid status
     let effectiveRoomCharge = targetRoomCharge;
@@ -5150,6 +5218,11 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
                 discountPct: combinedDiscountPct,
                 roomCharge: effectiveRoomCharge,
                 hotelExtrasCharge,
+                extraBedCharge: shouldUseNowTotals ? nowExtraMattressCost : groupExtraBedCharge,
+                extraMattressCost: shouldUseNowTotals ? nowExtraMattressCost : decExtraMattressCost,
+                extraMattressDaily: dailyExtraBedRate,
+                extraBeds: groupExtraBeds,
+                totalExtraBedCharge: groupExtraBedCharge,
                 earlyCheckinCharge: groupEarlyCheckinCharge,
                 earlyCheckinGst: groupEarlyCheckinGst,
                 otaBillAmount,
@@ -5195,7 +5268,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
                   extraMattressGst: finalNowExtraMattressGst,
                   extraMattressTotal: finalNowExtraMattressCost + finalNowExtraMattressGst,
                   extraMattressBeds: groupExtraBeds,
-                  extraMattressDaily: groupExtraBedCharge,
+                  extraMattressDaily: dailyExtraBedRate,
                   breakfastCost: nowBreakfastCost,
                   breakfastGst: nowBreakfastGst,
                   breakfastTotal: nowBreakfastCost + nowBreakfastGst,
@@ -5233,7 +5306,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
                   extraMattressGst: decExtraMattressGst,
                   extraMattressTotal: decExtraMattressCost + decExtraMattressGst,
                   extraMattressBeds: groupExtraBeds,
-                  extraMattressDaily: groupExtraBedCharge,
+                  extraMattressDaily: dailyExtraBedRate,
                   breakfastCost: decBreakfastCost,
                   breakfastGst: decBreakfastGst,
                   breakfastTotal: decBreakfastCost + decBreakfastGst,
@@ -5894,6 +5967,8 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
       console.warn('[Supabase] Pre-checkout cloud charge sync notice:', syncErr.message);
     }
 
+    let currentGroupRoomCharge = 0;
+
     const transaction = db.transaction(() => {
     const { id } = req.params;
     const b = req.body || {};
@@ -5932,6 +6007,8 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
 
     const primaryBooking = db.prepare('SELECT b.*, g.name as guest_name, g.mobile FROM bookings b JOIN guests g ON b.guest_id = g.id WHERE b.id = ?').get(room.current_booking_id);
     if (!primaryBooking) throw new Error('Booking not found');
+
+    const checkinDiscountAmt = parseFloat(primaryBooking.discount_amount) || 0;
 
     const isOtaPrepaidInitial = (primaryBooking.booking_source || '').toUpperCase() === 'OTA' && (primaryBooking.is_prepaid === 1 || primaryBooking.is_prepaid === '1' || primaryBooking.rate_type === 'prepaid');
     const defaultCheckoutMode = isOtaPrepaidInitial && computedSettle === 0 ? 'prepaid' : (computedSettle > 0 ? 'split' : 'cash');
@@ -6027,7 +6104,7 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
       return sum + (b ? (b.total_room_charge || 0) : (gb.price || 0));
     }, 0);
 
-    let currentGroupRoomCharge = totalGroupBookedCharge;
+    currentGroupRoomCharge = totalGroupBookedCharge;
     if (finalRoomCharge !== null && !isNaN(finalRoomCharge) && finalRoomCharge > 0) {
       const roomGstRow = db.prepare("SELECT value FROM system_settings WHERE key = 'room_gst_pct'").get();
       const fallbackGstPct = roomGstRow ? (parseFloat(roomGstRow.value) || 0) : 5;
@@ -6138,14 +6215,7 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
                 ? 'pending_from_company' 
                 : ((primaryBooking.total_paid || 0) >= (bRoomCharge || primaryBooking.total_room_charge || 0) ? 'settled' : 'pending')));
 
-      const existingDiscountAmt = parseFloat(primaryBooking.discount_amount) || 0;
-      const aggregateDiscountAmt = checkout_discount_amt > 0
-        ? (existingDiscountAmt + checkout_discount_amt)
-        : existingDiscountAmt;
       const baseStayTariff = parseFloat(primaryBooking.total_room_charge) || parseFloat(primaryBooking.room_rate) || 0;
-      const aggregateDiscountPct = (baseStayTariff > 0 && aggregateDiscountAmt > 0)
-        ? Math.round((aggregateDiscountAmt / baseStayTariff) * 100)
-        : (checkout_discount_pct > 0 ? checkout_discount_pct : (parseFloat(primaryBooking.discount_pct) || 0));
 
       db.prepare(`
         UPDATE bookings 
@@ -6159,8 +6229,7 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
           tax_type = COALESCE(?, tax_type),
           is_igst = COALESCE(?, is_igst),
           total_room_charge = COALESCE(?, total_room_charge),
-          discount_pct = CASE WHEN ? > 0 THEN ? ELSE discount_pct END,
-          discount_amount = CASE WHEN ? > 0 THEN ? ELSE discount_amount END,
+          checkout_discount_amount = ?,
           total_paid = total_paid + ? - ?,
           payment_status = ?,
           final_settlement_payment = ?,
@@ -6189,8 +6258,7 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
         checkoutTaxType,
         checkoutIsIgstVal,
         bRoomCharge,
-        aggregateDiscountPct, aggregateDiscountPct,
-        aggregateDiscountAmt, aggregateDiscountAmt,
+        idx === 0 ? checkout_discount_amt : 0,
         bSettle,
         bRefund,
         updatedPaymentStatus,
@@ -6379,6 +6447,14 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
       tax_type: checkoutTaxType || primaryBooking.tax_type,
       isIgst: (checkoutIsIgstVal !== null ? checkoutIsIgstVal : primaryBooking.is_igst) === 1,
       is_igst: checkoutIsIgstVal !== null ? checkoutIsIgstVal : primaryBooking.is_igst,
+      roomCharge: currentGroupRoomCharge,
+      room_charge: currentGroupRoomCharge,
+      checkout_discount_amt: checkout_discount_amt,
+      checkoutDiscountAmount: checkout_discount_amt,
+      checkout_discount_amount: checkout_discount_amt,
+      checkin_discount_amt: checkinDiscountAmt,
+      discount_amount: checkinDiscountAmt,
+      discount: checkout_discount_amt > 0 ? checkout_discount_amt : checkinDiscountAmt,
       corporateDetails: {
         companyName: checkoutCompanyName || primaryBooking.company_name,
         gstNumber: checkoutGstNumber || primaryBooking.gst_number,
@@ -6482,7 +6558,9 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
         refundAmount: result.refund_amount || 0,
         total: result.netSettle || 0,
         grandTotal: result.netSettle || 0,
-        roomCharge: currentGroupRoomCharge || 0,
+        roomCharge: result.roomCharge || currentGroupRoomCharge || 0,
+        subtotal: result.roomCharge || currentGroupRoomCharge || 0,
+        discount: result.discountAmount || result.discount_amount || primaryBooking.discount_amount || 0,
         payments: formattedPayments
       };
 
@@ -11250,7 +11328,15 @@ app.post(['/api/save-invoice-pdf', '/api/auto-save-receipt'], async (req, res) =
         ? pdfBase64.split(';base64,').pop()
         : pdfBase64.replace(/^data:[^,]+,/, '');
       const buffer = Buffer.from(cleanBase64, 'base64');
-      fs.writeFileSync(targetPath, buffer);
+      if (buffer.length > 500 && buffer.slice(0, 5).toString().startsWith('%PDF')) {
+        fs.writeFileSync(targetPath, buffer);
+      } else if (htmlContent) {
+        console.warn(`[AutoSave] Received invalid/empty PDF buffer (${buffer.length} bytes) for ${safeFilename}. Saving HTML fallback.`);
+        const htmlPath = path.join(targetDir, `${baseName}.html`);
+        fs.writeFileSync(htmlPath, htmlContent, 'utf8');
+      } else {
+        return res.status(400).json({ success: false, error: 'Generated PDF was invalid or blank' });
+      }
     } else if (htmlContent) {
       const htmlPath = path.join(targetDir, `${baseName}.html`);
       fs.writeFileSync(htmlPath, htmlContent, 'utf8');
@@ -12447,6 +12533,7 @@ app.get('/api/hospitality/history', (req, res) => {
         b.room_rate,
         b.discount_pct,
         b.discount_amount,
+        b.checkout_discount_amount,
         b.total_room_charge,
         b.total_paid,
         COALESCE((SELECT SUM(amount) FROM payments p WHERE p.booking_id = b.id AND p.payment_type != 'refund'), 0) as payments_total_paid,
@@ -12587,7 +12674,7 @@ app.get('/api/hospitality/history', (req, res) => {
             daily_rate: row.room_rate,
             total_room_charge: row.total_room_charge,
             meal_plan: row.meal_plan,
-            extra_bed_charge: row.extra_beds || 0,
+            extra_bed_charge: Number(row.extra_bed_charge > 0 ? (row.extra_bed_charge / (expectedDays || 1)) : ((row.extra_beds || 0) * 600)),
             adults_male: row.adults_male || 1,
             adults_female: row.adults_female || 0,
             booking_source: row.booking_source
@@ -12811,6 +12898,7 @@ app.get('/api/manager/accounting-analysis', requireAuth, requireRole('manager', 
         b.room_rate,
         b.discount_pct,
         b.discount_amount,
+        b.checkout_discount_amount,
         b.total_room_charge,
         b.total_paid,
         b.booking_source,
@@ -13529,6 +13617,7 @@ app.post('/api/manager/send-accounting-email', requireAuth, requireRole('manager
 try { db.exec("ALTER TABLE bookings ADD COLUMN split_cheque REAL DEFAULT 0;"); } catch (e) {}
 try { db.exec("ALTER TABLE bookings ADD COLUMN transaction_id TEXT DEFAULT NULL;"); } catch (e) {}
 try { db.exec("ALTER TABLE bookings ADD COLUMN cheque_photo TEXT DEFAULT NULL;"); } catch (e) {}
+try { db.exec("ALTER TABLE bookings ADD COLUMN checkout_discount_amount REAL DEFAULT 0;"); } catch (e) {}
 try { db.exec("ALTER TABLE payments ADD COLUMN transaction_id TEXT DEFAULT NULL;"); } catch (e) {}
 try { db.exec("ALTER TABLE payments ADD COLUMN cheque_photo TEXT DEFAULT NULL;"); } catch (e) {}
 try { db.exec("ALTER TABLE booking_extra_expenses ADD COLUMN added_by TEXT;"); } catch (e) {}
@@ -17146,27 +17235,28 @@ async function startServer() {
       firebaseService.pollPendingCloudOrders(db).catch(() => {});
     }
 
-    // 2. STAGGERED CALM HEARTBEAT BACKUP (Every 20 seconds):
-    // Realtime WebSockets already deliver instant updates (<10ms).
-    // This calm heartbeat acts as a silent fallback.
+    // 2. STAGGERED CALM HEARTBEAT BACKUP (Every 2 minutes):
+    // Realtime WebSockets (onSnapshot) already deliver instant updates (<10ms) with zero polling reads.
+    // This calm heartbeat acts as a silent fallback without burning daily Firestore read quota.
     let heartbeatTick = 0;
     setInterval(() => {
       heartbeatTick++;
       if (typeof firebaseService.pollCloudApprovals === 'function') {
         firebaseService.pollCloudApprovals(db).catch(() => {});
       }
-      if (heartbeatTick % 45 === 0 && typeof firebaseService.syncDailyAnalyticsToCloud === 'function') {
+      if (heartbeatTick % 15 === 0 && typeof firebaseService.syncDailyAnalyticsToCloud === 'function') {
         firebaseService.syncDailyAnalyticsToCloud(db).catch(() => {});
       }
-    }, 20000);
+    }, 120000);
 
-    // 3. ZERO-IP CLOUD ORDER SAFETY-NET POLLER (Every 5 seconds):
-    // Continuous self-healing poller ensuring zero dropped orders during Wi-Fi changes, sleep/wake, or socket disconnects
+    // 3. ZERO-IP CLOUD ORDER SAFETY-NET POLLER (Every 5 minutes):
+    // Realtime onSnapshot listener already picks up cloud orders instantly (0ms).
+    // This slow safety-net ensures zero dropped orders without burning 17,000+ reads/day.
     setInterval(() => {
       if (typeof firebaseService.pollPendingCloudOrders === 'function') {
         firebaseService.pollPendingCloudOrders(db).catch(() => {});
       }
-    }, 5000);
+    }, 300000);
 
     // Initial sync of live waiter menu, tables, and staff to Firebase Firestore and Supabase bridge
     if (isCloudSyncAllowed('firebase') && typeof firebaseService.syncWaiterDataToCloud === 'function') {

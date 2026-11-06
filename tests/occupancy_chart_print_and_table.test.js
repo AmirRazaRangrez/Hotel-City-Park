@@ -67,9 +67,9 @@ describe('Occupancy Chart Button, Modal, API, and Print Layout', () => {
 
   it('5. Verifies OccupancyChartModal.jsx contains dotted line separator in Arr/Dep column and matching print format', () => {
     const modalContent = fs.readFileSync(path.join(rootDir, 'src/components/hospitality/OccupancyChartModal.jsx'), 'utf-8');
-    
+
     // Check Breakfast column exists right after City in the print <thead>
-    const theadMatch = modalContent.match(/<thead>([\s\S]*?)<\/thead>/);
+    const theadMatch = modalContent.match(/<table class="chart-table">[\s\S]*?<thead>([\s\S]*?)<\/thead>/);
     expect(theadMatch).not.toBeNull();
     const theadStr = theadMatch[1];
 
@@ -92,5 +92,24 @@ describe('Occupancy Chart Button, Modal, API, and Print Layout', () => {
     expect(modalContent).toContain('ROOM OCCUPANCY :');
     expect(modalContent).toContain('TOTAL BREAKFAST :');
     expect(modalContent).toContain('TOTAL PAX :');
+  });
+
+  it('6. Verifies Refresh button does NOT pass click event to loadData and preserves live room data', () => {
+    const modalContent = fs.readFileSync(path.join(rootDir, 'src/components/hospitality/OccupancyChartModal.jsx'), 'utf-8');
+    // Ensure Refresh button uses arrow function instead of naked onClick={loadData}
+    expect(modalContent).toContain('onClick={() => loadData(selectedDate)}');
+    expect(modalContent).not.toContain('onClick={loadData}');
+    expect(modalContent).toContain('typeof dateParam === \'string\' && /^\\d{4}-\\d{2}-\\d{2}$/.test(dateParam.trim())');
+  });
+
+  it('7. Verifies GET /api/hospitality/occupancy-chart gracefully sanitizes invalid date parameters (like [object Object]) and returns active rooms', async () => {
+    const normalRes = await request(app).get('/api/hospitality/occupancy-chart');
+    const dirtyRes = await request(app).get('/api/hospitality/occupancy-chart?date=[object%20Object]');
+
+    expect(dirtyRes.status).toBe(200);
+    expect(dirtyRes.body.success).toBe(true);
+    // Both must match exactly in room count and occupancy because invalid date falls back to live rooms
+    expect(dirtyRes.body.summary.occupiedCount).toBe(normalRes.body.summary.occupiedCount);
+    expect(dirtyRes.body.summary.totalRooms).toBe(normalRes.body.summary.totalRooms);
   });
 });

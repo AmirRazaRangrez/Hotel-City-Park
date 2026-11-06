@@ -568,47 +568,94 @@ function getActivityFeed(type = 'all', limit = 100) {
     for (const n of notifs) {
       let meta = {};
       try { meta = n.metadata ? JSON.parse(n.metadata) : {}; } catch {}
+      const isCo = n.type === 'checkout';
+      const isCi = n.type === 'checkin';
       list.push({
         id: 'notif:' + n.id,
         type: n.type || 'general',
-        tags: [n.type || 'general', 'notification'],
+        tags: [
+          n.type || 'general',
+          'notification',
+          'all',
+          ...(isCo ? ['checkout', 'check-out'] : []),
+          ...(isCi ? ['checkin', 'check-in', 'stay'] : [])
+        ],
         title: n.title,
         body: n.body,
         created_at: n.created_at,
-        dept: (n.type === 'checkin' || n.type === 'checkout') ? 'Room' : (meta.dept || 'Hotel'),
+        dept: (isCi || isCo) ? 'Room' : (meta.dept || 'Hotel'),
         guest: meta.guestName || meta.guest || '',
-        room: Array.isArray(meta.roomNumbers) ? meta.roomNumbers.join(', ') : (meta.room || ''),
+        room: Array.isArray(meta.roomNumbers) ? meta.roomNumbers.join(', ') : (meta.room || meta.room_number || ''),
         total: Number(meta.totalPaid || meta.settleAmount || meta.total || 0),
-        discount: Number(meta.discount || 0)
+        discount: Number(meta.discount || 0),
+        meta: meta
       });
     }
 
-    // 2. Recent Bookings (Check-ins & Check-outs)
+    // 2. Recent Bookings (Check-ins & Check-outs with Full Accurate Details)
     try {
       const bookings = db.prepare(`
-        SELECT b.id, b.room_id, r.room_number, g.name as guest_name, b.checkin_time, b.actual_checkout_time,
-               b.status, b.advance_payment, b.total_room_charge, b.discount_amount
+        SELECT b.id, b.room_id, r.room_number, r.room_type, g.name as guest_name, g.mobile,
+               b.checkin_time, b.approx_checkout_time, b.actual_checkout_time,
+               b.status, b.advance_payment, b.advance_payment_mode, b.total_paid,
+               b.total_room_charge, b.discount_amount, b.booking_source, b.checked_in_by,
+               b.checked_out_by, b.voucher_number
         FROM bookings b
         LEFT JOIN rooms r ON b.room_id = r.id
         LEFT JOIN guests g ON b.guest_id = g.id
-        ORDER BY b.id DESC
-        LIMIT 50
+        ORDER BY COALESCE(b.actual_checkout_time, b.checkin_time, b.created_at) DESC
+        LIMIT 100
       `).all();
 
       for (const b of bookings) {
         const isCheckout = b.status === 'checked_out' && b.actual_checkout_time;
+        const gName = b.guest_name || 'Guest';
+        const rNum = b.room_number || '';
+        const rType = b.room_type || 'Room';
+        const mob = b.mobile ? ` · 📞 ${b.mobile}` : '';
+        const source = b.booking_source || 'Walk-in';
+        const tariff = Number(b.total_room_charge || 0);
+        const adv = Number(b.advance_payment || 0);
+        const paid = Number(b.total_paid || 0);
+        const staff = isCheckout ? (b.checked_out_by || 'Staff') : (b.checked_in_by || 'Front Desk');
+
+        let bodyText = '';
+        if (isCheckout) {
+          const discount = Number(b.discount_amount || 0);
+          const discText = discount > 0 ? ` · Discount: ₹${discount.toLocaleString('en-IN')}` : '';
+          bodyText = `${gName}${mob} · ${rType} · Total: ₹${tariff.toLocaleString('en-IN')}${discText} · Settled: ₹${paid.toLocaleString('en-IN')} · By ${staff}`;
+        } else {
+          const advText = adv > 0 ? `Advance: ₹${adv.toLocaleString('en-IN')}${b.advance_payment_mode ? ' (' + b.advance_payment_mode + ')' : ''}` : 'Advance: ₹0';
+          bodyText = `${gName}${mob} · ${rType} · Tariff: ₹${tariff.toLocaleString('en-IN')} · ${advText} · ${source} · By ${staff}`;
+        }
+
         list.push({
           id: 'stay:' + b.id,
-          type: isCheckout ? 'checkout' : 'stay',
-          tags: [isCheckout ? 'checkout' : 'stay', 'stay', 'checkin'],
-          title: `${isCheckout ? 'Check-out' : 'Check-in'}: Room ${b.room_number || ''}`,
-          body: `${b.guest_name || 'Guest'} (${isCheckout ? 'Settled' : '₹' + (b.advance_payment || 0) + ' advance'})`,
+          type: isCheckout ? 'checkout' : 'checkin',
+          tags: isCheckout ? ['checkout', 'check-out', 'stay', 'all', 'bills', 'payments'] : ['checkin', 'check-in', 'stay', 'all'],
+          title: `${isCheckout ? 'Check-out' : 'Check-in'}: Room ${rNum}`,
+          body: bodyText,
           created_at: (isCheckout ? b.actual_checkout_time : b.checkin_time) || new Date().toISOString(),
           dept: 'Room',
-          guest: b.guest_name || '',
-          room: String(b.room_number || ''),
-          total: Number(b.total_room_charge || b.advance_payment || 0),
-          discount: Number(b.discount_amount || 0)
+          guest: gName,
+          room: String(rNum),
+          total: isCheckout ? paid : tariff,
+          discount: Number(b.discount_amount || 0),
+          meta: {
+            bookingId: b.id,
+            guestName: gName,
+            mobile: b.mobile,
+            roomNumber: rNum,
+            roomType: rType,
+            tariff,
+            advance: adv,
+            paid,
+            source,
+            staff,
+            isCheckout: Boolean(isCheckout),
+            checkinTime: b.checkin_time,
+            checkoutTime: b.actual_checkout_time
+          }
         });
       }
     } catch (bErr) {
@@ -699,12 +746,24 @@ function getActivityFeed(type = 'all', limit = 100) {
     // Sort descending by created_at
     list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-    // Filter by type if not 'all'
-    if (type && type !== 'all') {
-      return list.filter(item => item.tags.includes(type) || item.type === type).slice(0, limit);
+    // Deduplicate items: if bookingId or title+date is duplicate, prefer richer booking details
+    const seenKeys = new Set();
+    const dedupedList = [];
+    for (const item of list) {
+      const bId = item.meta?.bookingId;
+      const key = bId ? `b:${bId}:${item.type}` : `${item.title}:${String(item.created_at).slice(0, 16)}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        dedupedList.push(item);
+      }
     }
 
-    return list.slice(0, limit);
+    // Filter by type if not 'all'
+    if (type && type !== 'all') {
+      return dedupedList.filter(item => item.tags.includes(type) || item.type === type).slice(0, limit);
+    }
+
+    return dedupedList.slice(0, limit);
   } catch (err) {
     console.warn('[NotificationService] getActivityFeed error:', err.message);
     return [];

@@ -228,7 +228,7 @@ function AppContent() {
       {/* Restaurant Panel */}
       {activePanel === 'restaurant' && (
         <RestaurantPage
-          onPrintKOTSlip={(kotData) => printKOTSlip(kotData?.kot || kotData, kotData?.tableNumber, kotData?.waiterName)}
+          onPrintKOTSlip={(kotData) => printKOTSlip(kotData?.kot || kotData, kotData?.tableNumber, kotData?.waiterName, kotData?.notes || kotData?.special_notes || kotData?.kot?.notes)}
           onPrintBillSlip={(bill) => printThermalBillSlip(bill, 'Restaurant Bill/Cheque')}
         />
       )}
@@ -236,7 +236,7 @@ function AppContent() {
       {/* Bar Lounge Panel */}
       {activePanel === 'bar' && (
         <BarPage
-          onPrintBOTSlip={(botData) => printBOTSlip(botData?.bot || botData, botData?.tableNumber, botData?.waiterName)}
+          onPrintBOTSlip={(botData) => printBOTSlip(botData?.bot || botData, botData?.tableNumber, botData?.waiterName, botData?.notes || botData?.special_notes || botData?.bot?.notes)}
           onPrintBillSlip={(bill) => printThermalBillSlip(bill, 'HOTEL CITY PARK - BAR & LOUNGE')}
         />
       )}

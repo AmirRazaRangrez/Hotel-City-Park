@@ -264,3 +264,4 @@ describe('User Requirements (Nov 4 Fixes)', () => {
     expect(updatedList.username).toBe('cap-1');
   });
 });
+

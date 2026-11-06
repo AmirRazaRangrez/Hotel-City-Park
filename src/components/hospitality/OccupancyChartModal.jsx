@@ -81,10 +81,15 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
   const [matrixData, setMatrixData] = useState(null);
   const [isMatrixLoading, setIsMatrixLoading] = useState(false);
 
-  const loadData = async (dateParam = selectedDate) => {
+  const loadData = async (dateParam) => {
+    // Sanitize dateParam: if called from onClick without args, or passed a SyntheticEvent, fallback cleanly to selectedDate
+    const targetDate = (typeof dateParam === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateParam.trim()))
+      ? dateParam.trim()
+      : (typeof selectedDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedDate.trim()) ? selectedDate.trim() : new Date().toISOString().split('T')[0]);
+
     setIsLoading(true);
     try {
-      const res = await api.getOccupancyChart(dateParam);
+      const res = await api.getOccupancyChart(targetDate);
       if (res && res.success) {
         setChartData(res.chart || []);
         setSummary(res.summary || null);
@@ -1008,7 +1013,7 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
                 {/* Refresh */}
                 <button
                   type="button"
-                  onClick={loadData}
+                  onClick={() => loadData(selectedDate)}
                   disabled={isLoading}
                   title="Refresh live room occupancy data"
                   style={{

@@ -147,9 +147,7 @@ export default function FolioSettlementModal({
     ((folioData?.stayCalcNow?.extensionCharge || folioData?.summary?.stayCalcNow?.extensionCharge || 0) > 0)
   );
 
-  const activeStayCalc = hasOverstayed
-    ? (folioData?.stayCalcNow || folioData?.summary?.stayCalcNow || folioData?.summary)
-    : (folioData?.stayCalcDeclared || folioData?.summary?.stayCalcDeclared || folioData?.summary);
+  const activeStayCalc = folioData?.stayCalcNow || folioData?.summary?.stayCalcNow || (hasOverstayed ? folioData?.summary : (folioData?.stayCalcDeclared || folioData?.summary));
 
   const effectiveRoomTariff = isOtaPrepaid
     ? 0
@@ -778,8 +776,13 @@ export default function FolioSettlementModal({
             // User requirement: First print checkout final bill (tax invoice), then print receipt of paid amount
             const settlementData = {
               settleAmt: isRefund ? 0 : totalSettled,
+              targetNetPayable: isRefund ? 0 : (balanceDue !== undefined ? balanceDue : totalSettled),
+              balanceDue: isRefund ? 0 : balanceDue,
               refundAmt: isRefund ? refundAmt : 0,
               settled_at: new Date(),
+              isCheckoutSettlement: true,
+              checkin_discount_amt: folioData.stayCalcNow?.discountAmount ?? folioData.discountAmount ?? folioData.discountAmt ?? 0,
+              checkout_discount_amt: activeDiscountAmt,
               discount_amount: activeDiscountAmt,
               discount_pct: discountType === 'pct' ? (Number(discountValue) || 0) : (activeDiscountAmt > 0 && dynamicBalanceDue > 0 ? Math.round((activeDiscountAmt / dynamicBalanceDue) * 100) : 0),
               discount: activeDiscountAmt,
@@ -969,6 +972,12 @@ export default function FolioSettlementModal({
                 <strong style={{ color: '#b91c1c' }}>{formatCurrency(extraExpensesVal)}</strong>
               </div>
             )}
+            {activeDiscountAmt > 0 && (
+              <div>
+                <span className="sub-label">Discount:</span>
+                <strong style={{ color: '#dc2626' }}>- {formatCurrency(activeDiscountAmt)}</strong>
+              </div>
+            )}
             <div>
               <span className="sub-label">Advance Paid:</span>
               <strong style={{ color: 'var(--apple-green)' }}>- {formatCurrency(effectiveAdvancePaid)}</strong>
@@ -998,11 +1007,11 @@ export default function FolioSettlementModal({
           }}>
             {isOtaPrepaid ? (
               <span>
-                💡 <strong>Prepaid Reconciliation:</strong> Room Stay Covered by {folioData.otaPlatform || 'OTA'} Voucher + {formatCurrency(hotelExtrasChargeVal + extensionChargeVal)} (Extras/Ext) + {formatCurrency(effectiveFnbTotal)} (F&amp;B){extraExpensesVal > 0 ? ` + ${formatCurrency(extraExpensesVal)} (Damages/Extras)` : ''} - {formatCurrency(effectiveAdvancePaid)} (Desk Advance) = <strong style={{ color: balanceDue > 0 ? '#b91c1c' : '#15803d' }}>{balanceDue === 0 ? '₹0.00 Fully Settled' : `${formatCurrency(balanceDue)} Remaining Due`}</strong>
+                💡 <strong>Prepaid Reconciliation:</strong> Room Stay Covered by {folioData.otaPlatform || 'OTA'} Voucher + {formatCurrency(hotelExtrasChargeVal + extensionChargeVal)} (Extras/Ext) + {formatCurrency(effectiveFnbTotal)} (F&amp;B){extraExpensesVal > 0 ? ` + ${formatCurrency(extraExpensesVal)} (Damages/Extras)` : ''}{activeDiscountAmt > 0 ? ` - ${formatCurrency(activeDiscountAmt)} (Discount)` : ''} - {formatCurrency(effectiveAdvancePaid)} (Desk Advance) = <strong style={{ color: balanceDue > 0 ? '#b91c1c' : '#15803d' }}>{balanceDue === 0 ? '₹0.00 Fully Settled' : `${formatCurrency(balanceDue)} Remaining Due`}</strong>
               </span>
             ) : (
               <span>
-                💡 <strong>Reconciliation:</strong> {formatCurrency(effectiveRoomTariff)} (Room) + {formatCurrency(effectiveStayTax)} (Tax) + {formatCurrency(effectiveFnbTotal)} (F&amp;B){extraExpensesVal > 0 ? ` + ${formatCurrency(extraExpensesVal)} (Damages/Extras)` : ''} - {formatCurrency(effectiveAdvancePaid)} (Advance) = <strong style={{ color: isRefund ? '#15803d' : (balanceDue > 0 ? '#b91c1c' : '#15803d') }}>{isRefund ? `Refund: ${formatCurrency(refundAmount)}` : `${formatCurrency(balanceDue)} Remaining Due`}</strong>
+                💡 <strong>Reconciliation:</strong> {formatCurrency(effectiveRoomTariff)} (Room) + {formatCurrency(effectiveStayTax)} (Tax) + {formatCurrency(effectiveFnbTotal)} (F&amp;B){extraExpensesVal > 0 ? ` + ${formatCurrency(extraExpensesVal)} (Damages/Extras)` : ''}{activeDiscountAmt > 0 ? ` - ${formatCurrency(activeDiscountAmt)} (Discount)` : ''} - {formatCurrency(effectiveAdvancePaid)} (Advance) = <strong style={{ color: isRefund ? '#15803d' : (balanceDue > 0 ? '#b91c1c' : '#15803d') }}>{isRefund ? `Refund: ${formatCurrency(refundAmount)}` : `${formatCurrency(balanceDue)} Remaining Due`}</strong>
               </span>
             )}
             {effectiveFnbTotal > 0 && (
@@ -2147,9 +2156,14 @@ export default function FolioSettlementModal({
               className="filter-chip"
               onClick={() => {
                 printFinalBillA4(room, folioData, {
-                  settleAmt: isRefund ? 0 : (isCompanyPayingLater ? 0 : totalSettled),
+                  settleAmt: isRefund ? 0 : (isCompanyPayingLater ? 0 : (totalSettled > 0 ? totalSettled : balanceDue)),
+                  targetNetPayable: isRefund ? 0 : (balanceDue !== undefined ? balanceDue : (isCompanyPayingLater ? 0 : totalSettled)),
+                  balanceDue: isRefund ? 0 : balanceDue,
                   refundAmt: isRefund ? refundAmount : 0,
                   settled_at: new Date(),
+                  isCheckoutSettlement: true,
+                  checkin_discount_amt: folioData.stayCalcNow?.discountAmount ?? folioData.discountAmount ?? folioData.discountAmt ?? 0,
+                  checkout_discount_amt: activeDiscountAmt,
                   discount_amount: activeDiscountAmt,
                   discount_pct: discountType === 'pct' ? (Number(discountValue) || 0) : (activeDiscountAmt > 0 && dynamicBalanceDue > 0 ? Math.round((activeDiscountAmt / dynamicBalanceDue) * 100) : 0),
                   discount: activeDiscountAmt,

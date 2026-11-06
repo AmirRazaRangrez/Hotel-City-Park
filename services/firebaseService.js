@@ -363,12 +363,14 @@ async function syncCheckoutToCloud(checkoutData) {
         children: Number(checkoutData.children || 0),
         mealPlan: checkoutData.mealPlan || checkoutData.meal_plan || 'without_breakfast',
         roomCount: Number(checkoutData.roomCount || checkoutData.room_count || roomsList.length || 1),
+        roomType: checkoutData.roomType || checkoutData.room_type || 'Executive Room',
         roomNumber: String(checkoutData.roomNumber || checkoutData.room_number || cleanRoom),
         roomNumbers: roomsList,
         checkinTime: checkoutData.checkinTime || checkoutData.checkin_time,
         checkoutTime: checkoutData.checkoutTime || checkoutData.checkout_time || new Date().toISOString(),
         checkedInBy: checkoutData.checkedInBy || checkoutData.checked_in_by || 'Front Desk',
         checkedOutBy: checkoutData.checkedOutBy || checkoutData.checked_out_by || 'Staff',
+        discount: Number(checkoutData.discount || checkoutData.discount_amount || 0),
         netSettle: parseFloat(checkoutData.netSettle || checkoutData.grandTotal || checkoutData.total || 0),
         refundAmount: parseFloat(checkoutData.refundAmount || checkoutData.refund_amount || 0),
         payments: Array.isArray(checkoutData.payments) ? checkoutData.payments : []
@@ -389,6 +391,9 @@ async function syncCheckoutToCloud(checkoutData) {
       grand_total: Number(checkoutData.grandTotal || checkoutData.grand_total || checkoutData.netSettle || checkoutData.total || 0),
       settled_by: String(checkoutData.checkedOutBy || checkoutData.settled_by || 'Staff').trim(),
       status: 'settled',
+      guest_name: String(itemsMeta.guestName || checkoutData.guestName || 'Valued Guest').trim(),
+      guest_mobile: String(itemsMeta.mobile || checkoutData.mobile || '').trim(),
+      discount: Number(checkoutData.discount || checkoutData.discount_amount || itemsMeta.discount || 0),
       items_summary: itemsSummaryStr,
       created_at: checkoutData.checkoutTime || new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -591,27 +596,84 @@ async function pushSystemSetting(key, value) {
 }
 
 // ==========================================
-// 4. DAILY HOTEL ANALYTICS
+// 4. DAILY HOTEL ANALYTICS & LIVE STATS
 // ==========================================
-async function syncDailyAnalyticsToCloud(analytics) {
-  if (!firestore || !analytics) return;
-  const dateKey = analytics.date || analytics.id || new Date().toISOString().split('T')[0];
+async function syncDailyAnalyticsToCloud(analyticsOrDb) {
+  if (!firestore) return;
   try {
-    const payload = {
-      id: dateKey,
-      today_revenue: Number(analytics.today_revenue || analytics.total_revenue || 0),
-      today_cash: Number(analytics.today_cash || analytics.cash || 0),
-      today_upi: Number(analytics.today_upi || analytics.upi || 0),
-      today_card: Number(analytics.today_card || analytics.card || 0),
-      today_checkins: Number(analytics.today_checkins || analytics.checkins || 0),
-      today_checkouts: Number(analytics.today_checkouts || analytics.checkouts || 0),
-      occupied_rooms: Number(analytics.occupied_rooms || 0),
-      total_rooms: Number(analytics.total_rooms || 24),
-      updated_at: new Date().toISOString()
-    };
-    await withTimeout(firestore.collection('hotel_analytics').doc(dateKey).set(payload, { merge: true }));
+    let payload = null;
+    let dateKey = new Date().toISOString().split('T')[0];
+
+    if (analyticsOrDb && typeof analyticsOrDb.prepare === 'function') {
+      const db = analyticsOrDb;
+      const today = dateKey;
+      const hospRow = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE department = 'hospitality' AND date(created_at) = date('now', 'localtime')").get();
+      const restRow = db.prepare("SELECT COALESCE(SUM(total), 0) as total FROM restaurant_orders WHERE is_paid = 1 AND date(created_at) = date('now', 'localtime')").get();
+      const barRow = db.prepare("SELECT COALESCE(SUM(total), 0) as total FROM bar_orders WHERE is_paid = 1 AND date(created_at) = date('now', 'localtime')").get();
+      const expRow = db.prepare("SELECT COALESCE(SUM(COALESCE(actual_used_amount, amount)), 0) as total FROM expenses WHERE date(created_at) = date('now', 'localtime')").get();
+      const cinRow = db.prepare("SELECT COUNT(*) as cnt FROM bookings WHERE date(checkin_time) = date('now', 'localtime')").get();
+      const coutRow = db.prepare("SELECT COUNT(*) as cnt FROM bookings WHERE date(actual_checkout_time) = date('now', 'localtime')").get();
+      const discRow = db.prepare("SELECT COALESCE(SUM(discount_amount), 0) as total FROM bookings WHERE date(checkin_time) = date('now', 'localtime') OR date(actual_checkout_time) = date('now', 'localtime')").get();
+      const btcRow = db.prepare("SELECT COALESCE(SUM(b.total_room_charge - b.total_paid), 0) as total FROM bookings b JOIN rooms r ON r.current_booking_id = b.id WHERE r.status = 'occupied' AND (b.booking_source = 'Corporate BTC' OR b.btc_company_name IS NOT NULL)").get();
+      const occRow = db.prepare("SELECT COUNT(*) as cnt FROM rooms WHERE status = 'occupied'").get();
+      const totRoomsRow = db.prepare("SELECT COUNT(*) as cnt FROM rooms").get();
+
+      let occupiedCount = occRow?.cnt || 0;
+      if (occupiedCount === 0 && firestore) {
+        try {
+          const occSnap = await firestore.collection('active_occupancies').get();
+          if (occSnap && !occSnap.empty) {
+            occupiedCount = occSnap.size;
+          }
+        } catch (_) {}
+      }
+
+      payload = {
+        id: today,
+        date: today,
+        today_revenue: (hospRow?.total || 0) + (restRow?.total || 0) + (barRow?.total || 0),
+        hospitality_revenue: hospRow?.total || 0,
+        restaurant_revenue: restRow?.total || 0,
+        bar_revenue: barRow?.total || 0,
+        today_expenses: expRow?.total || 0,
+        today_checkins: cinRow?.cnt || 0,
+        today_checkouts: coutRow?.cnt || 0,
+        today_discounts: discRow?.total || 0,
+        btc_pending: btcRow?.total || 0,
+        occupied_rooms: occupiedCount,
+        total_rooms: totRoomsRow?.cnt || 40,
+        updated_at: new Date().toISOString()
+      };
+    } else if (analyticsOrDb && typeof analyticsOrDb === 'object') {
+      const a = analyticsOrDb;
+      dateKey = a.date || a.id || dateKey;
+      payload = {
+        id: dateKey,
+        date: dateKey,
+        today_revenue: Number(a.today_revenue || a.total_revenue || 0),
+        hospitality_revenue: Number(a.hospitality_revenue || a.hospitality || a.today_revenue || 0),
+        restaurant_revenue: Number(a.restaurant_revenue || a.restaurant || 0),
+        bar_revenue: Number(a.bar_revenue || a.bar || 0),
+        today_expenses: Number(a.today_expenses || a.expenses || 0),
+        today_checkins: Number(a.today_checkins || a.checkins || 0),
+        today_checkouts: Number(a.today_checkouts || a.checkouts || 0),
+        today_discounts: Number(a.today_discounts || a.discounts || 0),
+        btc_pending: Number(a.btc_pending || 0),
+        occupied_rooms: Number(a.occupied_rooms || 0),
+        total_rooms: Number(a.total_rooms || 40),
+        updated_at: new Date().toISOString()
+      };
+    }
+
+    if (payload) {
+      await withTimeout(firestore.collection('hotel_analytics').doc(dateKey).set(payload, { merge: true }));
+      await withTimeout(firestore.collection('system_settings').doc('live_stats').set({
+        ...payload,
+        updated_at: new Date().toISOString()
+      }, { merge: true }));
+    }
   } catch (err) {
-    console.warn(`[Firebase] syncDailyAnalyticsToCloud error for ${dateKey}:`, err.message);
+    console.warn(`[Firebase] syncDailyAnalyticsToCloud error:`, err.message);
   }
 }
 
@@ -662,7 +724,12 @@ async function syncAllActiveRoomsFromLocal(db) {
         b.adults_female,
         b.children,
         b.checked_in_by,
-        b.booking_source
+        b.booking_source,
+        b.ota_platform,
+        b.is_prepaid,
+        b.ota_bill_amount,
+        b.ota_booking_id,
+        b.btc_company_name
       FROM rooms r
       JOIN bookings b ON r.current_booking_id = b.id
       JOIN guests g ON b.guest_id = g.id
@@ -700,6 +767,14 @@ async function syncAllActiveRoomsFromLocal(db) {
         children: room.children || 0,
         meal_plan: room.meal_plan || 'without_breakfast',
         booking_source: room.booking_source || 'Walk-in',
+        ota_platform: room.ota_platform || null,
+        is_prepaid: room.is_prepaid ? 1 : 0,
+        ota_bill_amount: Number(room.ota_bill_amount || 0),
+        ota_booking_id: room.ota_booking_id || null,
+        room_rate: Number(room.room_rate || 0),
+        custom_tariff: Number(room.room_rate || 0),
+        total_room_charge: Number(room.total_room_charge || 0),
+        btc_company_name: room.btc_company_name || null,
         checked_in_by: room.checked_in_by || 'Front Desk',
         voucher_number: room.voucher_number || '',
         advance_payment: Number(room.advance_payment || 0),
@@ -726,7 +801,8 @@ async function syncAllActiveRoomsFromLocal(db) {
 
       const payments = db.prepare(`
         SELECT receipt_no, amount, payment_mode, cashier_name, created_at, notes, payment_type,
-               split_cash, split_card, split_online, utr_number
+               split_cash, split_card, split_online, utr_number,
+               card_surcharge, upi_tax, card_digits, cheque_no, bank_name, cheque_status, realized_at
         FROM payments 
         WHERE booking_id = ? 
         ORDER BY id ASC
@@ -802,13 +878,18 @@ async function syncAllActiveRoomsFromLocal(db) {
       const roomGst = Math.round(decPreTaxRoom * 0.05);
       const decRoomCharge = decPreTaxRoom + roomGst;
 
-      const roomTotal = decRoomCharge > 0 ? decRoomCharge : Number(room.total_room_charge || 0);
+      const isOta = (room.booking_source || '').toUpperCase() === 'OTA';
+      let roomTotal = decRoomCharge > 0 ? decRoomCharge : Number(room.total_room_charge || 0);
+      if (isOta && Number(room.total_room_charge || 0) > 0) {
+        roomTotal = Number(room.total_room_charge);
+      }
       const grandTotal = Math.round(roomTotal + foodTotal + barTotal + extraTotal);
       const paidTotal = Math.round(Number(room.total_paid || room.advance_payment || 0));
       const pendingTotal = Math.max(0, grandTotal - paidTotal);
 
       const folioSummary = {
         roomCharge: roomTotal,
+        totalRoomCharge: roomTotal,
         tariffSubtotal: Number(decBaseTariff + decExtraMattressCost + decBreakfastCost),
         restaurant: foodTotal,
         bar: barTotal,
@@ -818,7 +899,9 @@ async function syncAllActiveRoomsFromLocal(db) {
         total: grandTotal,
         grandTotal,
         paid: paidTotal,
+        advancePaid: paidTotal,
         pending: pendingTotal,
+        balanceDue: pendingTotal,
         stayCalcDeclared: {
           roomCharge: roomTotal,
           grandTotal,
@@ -864,6 +947,19 @@ async function syncAllActiveRoomsFromLocal(db) {
         children: room.children || 0,
         mealPlan: room.meal_plan || 'without_breakfast',
         bookingSource: room.booking_source || 'Walk-in',
+        otaPlatform: room.ota_platform || '',
+        ota_platform: room.ota_platform || '',
+        isPrepaid: room.is_prepaid ? 1 : 0,
+        is_prepaid: room.is_prepaid ? 1 : 0,
+        otaBillAmount: Number(room.ota_bill_amount || 0),
+        ota_bill_amount: Number(room.ota_bill_amount || 0),
+        otaBookingId: room.ota_booking_id || '',
+        ota_booking_id: room.ota_booking_id || '',
+        roomRate: Number(room.room_rate || 0),
+        room_rate: Number(room.room_rate || 0),
+        customTariff: Number(room.room_rate || 0),
+        btcCompanyName: room.btc_company_name || '',
+        btc_company_name: room.btc_company_name || '',
         checkedInBy: room.checked_in_by || 'Front Desk',
         checkinTime: room.checkin_time || '',
         approxCheckout: room.approx_checkout_time || '',
@@ -883,9 +979,23 @@ async function syncAllActiveRoomsFromLocal(db) {
           } else if (!resolvedMode || resolvedMode.toLowerCase() === 'cash') {
             resolvedMode = sOnline > 0 ? 'UPI' : (sCard > 0 ? 'Card' : 'Cash');
           }
+          const pAmount = Number(p.amount || 0);
+          const cardFee = Number(p.card_surcharge || 0);
+          const upiFee = Number(p.upi_tax || 0);
+          const baseAmt = Math.max(0, pAmount - (cardFee + upiFee));
           return {
+            id: p.receipt_no,
             receiptNo: p.receipt_no || 'CR52',
-            amount: Number(p.amount || 0),
+            receipt_no: p.receipt_no || 'CR52',
+            amount: pAmount,
+            base_amount: baseAmt,
+            card_surcharge: cardFee,
+            upi_tax: upiFee,
+            card_digits: p.card_digits || '',
+            cheque_no: p.cheque_no || '',
+            bank_name: p.bank_name || '',
+            cheque_status: p.cheque_status || '',
+            realized_at: p.realized_at || '',
             mode: resolvedMode,
             payment_mode: resolvedMode,
             split_cash: sCash,
@@ -893,9 +1003,12 @@ async function syncAllActiveRoomsFromLocal(db) {
             split_online: sOnline,
             utr_number: p.utr_number || '',
             cashier: p.cashier_name || 'Staff',
+            cashier_name: p.cashier_name || 'Staff',
             date: p.created_at || room.checkin_time,
+            created_at: p.created_at || room.checkin_time,
             notes: p.notes || '',
-            type: p.payment_type || 'advance'
+            type: p.payment_type || 'advance',
+            payment_type: p.payment_type || 'advance'
           };
         })
       };
@@ -929,8 +1042,72 @@ async function syncAllActiveRoomsFromLocal(db) {
       await withTimeout(batch.commit());
     }
     console.log(`🔥 [Firebase] Synced ${activeRooms.length} active room(s) with folios to Firestore.`);
+
+    // Also sync recent checkout history records so Owner Activity feed is accurate
+    await syncRecentCheckoutsToCloud(db).catch(() => {});
   } catch (err) {
     console.warn('[Firebase] syncAllActiveRoomsFromLocal error:', err.message);
+  }
+}
+
+/**
+ * Synchronize recent checkout history records to Firestore room_charges_inbox
+ * Ensures the Owner App's Activity feed always shows the latest checkouts with full details.
+ * Uses 1 single batch write (negligible quota cost).
+ */
+async function syncRecentCheckoutsToCloud(db, limit = 20) {
+  if (!firestore || !db) return;
+  try {
+    const checkouts = db.prepare(`
+      SELECT id, type, title, body, metadata, created_at
+      FROM owner_notifications
+      WHERE type = 'checkout'
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(limit);
+
+    if (!checkouts || checkouts.length === 0) return;
+
+    let batch = firestore.batch();
+    for (const c of checkouts) {
+      let meta = {};
+      try { meta = c.metadata ? JSON.parse(c.metadata) : {}; } catch {}
+      const roomNum = cleanRoomNumber(meta.room || meta.room_number || (meta.roomNumbers && meta.roomNumbers[0]) || '0');
+      const docId = `checkout_hist_${c.id}`;
+      const settleAmt = Number(meta.settleAmount || meta.total || 0);
+      const safeDate = String(c.created_at || '').replace(' ', 'T');
+
+      const payload = {
+        id: docId,
+        department: 'room_checkout',
+        room_number: roomNum,
+        bill_no: `CO-${meta.bookingId || c.id}`,
+        subtotal: settleAmt,
+        gst: 0,
+        grand_total: settleAmt,
+        settled_by: 'Staff',
+        status: 'settled',
+        guest_name: meta.guestName || 'Guest',
+        items_summary: JSON.stringify({
+          isCheckout: true,
+          guestName: meta.guestName || 'Guest',
+          roomNumber: roomNum,
+          netSettle: settleAmt,
+          refundAmount: Number(meta.refundAmount || 0),
+          bookingId: meta.bookingId
+        }),
+        created_at: safeDate || new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      const ref = firestore.collection('room_charges_inbox').doc(docId);
+      batch.set(ref, payload, { merge: true });
+    }
+
+    await withTimeout(batch.commit());
+    console.log(`🔥 [Firebase] Synced ${checkouts.length} recent checkout history records to Firestore.`);
+  } catch (err) {
+    console.warn('[Firebase] syncRecentCheckoutsToCloud error:', err.message);
   }
 }
 
@@ -1999,6 +2176,7 @@ module.exports = {
   pushOwnerDevice,
   deleteCloudRoomCharge,
   syncCheckoutToCloud,
+  syncRecentCheckoutsToCloud,
   syncApprovalRequestToCloud,
   fetchApprovalStatusFromCloud,
   pollCloudApprovals,

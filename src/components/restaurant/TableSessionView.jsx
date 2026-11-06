@@ -38,6 +38,43 @@ export default function TableSessionView({
   const [searchQuery, setSearchQuery] = useState('');
   const [waiterName, setWaiterName] = useState(table.waiter_name || '');
   const [showUnsavedGuardModal, setShowUnsavedGuardModal] = useState(false);
+  const [isSubmittingKOT, setIsSubmittingKOT] = useState(false);
+  const [isSubmittingPrebill, setIsSubmittingPrebill] = useState(false);
+
+  // Check if this table session already has active KOTs generated (committed kitchen order)
+  const hasActiveKOT = useMemo(() => {
+    if (!table) return false;
+    const kotCount = Number(table.kot_count || 0);
+    let hasPrintedItems = false;
+    try {
+      const printed = JSON.parse(table.printed_cart_json || '[]');
+      if (Array.isArray(printed) && printed.length > 0) hasPrintedItems = true;
+    } catch (_) {}
+    const isOccupiedStatus = ['occupied', 'billed', 'ready', 'in_process'].includes(String(table.status || '').toLowerCase());
+    return kotCount > 0 || hasPrintedItems || (isOccupiedStatus && ((initialCartRef.current && initialCartRef.current.length > 0) || false));
+  }, [table]);
+
+  // Check if new un-sent items have been added to the cart
+  const hasUnsentNewItems = useMemo(() => {
+    if (!hasActiveKOT) {
+      return cart.length > 0;
+    }
+    // For active KOT tables: compare current cart with printed/initial items
+    let printedItems = [];
+    try {
+      printedItems = JSON.parse(table.printed_cart_json || '[]');
+    } catch (_) {
+      printedItems = initialCartRef.current || [];
+    }
+    if (!Array.isArray(printedItems) || printedItems.length === 0) {
+      printedItems = initialCartRef.current || [];
+    }
+
+    const currentQty = cart.reduce((sum, it) => sum + (Number(it.quantity || it.qty) || 1), 0);
+    const initialQty = printedItems.reduce((sum, it) => sum + (Number(it.quantity || it.qty) || 1), 0);
+
+    return currentQty > initialQty || (JSON.stringify(cart) !== JSON.stringify(printedItems));
+  }, [cart, table, hasActiveKOT]);
   
   // Pre-select chargeToRoomId if room service
   const initialRoomId = useMemo(() => {
@@ -163,10 +200,12 @@ export default function TableSessionView({
 
 
   const handleKOT = async () => {
+    if (isSubmittingKOT) return;
     if (cart.length === 0) {
       showToast(`Cart is empty. Please add items before sending ${department === 'bar' ? 'BOT' : 'KOT'}.`, 'red');
       return;
     }
+    setIsSubmittingKOT(true);
     try {
       const payload = {
         cart,
@@ -195,14 +234,18 @@ export default function TableSessionView({
       onBack();
     } catch (err) {
       showToast(`Error generating ${department === 'bar' ? 'BOT' : 'KOT'}: ` + err.message, 'red');
+    } finally {
+      setIsSubmittingKOT(false);
     }
   };
 
   const handlePreBill = async () => {
+    if (isSubmittingPrebill) return;
     if (cart.length === 0) {
       showToast('Cart is empty. Add items before releasing pre-bill.', 'red');
       return;
     }
+    setIsSubmittingPrebill(true);
     try {
       const payload = {
         cart,
@@ -240,6 +283,8 @@ export default function TableSessionView({
       onBack();
     } catch (err) {
       showToast('Error generating pre-bill: ' + err.message, 'red');
+    } finally {
+      setIsSubmittingPrebill(false);
     }
   };
 
@@ -282,12 +327,26 @@ export default function TableSessionView({
     }
   };
 
-  // User requirement: When selected items exist in order & back button pressed, ask via popup: Save or Discard
+  // User requirement: When taking back or navigating anywhere:
+  // - If table already has active KOT orders and no un-sent items were added: exit immediately (NO POPUP, NO DISCARD).
+  // - If table has active KOT and new un-sent items were added: prompt to save or discard ONLY the new additions.
+  // - If table has NO KOT and order was taken in cart: prompt to save or discard draft order.
   const handleBackClick = () => {
-    if (cart.length > 0) {
-      setShowUnsavedGuardModal(true);
+    if (hasActiveKOT) {
+      if (hasUnsentNewItems) {
+        setShowUnsavedGuardModal(true);
+      } else {
+        // Active table with KOT: smooth direct exit to floor with zero popups
+        onBack();
+      }
     } else {
-      handleDiscardAndExit();
+      if (cart.length > 0) {
+        // Taken order WITHOUT KOT: show Save or Discard prompt
+        setShowUnsavedGuardModal(true);
+      } else {
+        // Empty draft table: clean up temporary session if needed and exit
+        handleDiscardAndExit();
+      }
     }
   };
 
@@ -315,15 +374,44 @@ export default function TableSessionView({
   };
 
   const handleDiscardAndExit = async () => {
-    if (isRoomService || isParcel) {
+    if (hasActiveKOT) {
+      // Revert cart to initial/printed items, keeping existing KOT order 100% intact!
       try {
+        let printed = [];
+        try { printed = JSON.parse(table.printed_cart_json || '[]'); } catch (_) {}
+        const originalCart = (Array.isArray(printed) && printed.length > 0) ? printed : (initialCartRef.current || []);
+        const origSubtotal = originalCart.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity || item.qty) || 1), 0);
+        const origGst = Math.round(origSubtotal * 0.05);
+        const origGrandTotal = origSubtotal + origGst;
+        const payload = {
+          cart: originalCart,
+          waiterName,
+          chargeToRoomId: chargeToRoomId || null,
+          subtotal: origSubtotal,
+          gst: origGst,
+          grandTotal: origGrandTotal
+        };
         if (department === 'bar') {
-          await api.cancelBarTable(table.id);
+          await api.saveBarCart(table.id, payload);
         } else {
-          await api.cancelRestaurantTable(table.id);
+          await api.saveRestaurantCart(table.id, payload);
         }
+        showToast('Un-sent new additions discarded. Running KOT order preserved.', 'info', 2200);
       } catch (e) {
-        console.warn('Error cancelling empty/discarded session:', e);
+        console.warn('Reverting un-sent items on back:', e);
+      }
+    } else {
+      // Draft order without KOT: discard un-sent session
+      if (isRoomService || isParcel) {
+        try {
+          if (department === 'bar') {
+            await api.cancelBarTable(table.id);
+          } else {
+            await api.cancelRestaurantTable(table.id);
+          }
+        } catch (e) {
+          console.warn('Error cancelling empty/discarded session:', e);
+        }
       }
     }
     setShowUnsavedGuardModal(false);
@@ -1029,23 +1117,25 @@ export default function TableSessionView({
                 className="pos-btn-kot"
                 id="pos-btn-action-kot"
                 onClick={handleKOT}
+                disabled={isSubmittingKOT || cart.length === 0}
                 style={{
-                  background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                  background: isSubmittingKOT ? '#94a3b8' : 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: '8px',
                   padding: '7px 4px',
                   fontWeight: 800,
                   fontSize: '0.80rem',
-                  cursor: 'pointer',
+                  cursor: isSubmittingKOT || cart.length === 0 ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '4px',
-                  boxShadow: '0 2px 6px rgba(22, 163, 74, 0.25)'
+                  boxShadow: isSubmittingKOT ? 'none' : '0 2px 6px rgba(22, 163, 74, 0.25)',
+                  opacity: isSubmittingKOT ? 0.7 : 1
                 }}
               >
-                <span>🖨️ {department === 'bar' ? 'BOT' : 'KOT'}</span>
+                <span>{isSubmittingKOT ? '⏳ Printing...' : `🖨️ ${department === 'bar' ? 'BOT' : 'KOT'}`}</span>
               </button>
 
               <button
@@ -1053,22 +1143,24 @@ export default function TableSessionView({
                 className="pos-btn-prebill"
                 id="pos-btn-action-prebill"
                 onClick={handlePreBill}
+                disabled={isSubmittingPrebill || cart.length === 0}
                 style={{
-                  background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                  background: isSubmittingPrebill ? '#94a3b8' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: '8px',
                   padding: '7px 4px',
                   fontWeight: 800,
                   fontSize: '0.80rem',
-                  cursor: 'pointer',
+                  cursor: isSubmittingPrebill || cart.length === 0 ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '4px'
+                  gap: '4px',
+                  opacity: isSubmittingPrebill ? 0.7 : 1
                 }}
               >
-                <span>🧾 Pre-Bill</span>
+                <span>{isSubmittingPrebill ? '⏳ Printing...' : '🧾 Pre-Bill'}</span>
               </button>
 
               <button
@@ -1148,12 +1240,26 @@ export default function TableSessionView({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>🛒</div>
+            <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>
+              {hasActiveKOT ? '🍲' : '🛒'}
+            </div>
             <h3 style={{ margin: '0 0 8px 0', fontSize: '1.2rem', fontWeight: 900, color: '#0f172a' }}>
-              Save or Discard Order?
+              {hasActiveKOT ? 'Save or Discard New Additions?' : 'Save or Discard Draft Order?'}
             </h3>
             <p style={{ margin: '0 0 20px 0', fontSize: '0.86rem', color: '#64748b', lineHeight: 1.5 }}>
-              You have selected <strong>{cart.length} item(s)</strong> in this order for <strong>{titleText}</strong>. What would you like to do?
+              {hasActiveKOT ? (
+                <>
+                  You added new items to <strong>{titleText}</strong> without generating a {department === 'bar' ? 'BOT' : 'KOT'}.
+                  <br />
+                  <span style={{ color: '#059669', fontWeight: 700, display: 'inline-block', marginTop: '6px' }}>
+                    🛡️ Existing running KOT items are completely safe.
+                  </span>
+                </>
+              ) : (
+                <>
+                  You have selected <strong>{cart.length} item(s)</strong> in this draft order for <strong>{titleText}</strong> without generating a {department === 'bar' ? 'BOT' : 'KOT'}. What would you like to do?
+                </>
+              )}
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <button
@@ -1171,7 +1277,7 @@ export default function TableSessionView({
                   boxShadow: '0 2px 8px rgba(2, 132, 199, 0.3)'
                 }}
               >
-                💾 Save Order
+                {hasActiveKOT ? '💾 Save New Additions to Table' : '💾 Save Draft Order'}
               </button>
               <button
                 type="button"
@@ -1187,7 +1293,7 @@ export default function TableSessionView({
                   cursor: 'pointer'
                 }}
               >
-                🗑️ Discard
+                {hasActiveKOT ? '🗑️ Discard New Additions' : '🗑️ Discard Draft Order'}
               </button>
               <button
                 type="button"

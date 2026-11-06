@@ -912,7 +912,7 @@ export default function CheckinWizardModal({
           roomExtraBeds: draft.roomExtraBeds || {},
           mealPlan: draft.mealPlan,
           baseRate: basePrice,
-          roomTariffNet: totalDue - gstAmount,
+          roomTariffNet: totalBaseRate,
           discountPct: effectiveDiscountPct,
           discountAmount: discountAmount,
           taxAmount: gstAmount,

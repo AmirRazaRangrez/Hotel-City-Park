@@ -3,23 +3,34 @@ import subprocess
 import os
 import shutil
 
-apk_path = r"c:\Aamir Delta\city_backup\HotelCityPark-Owner.apk"
-bundle_dir = r"c:\Aamir Delta\city_backup\admin\dist-android\_expo\static\js\android"
-hbc_files = [os.path.join(bundle_dir, f) for f in os.listdir(bundle_dir) if f.endswith(".hbc")]
-if not hbc_files:
-    raise FileNotFoundError("No .hbc bundle file found in " + bundle_dir)
-hbc_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-bundle_src = hbc_files[0]
-print("Using bundle source:", bundle_src)
-temp_apk = r"c:\Aamir Delta\city_backup\temp_owner.apk"
-aligned_apk = r"c:\Aamir Delta\city_backup\aligned_owner.apk"
+apk_path = r"c:\Aamir Delta\city_backup\public\HotelCityPark-Owner.apk"
+bundle_src = r"c:\Aamir Delta\city_backup\temp_index.android.bundle"
 
-build_tools = r"C:\Users\91937\AppData\Local\Android\Sdk\build-tools\37.0.0"
+if not os.path.exists(apk_path):
+    raise FileNotFoundError("Base APK not found at " + apk_path)
+if not os.path.exists(bundle_src):
+    raise FileNotFoundError("temp_index.android.bundle not found at " + bundle_src)
+
+temp_apk = r"c:\Aamir Delta\city_backup\temp_owner_unsigned.apk"
+aligned_apk = r"c:\Aamir Delta\city_backup\HotelCityPark-Owner_aligned.apk"
+
+build_tools = r"C:\Users\91937\AppData\Local\Android\Sdk\build-tools\35.0.0"
+if not os.path.exists(build_tools):
+    build_tools = r"C:\Users\91937\AppData\Local\Android\Sdk\build-tools\34.0.0"
+
 zipalign = os.path.join(build_tools, "zipalign.exe")
 apksigner = os.path.join(build_tools, "apksigner.bat")
 keystore = r"C:\Users\91937\.android\debug.keystore"
 
-print("Reading and updating index.android.bundle inside APK...")
+print(f"Using build-tools at {build_tools}...")
+print("Replacing assets/index.android.bundle inside HotelCityPark-Owner.apk...")
+
+with open(bundle_src, 'rb') as f:
+    new_bundle_bytes = f.read()
+
+if os.path.exists(temp_apk):
+    os.remove(temp_apk)
+
 with zipfile.ZipFile(apk_path, 'r') as zin:
     with zipfile.ZipFile(temp_apk, 'w', compression=zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
@@ -31,9 +42,8 @@ with zipfile.ZipFile(apk_path, 'r') as zin:
             buffer = zin.read(item.filename)
             zout.writestr(item, buffer)
         
-        # Add updated bundle
-        with open(bundle_src, 'rb') as f:
-            zout.writestr("assets/index.android.bundle", f.read())
+        # Write updated Hermes bundle
+        zout.writestr("assets/index.android.bundle", new_bundle_bytes)
 
 print("Running zipalign...")
 if os.path.exists(aligned_apk):
@@ -46,38 +56,38 @@ subprocess.check_call([
     "--ks", keystore,
     "--ks-pass", "pass:android",
     "--ks-key-alias", "androiddebugkey",
-    "--key-pass", "pass:android",
     aligned_apk
 ])
 
-print("Verifying...")
-subprocess.check_call([apksigner, "verify", "--verbose", aligned_apk])
+print("Verifying signature...")
+subprocess.check_call([apksigner, "verify", aligned_apk])
+print("Signature verified successfully!")
 
-os.replace(aligned_apk, apk_path)
-targets = [
-    r"c:\Aamir Delta\city_backup\HotelCityPark-Admin.apk",
-    r"c:\Aamir Delta\city_backup\public\HotelCityPark-Admin.apk",
+# Copy to destinations
+destinations = [
     r"c:\Aamir Delta\city_backup\public\HotelCityPark-Owner.apk",
     r"c:\Aamir Delta\city_backup\public\HotelCityPark-Owner-v2.apk",
-    r"c:\Aamir Delta\city_backup\release\public\HotelCityPark-Admin.apk",
-    r"c:\Aamir Delta\city_backup\release\public\HotelCityPark-Owner.apk",
-    r"c:\Aamir Delta\city_backup\release\public\HotelCityPark-Owner-v2.apk",
-    r"c:\Aamir Delta\city_backup\release\dist\HotelCityPark-Owner-v2.apk",
-    r"c:\Aamir Delta\city_backup\dist\HotelCityPark-Admin.apk",
-    r"c:\Aamir Delta\city_backup\dist\HotelCityPark-Owner.apk",
-    r"c:\Aamir Delta\city_backup\dist\HotelCityPark-Owner-v2.apk",
-    r"c:\Aamir Delta\city_backup\apks\HotelCityPark-Admin.apk",
-    r"c:\Aamir Delta\city_backup\apks\HotelCityPark-Owner.apk"
+    r"c:\Aamir Delta\city_backup\public\HotelCityPark-Admin.apk",
+    r"c:\Aamir Delta\city_backup\admin\HotelCityPark-Owner.apk",
 ]
-for t in targets:
-    try:
-        os.makedirs(os.path.dirname(t), exist_ok=True)
-        shutil.copyfile(apk_path, t)
-        print("Copied to:", t)
-    except Exception as e:
-        print("Warning copying to", t, e)
 
+for dest in destinations:
+    shutil.copyfile(aligned_apk, dest)
+    size_mb = os.path.getsize(dest) / (1024 * 1024)
+    print(f"Updated {dest} ({size_mb:.2f} MB)")
+
+if os.path.exists(r"c:\Aamir Delta\city_backup\apks"):
+    for name in ["HotelCityPark-Owner.apk", "HotelCityPark-Admin.apk"]:
+        dest = os.path.join(r"c:\Aamir Delta\city_backup\apks", name)
+        shutil.copyfile(aligned_apk, dest)
+        print(f"Updated {dest}")
+
+# Cleanup temp files
 if os.path.exists(temp_apk):
     os.remove(temp_apk)
+if os.path.exists(aligned_apk):
+    os.remove(aligned_apk)
+if os.path.exists(bundle_src):
+    os.remove(bundle_src)
 
-print("SUCCESS: HotelCityPark-Owner.apk updated, signed, and deployed to public!")
+print("\nOwner and Admin APKs successfully built and published!")

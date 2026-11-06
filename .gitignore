@@ -33,6 +33,8 @@ qa-selenium.zip
 qa-selenium/
 propmpt.txt
 backup-file/
+backups/
+FIREBASE_CONTEXT.md
 *.zip
 *.lnk
 *firebase*.json

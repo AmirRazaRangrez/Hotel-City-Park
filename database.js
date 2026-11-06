@@ -1001,6 +1001,7 @@ try { db.exec("ALTER TABLE bookings ADD COLUMN is_igst INTEGER DEFAULT 0;"); } c
 try { db.exec("ALTER TABLE bookings ADD COLUMN company_name TEXT DEFAULT NULL;"); } catch (e) {}
 try { db.exec("ALTER TABLE bookings ADD COLUMN gst_number TEXT DEFAULT NULL;"); } catch (e) {}
 try { db.exec("ALTER TABLE bookings ADD COLUMN company_address TEXT DEFAULT NULL;"); } catch (e) {}
+try { db.exec("ALTER TABLE bookings ADD COLUMN checkout_discount_amount REAL DEFAULT 0;"); } catch (e) {}
 try { db.exec("ALTER TABLE guests ADD COLUMN company_name TEXT DEFAULT NULL;"); } catch (e) {}
 try { db.exec("ALTER TABLE guests ADD COLUMN gst_number TEXT DEFAULT NULL;"); } catch (e) {}
 

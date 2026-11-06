@@ -385,9 +385,18 @@ export const api = {
   saveSectionPasswords: (data) => request('/settings/section-passwords', { method: 'POST', body: data }),
 
   // Room Occupancy Chart & 7-Day Matrix
-  getOccupancyChart: (date) => request('/hospitality/occupancy-chart' + (date ? `?date=${encodeURIComponent(date)}` : '')),
-  getCleanerHistory: (date) => request('/hospitality/cleaner-history' + (date ? `?date=${encodeURIComponent(date)}` : '')),
-  getOccupancyMatrix: (startDate) => request('/hospitality/occupancy-matrix' + (startDate ? `?startDate=${startDate}` : '')),
+  getOccupancyChart: (date) => {
+    const validDate = (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date.trim())) ? date.trim() : '';
+    return request('/hospitality/occupancy-chart' + (validDate ? `?date=${encodeURIComponent(validDate)}` : ''));
+  },
+  getCleanerHistory: (date) => {
+    const validDate = (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date.trim())) ? date.trim() : '';
+    return request('/hospitality/cleaner-history' + (validDate ? `?date=${encodeURIComponent(validDate)}` : ''));
+  },
+  getOccupancyMatrix: (startDate) => {
+    const validDate = (typeof startDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(startDate.trim())) ? startDate.trim() : '';
+    return request('/hospitality/occupancy-matrix' + (validDate ? `?startDate=${encodeURIComponent(validDate)}` : ''));
+  },
 
   // Shift Cash Handover Statements (Front Office & F&B)
   updateCFormData: (bookingId, data) => request('/bookings/' + bookingId + '/c-form', { method: 'POST', body: data }),

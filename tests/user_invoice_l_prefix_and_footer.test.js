@@ -68,8 +68,8 @@ describe('User Requirement: Tax Invoice No L-prefix and Bottom Footer Pinning', 
     expect(html).toContain('HCP600');
     expect(html).not.toContain('>260926-600</span></td>\n                    <td style="padding: 1.5px 0 1.5px 12px; width: 50%; white-space: nowrap;">\n                      <span style="color: #333; font-weight: 400;">Reg. No. :');
 
-    // Verify Reg. No. is 260926-600
-    expect(html).toContain('Reg. No. :');
+    // Verify Bill No. is 260926-600
+    expect(html).toContain('Bill No. :');
     expect(html).toContain('260926-600');
 
     // Verify Booking Mode shows only "BTC" without company name
