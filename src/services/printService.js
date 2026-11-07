@@ -4904,8 +4904,8 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
     baseRoomTariffTotal = baseRoomDailyRate * billableDays;
   }
 
-  // Total Undiscounted Base Package
-  const fullGrossPackage = Number((baseRoomTariffTotal + breakfastPlanTotal + extraBedCharge + earlyCheckinCharge + extraRoomsCharge + extraBreakfastCharge + extensionPreTax).toFixed(2));
+  // Total Undiscounted Base Package (Stay package subject to check-in trade discount; extension hours charges are fixed hourly fees and not discounted)
+  const fullGrossPackage = Number((baseRoomTariffTotal + breakfastPlanTotal + extraBedCharge + earlyCheckinCharge + extraRoomsCharge + extraBreakfastCharge).toFixed(2));
 
   let baseGrossTariff = 0;
   if (isBookingOta && otaBillAmount > 0) {
@@ -4989,8 +4989,17 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
   const recordDiscAmt = Number(r.discount_amount ?? r.discountAmount ?? r.discount ?? 0);
   const recordDiscPct = Number(r.discount_pct ?? r.discountPct ?? 0);
 
+  const pctCalculatedDiscount = (!isBookingOta && checkinDiscPct > 0 && baseGrossTariff > 0)
+    ? Math.round((baseGrossTariff * checkinDiscPct) / 100)
+    : 0;
+
   let discountAmt = 0;
-  if (c.stayCalcNow?.discountAmount !== undefined) {
+  if (pctCalculatedDiscount > 0) {
+    discountAmt = pctCalculatedDiscount;
+    if (checkoutDiscAmt > 0 && s.isCheckoutSettlement) {
+      discountAmt = Number((discountAmt + checkoutDiscAmt).toFixed(2));
+    }
+  } else if (c.stayCalcNow?.discountAmount !== undefined) {
     discountAmt = Number(c.stayCalcNow.discountAmount);
   } else if (s.isCheckoutSettlement) {
     // Actively checking out in modal: check-in discount + checkout modal discount
@@ -5080,7 +5089,9 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
       const targetRoomNightBill = Math.max(0, Number((targetRoomBill - extTot).toFixed(2)));
 
       // The body discount is ONLY the trade discount from check-in:
-      const bodyDiscountAmt = Math.min(baseGrossTariff, Math.max(0, checkinDiscAmt));
+      const bodyDiscountAmt = (checkinDiscPct > 0 && baseGrossTariff > 0)
+        ? Math.round((baseGrossTariff * checkinDiscPct) / 100)
+        : Math.min(baseGrossTariff, Math.max(0, checkinDiscAmt));
       discountAmt = bodyDiscountAmt;
       discountPct = checkinDiscPct || (baseGrossTariff > 0 && discountAmt > 0 ? Number(((discountAmt / baseGrossTariff) * 100).toFixed(2)) : 0);
 
@@ -5499,21 +5510,11 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
       const blockEffective = hasMultipleBlocks
         ? dates.reduce((s, d) => { const e = entryMap[d]; return s + ((e && e.isRoomNight && e.dayIndex >= 0) ? (dailyEffectiveArr[e.dayIndex] || 0) : 0); }, 0)
         : (discountAmt > 0 ? Number((baseRoomTariffTotal + breakfastPlanTotal + blockExtraMattress + blockEarlyCheckin + blockExtraRooms + blockExtraBreakfast - discountAmt).toFixed(2)) : (baseRoomTariffTotal + breakfastPlanTotal + blockExtraMattress + blockEarlyCheckin + blockExtraRooms + blockExtraBreakfast));
-      const blockExtension = hasMultipleBlocks
-        ? dates.reduce((s, d) => s + ((d === targetExtensionDate) ? extensionPreTax : 0), 0)
-        : extensionPreTax;
-      const blockIgst = hasMultipleBlocks
-        ? dates.reduce((s, d) => { const e = entryMap[d]; const rVal = (e && e.isRoomNight && e.dayIndex >= 0) ? (dailyIgstArr[e.dayIndex] || 0) : 0; const extVal = (d === targetExtensionDate) ? extensionIgst : 0; return s + rVal + extVal; }, 0)
-        : igst;
-      const blockCgst = hasMultipleBlocks
-        ? dates.reduce((s, d) => { const e = entryMap[d]; const rVal = (e && e.isRoomNight && e.dayIndex >= 0) ? (dailyCgstArr[e.dayIndex] || 0) : 0; const extVal = (d === targetExtensionDate) ? extensionCgst : 0; return s + rVal + extVal; }, 0)
-        : cgst;
-      const blockSgst = hasMultipleBlocks
-        ? dates.reduce((s, d) => { const e = entryMap[d]; const rVal = (e && e.isRoomNight && e.dayIndex >= 0) ? (dailySgstArr[e.dayIndex] || 0) : 0; const extVal = (d === targetExtensionDate) ? extensionSgst : 0; return s + rVal + extVal; }, 0)
-        : sgst;
-      const blockRoomBillTotal = hasMultipleBlocks
-        ? dates.reduce((s, d) => { const e = entryMap[d]; const rVal = (e && e.isRoomNight && e.dayIndex >= 0) ? (dailyRoomBillTotalArr[e.dayIndex] || 0) : 0; const extVal = (d === targetExtensionDate) ? extensionBillTotal : 0; return s + rVal + extVal; }, 0)
-        : roomBillTotal;
+      const blockExtension = dates.reduce((s, d) => s + ((d === targetExtensionDate && !isExtensionOver9Hours) ? extensionPreTax : 0), 0);
+      const blockIgst = dates.reduce((s, d) => { const e = entryMap[d]; const rVal = (e && e.isRoomNight && e.dayIndex >= 0) ? (dailyIgstArr[e.dayIndex] || 0) : 0; const extVal = (d === targetExtensionDate && !isExtensionOver9Hours) ? extensionIgst : 0; return Number((s + rVal + extVal).toFixed(2)); }, 0);
+      const blockCgst = dates.reduce((s, d) => { const e = entryMap[d]; const rVal = (e && e.isRoomNight && e.dayIndex >= 0) ? (dailyCgstArr[e.dayIndex] || 0) : 0; const extVal = (d === targetExtensionDate && !isExtensionOver9Hours) ? extensionCgst : 0; return Number((s + rVal + extVal).toFixed(2)); }, 0);
+      const blockSgst = dates.reduce((s, d) => { const e = entryMap[d]; const rVal = (e && e.isRoomNight && e.dayIndex >= 0) ? (dailySgstArr[e.dayIndex] || 0) : 0; const extVal = (d === targetExtensionDate && !isExtensionOver9Hours) ? extensionSgst : 0; return Number((s + rVal + extVal).toFixed(2)); }, 0);
+      const blockRoomBillTotal = dates.reduce((s, d) => { const e = entryMap[d]; const rVal = (e && e.isRoomNight && e.dayIndex >= 0) ? (dailyRoomBillTotalArr[e.dayIndex] || 0) : 0; const extVal = (d === targetExtensionDate && !isExtensionOver9Hours) ? extensionBillTotal : 0; return Number((s + rVal + extVal).toFixed(2)); }, 0);
 
       const blockFnbGross = hasMultipleBlocks
         ? dates.reduce((s, d) => s + (dailyFnbGrossMap[d] || 0), 0)

@@ -264,8 +264,8 @@ describe('Tax Invoice Dynamic Multi-Day and SAC Layout', () => {
     expect(html).toContain('>04/10</th>');
     expect(html).toContain('>05/10</th>');
 
-    // 2. Extra hours row header
-    expect(html).toContain('Extra Hours Charge (2 Hours)');
+    // 2. Extra hours row header with slot (1–3 Hours)
+    expect(html).toContain('Extra Hours Charge (1–3 Hours)');
 
     // 3. Extension charge 500 under 05/10 and total
     expect(html).toContain('500.00');

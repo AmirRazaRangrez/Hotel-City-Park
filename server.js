@@ -5233,9 +5233,10 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     const nowBreakfastGst = Math.round((nowBreakfastCost * effectiveGstPct) / 100);
     const nowExtensionGst = Math.round((nowExtensionCharge * effectiveGstPct) / 100);
 
-    const nowPreTaxGross = nowBaseRoomTariff + nowExtraMattressCost + nowBreakfastCost + nowExtensionCharge;
+    const nowStayBasePreTax = nowBaseRoomTariff + nowExtraMattressCost + nowBreakfastCost;
+    const nowPreTaxGross = nowStayBasePreTax + nowExtensionCharge;
     const nowDiscountAmount = combinedDiscountPct > 0
-      ? Math.round((nowPreTaxGross * combinedDiscountPct) / 100)
+      ? Math.round((nowStayBasePreTax * combinedDiscountPct) / 100)
       : (combinedDiscountAmount || 0);
     const nowGrossGst = Math.round((nowPreTaxGross * effectiveGstPct) / 100);
     const nowGrossTotal = nowPreTaxGross + nowGrossGst;

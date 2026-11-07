@@ -460,5 +460,76 @@ describe('History Documents Print Accuracy for Group Bookings', () => {
       const html = buildFinalBillA4HTML(bookingNoExtFee, bookingNoExtFee.stayCalcNow, {});
       expect(html).not.toContain('Extra Hours Charge');
     });
+
+    it('8. Room 407 Stay with 10% Discount and 1–3h Extension: Perfect Math Reconciliation (No ₹500 double counting or inflated discount)', () => {
+      const bookingRoom407 = {
+        room_number: '407',
+        guest_name: 'AMIR RAZA IRFAN RANGREZ',
+        address: 'BEGUM PETH, SOLAPUR',
+        voucher_number: '261107-700',
+        checkin_time: '2026-11-07T04:50:00',
+        approx_checkout_time: '2026-11-08T11:00:00',
+        actual_checkout_time: '2026-11-08T18:57:25',
+        adults_male: 1,
+        adults_female: 1,
+        room_rate: 2350,
+        meal_plan: 'with_breakfast',
+        breakfast_price: 250,
+        discount_pct: 10,
+        extension_hours: 2,
+        extension_charge: 500,
+        advance_payment: 1347,
+        total_paid: 1347,
+        stayCalcNow: {
+          chargedDays: 1,
+          billableDays: 1,
+          dailyBaseRate: 2350,
+          baseRoomTariff: 2350,
+          breakfastCost: 500,
+          breakfastPax: 2,
+          breakfastDailyRate: 250,
+          grossTariff: 2850,
+          discountPct: 10,
+          discountAmount: 285,
+          extensionCharge: 500,
+          extensionHours: 2,
+          extensionSlotLabel: '1–3 Hours',
+          advancePaid: 1347
+        }
+      };
+
+      const html = buildFinalBillA4HTML(bookingRoom407, bookingRoom407.stayCalcNow, {});
+
+      // 1. Discount must strictly be 10% on Stay Base (2350 + 500 = 2850 -> 285.00), NEVER 335.00
+      expect(html).toContain('Less Discount (10%)');
+      expect(html).toContain('-285.00');
+      expect(html).not.toContain('-335.00');
+
+      // 2. Day 1 Effective Tariff = 2565.00
+      expect(html).toContain('2565.00');
+      expect(html).not.toContain('2515.00');
+
+      // 3. Extra Hours row 500.00
+      expect(html).toContain('Extra Hours Charge (1–3 Hours)');
+      expect(html).toContain('500.00');
+
+      // 4. Room Bill Total on Day 1 is 2693.25, Extension is 525.00, and Block Room Bill Total is 3218.25 (NOT 3690.75)
+      expect(html).toContain('2693.25');
+      expect(html).toContain('525.00');
+      expect(html).toContain('3218.25');
+      expect(html).not.toContain('3690.75');
+
+      // 5. Invoice Total is 3218.00 (NOT 3691.00)
+      expect(html).toContain('3218.00');
+      expect(html).not.toContain('3691.00');
+
+      // 6. Net Payable is 1871.00 (NOT 2344.00)
+      expect(html).toContain('1871.00');
+      expect(html).not.toContain('2344.00');
+
+      // 7. Words representation
+      expect(html).toContain('Three Thousand Two Hundred And Eighteen');
+      expect(html).toContain('One Thousand Eight Hundred And Seventy One');
+    });
   });
 });

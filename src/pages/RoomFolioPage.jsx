@@ -3414,14 +3414,13 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
           const nowExtraMattressCost = Number(folioData.stayCalcNow?.extraMattressCost ?? (nowDays * extraBedDaily));
           const nowBreakfastCost = Number(folioData.stayCalcNow?.breakfastCost ?? (hasBreakfast ? (nowDays * breakfastPax * breakfastDailyRate) : 0));
           const nowExtensionCharge = Number(folioData.stayCalcNow?.extensionCharge ?? folioData.earlyExtensionCharge ?? 0);
-          const nowPreTaxGross = Number(folioData.stayCalcNow?.baseRoomTariff !== undefined
-            ? (nowBaseTariff + nowExtraMattressCost + nowBreakfastCost + nowExtensionCharge)
-            : (nowBaseTariff + nowExtraMattressCost + nowBreakfastCost + nowExtensionCharge));
+          const nowStayBaseGross = nowBaseTariff + nowExtraMattressCost + nowBreakfastCost;
+          const nowPreTaxGross = nowStayBaseGross + nowExtensionCharge;
 
           const nowDiscountAmount = Number(
             folioData.stayCalcNow?.discountAmount ??
             (folioData.discountPct > 0
-              ? Math.round((nowPreTaxGross * folioData.discountPct) / 100)
+              ? Math.round((nowStayBaseGross * folioData.discountPct) / 100)
               : (folioData.discountAmount || 0))
           );
           const nowPreTaxRoom = Number(folioData.stayCalcNow?.roomSubtotalPreTax ?? (nowPreTaxGross - nowDiscountAmount));
@@ -4389,13 +4388,14 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                 const nowExtensionCharge = Number(folioData.stayCalcNow?.extensionCharge ?? folioData.earlyExtensionCharge ?? 0);
                 const nowExtensionGst = Number(folioData.stayCalcNow?.extensionGst ?? Math.round((nowExtensionCharge * effectiveGstPct) / 100));
 
-                const nowPreTaxGross = nowBaseTariff + nowExtraMattressCost + nowBreakfastCost + nowExtensionCharge;
+                const nowStayBaseGross = nowBaseTariff + nowExtraMattressCost + nowBreakfastCost;
+                const nowPreTaxGross = nowStayBaseGross + nowExtensionCharge;
                 const nowGrossGst = Math.round((nowPreTaxGross * effectiveGstPct) / 100);
                 const nowGrossTotal = nowPreTaxGross + nowGrossGst;
                 const nowDiscountAmount = Number(
                   folioData.stayCalcNow?.discountAmount ??
                   (folioData.discountPct > 0
-                    ? Math.round((nowPreTaxGross * folioData.discountPct) / 100)
+                    ? Math.round((nowStayBaseGross * folioData.discountPct) / 100)
                     : (folioData.discountAmount || 0))
                 );
                 const nowPreTaxRoom = Number(folioData.stayCalcNow?.roomSubtotalPreTax ?? (nowPreTaxGross - nowDiscountAmount));
