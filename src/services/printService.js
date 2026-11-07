@@ -4650,13 +4650,47 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
 
   const extraMattressCount = Number((r.extra_beds ?? c.extra_beds ?? c.extraBeds ?? r.extraBeds ?? (Number(r.extra_bed_charge || c.hotelExtrasCharge || 0) > 0 ? 1 : 0)) || 0);
   const baseBedCapacity = Number(r.max_adults ?? c.max_adults ?? 2);
-  let adults = (Number(r.adults_male || 0) + Number(r.adults_female || 0) + Number(r.adults_other || 0)) || Number(r.adults || 0) || 1;
+
+  // Group rooms Pax resolution: sum across rooms if group details are available
+  let groupPaxSum = 0;
+  if (Array.isArray(r.group_room_details) && r.group_room_details.length > 0) {
+    groupPaxSum = r.group_room_details.reduce((sum, gr) => sum + (Number(gr.adults_male || gr.adultsMale || 0) + Number(gr.adults_female || gr.adultsFemale || 0) + Number(gr.adults_other || gr.adultsOther || 0) + Number(gr.children || 0)), 0);
+  } else if (Array.isArray(r.all_group_rooms) && r.all_group_rooms.length > 0) {
+    groupPaxSum = r.all_group_rooms.reduce((sum, gr) => sum + (Number(gr.adults_male || gr.adultsMale || 0) + Number(gr.adults_female || gr.adultsFemale || 0) + Number(gr.adults_other || gr.adultsOther || 0) + Number(gr.children || 0)), 0);
+  } else if (Array.isArray(c.group_room_details) && c.group_room_details.length > 0) {
+    groupPaxSum = c.group_room_details.reduce((sum, gr) => sum + (Number(gr.adults_male || gr.adultsMale || 0) + Number(gr.adults_female || gr.adultsFemale || 0) + Number(gr.adults_other || gr.adultsOther || 0) + Number(gr.children || 0)), 0);
+  }
+
+  // Direct Adult counts from room / calc / stayCalcNow
+  const rawMale = Number(r.adults_male ?? r.adultsMale ?? c.adults_male ?? c.adultsMale ?? 0);
+  const rawFemale = Number(r.adults_female ?? r.adultsFemale ?? c.adults_female ?? c.adultsFemale ?? 0);
+  const rawOther = Number(r.adults_other ?? r.adultsOther ?? c.adults_other ?? c.adultsOther ?? 0);
+  const directAdultsSum = rawMale + rawFemale + rawOther;
+
+  const totalAdultsField = Number(r.total_adults ?? r.totalAdults ?? c.total_adults ?? c.totalAdults ?? r.adults ?? c.adults ?? 0);
+  const explicitPaxField = Number(r.pax ?? r.total_pax ?? r.totalPax ?? c.pax ?? c.total_pax ?? c.totalPax ?? 0);
+  const breakfastPaxField = Number(c.stayCalcNow?.breakfastPax ?? r.stayCalcNow?.breakfastPax ?? c.breakfastPax ?? r.breakfastPax ?? 0);
+
+  let adults = groupPaxSum > 0
+    ? groupPaxSum
+    : (directAdultsSum > 0
+        ? directAdultsSum
+        : (totalAdultsField > 0
+            ? totalAdultsField
+            : (explicitPaxField > 0
+                ? explicitPaxField
+                : (breakfastPaxField > 0
+                    ? breakfastPaxField
+                    : 1))));
+
   // User Requirement: "if 2 bed + 1 Extra mattress = it will be 1pax or 3 pax (we want it should be 3 pax)"
-  if (extraMattressCount > 0) {
+  if (extraMattressCount > 0 && groupPaxSum <= 0) {
     adults = Math.max(adults, baseBedCapacity + extraMattressCount);
   }
-  const children = Number(r.children || 0);
-  const paxStr = children > 0 ? `${adults + children}` : `${adults}`;
+  const children = Number(r.children ?? r.childrenCount ?? c.children ?? 0);
+  const paxStr = (explicitPaxField > 0 && explicitPaxField > adults)
+    ? `${explicitPaxField}`
+    : (children > 0 && groupPaxSum <= 0 ? `${adults + children}` : `${adults}`);
 
   const arrivalDt = r.checkin_time || r.checkinTime || r.check_in || c.checkin_time || c.checkinTime || c.check_in || new Date();
   const departureDt = s.settled_at || r.actual_checkout_time || r.checkout_time || r.checkoutTime || r.check_out || c.check_out || new Date();
@@ -4758,13 +4792,20 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
     } catch (_) { }
   }
 
+  // If extension exceeds 9 hours, by hotel rule it rolls over into 1 full day of room tariff instead of hourly extension
+  const isExtensionOver9Hours = extensionHours > 9;
+  if (isExtensionOver9Hours) {
+    rawExtensionCharge = 0;
+  }
+
   const isBookingOtaCheck = Boolean(isBookingOta);
+  const activeStayCalc = c.stayCalcNow || r.stayCalcNow || summary.stayCalcNow || null;
   let extensionPreTax = 0;
   let extensionCharge = 0;
-  if (summary.stayCalcNow && summary.stayCalcNow.extensionCharge > 0) {
-    extensionPreTax = Number(summary.stayCalcNow.extensionCharge);
-    extensionCharge = Number(summary.stayCalcNow.extensionTotal || (extensionPreTax * 1.05));
-  } else if (rawExtensionCharge > 0) {
+  if (!isExtensionOver9Hours && activeStayCalc && activeStayCalc.extensionCharge > 0) {
+    extensionPreTax = Number(activeStayCalc.extensionCharge);
+    extensionCharge = Number(activeStayCalc.extensionTotal || (extensionPreTax * 1.05));
+  } else if (!isExtensionOver9Hours && rawExtensionCharge > 0) {
     if (!isBookingOtaCheck && Number(c.grossTariff || c.roomGrossTariff || 0) > 0 && Number(c.discountAmount || 0) > 0) {
       extensionPreTax = rawExtensionCharge;
       extensionCharge = Number((rawExtensionCharge * 1.05).toFixed(2));
@@ -4773,6 +4814,28 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
       extensionPreTax = isBookingOtaCheck
         ? Math.round(rawExtensionCharge * 0.95 * 100) / 100
         : Math.round((rawExtensionCharge / 1.05) * 100) / 100;
+    }
+  }
+
+  // Extra Hours Slot Label (1–3 Hours, 3–6 Hours, 6–9 Hours)
+  let extensionSlotLabel = c.extensionSlotLabel || activeStayCalc?.extensionSlotLabel || r.extensionSlotLabel || '';
+  if (!extensionSlotLabel && extensionPreTax > 0) {
+    if (extensionHours > 0 && extensionHours <= 3) {
+      extensionSlotLabel = '1–3 Hours';
+    } else if (extensionHours > 3 && extensionHours <= 6) {
+      extensionSlotLabel = '3–6 Hours';
+    } else if (extensionHours > 6 && extensionHours <= 9) {
+      extensionSlotLabel = '6–9 Hours';
+    } else {
+      const r3h = Number(r.ext_3h_rate || 500);
+      const r6h = Number(r.ext_6h_rate || 1000);
+      if (extensionPreTax <= r3h) {
+        extensionSlotLabel = '1–3 Hours';
+      } else if (extensionPreTax <= r6h) {
+        extensionSlotLabel = '3–6 Hours';
+      } else {
+        extensionSlotLabel = '6–9 Hours';
+      }
     }
   }
 
@@ -5013,7 +5076,7 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
       const targetTotalBill = checkoutDiscAmt > 0 ? (targetGrossPayable + checkoutDiscAmt) : targetGrossPayable;
       const nonRoomBill = (hasFnb ? fnbBillTotal : 0) + cardSurcharge + upiTax;
       const targetRoomBill = Math.max(0, targetTotalBill - nonRoomBill);
-      const extTot = (extensionPreTax > 0 || extensionHours > 0) ? extensionBillTotal : 0;
+      const extTot = extensionPreTax > 0 ? extensionBillTotal : 0;
       const targetRoomNightBill = Math.max(0, Number((targetRoomBill - extTot).toFixed(2)));
 
       // The body discount is ONLY the trade discount from check-in:
@@ -5188,7 +5251,7 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
     }
 
     // 4. Add checkout date if extra hours / extension charge exists and checkout date is not already in stayDateEntries
-    if (extensionPreTax > 0 || extensionHours > 0) {
+    if (extensionPreTax > 0) {
       let depDate = new Date(departureDt);
       if (isNaN(depDate.getTime()) && typeof departureDt === 'string') {
         depDate = new Date(departureDt.replace(' ', 'T'));
@@ -5600,11 +5663,11 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
           </tr>
           ` : ''}
 
-          <!-- Extra Hours / Stay Extension if present -->
-          ${(extensionPreTax > 0 || extensionHours > 0) ? `
+          <!-- Extra Hours / Stay Extension if present (ONLY if applicable, slots: 1–3 Hours, 3–6 Hours, 6–9 Hours) -->
+          ${(extensionPreTax > 0 && blockExtension > 0 && !isExtensionOver9Hours) ? `
           <tr style="background: transparent;">
             <td style="padding: 2.2px 6px; font-weight: 400; color: #000; width: ${particularsWidth};">
-              ${extensionHours > 0 ? `Extra Hours Charge (${extensionHours} Hour${extensionHours === 1 ? '' : 's'})` : 'Extra Hours Charge'}
+              Extra Hours Charge (${extensionSlotLabel || (extensionHours > 0 ? `${extensionHours} Hour${extensionHours === 1 ? '' : 's'}` : '1–3 Hours')})
             </td>
             ${dates.map(d => {
         const val = (d === targetExtensionDate) ? extensionPreTax : 0;

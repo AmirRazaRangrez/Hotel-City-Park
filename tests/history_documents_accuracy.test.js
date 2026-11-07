@@ -145,6 +145,9 @@ describe('History Documents Print Accuracy for Group Bookings', () => {
     expect(html).toContain('7681.00'); // Total & Advance
     expect(html).toContain('0.00');    // Net Payable: Rs. Zero Only
     expect(html).toContain('Net Payable Amount In words : Rs. Zero Only');
+
+    // Assert true group Pax count (3 male in 502 + 3 female in 506 = 6 Pax)
+    expect(html).toMatch(/Pax\s*:\s*<\/span>\s*<span[^>]*>6<\/span>/i);
   });
 
   it('2. Check-In Form from History: Displays declared stay, true advance paid, and cash payment badge', () => {
@@ -314,6 +317,148 @@ describe('History Documents Print Accuracy for Group Bookings', () => {
       expect(html).toContain('1,421.00');
       expect(html).toContain('2,842.00');
       expect(html).toContain('word-break: break-word');
+    });
+  });
+
+  describe('Pax Count & Extra Hours Slots on Tax Invoice', () => {
+    it('1. Group Booking History Reprint: Shows total group Pax (6 Pax) instead of 1 Pax', () => {
+      const groupRoom2 = {
+        id: 5,
+        room_number: '502, 506',
+        voucher_number: '261106-696',
+        adults_male: 0,
+        adults_female: 0,
+        all_group_rooms: [
+          { room_number: '502', adults_male: 3, adults_female: 0 },
+          { room_number: '506', adults_male: 0, adults_female: 3 }
+        ],
+        group_room_details: [
+          { room_number: '502', adults_male: 3, adults_female: 0 },
+          { room_number: '506', adults_male: 0, adults_female: 3 }
+        ]
+      };
+      const html = buildFinalBillA4HTML(groupRoom2, groupRoom2, {});
+      expect(html).toMatch(/Pax\s*:\s*<\/span>\s*<span[^>]*>6<\/span>/i);
+      expect(html).not.toMatch(/Pax\s*:\s*<\/span>\s*<span[^>]*>1<\/span>/i);
+    });
+
+    it('2. Single Room Booking History Reprint: Preserves true occupancy (2 Pax)', () => {
+      const singleRoom = {
+        room_number: '404',
+        adults_male: 1,
+        adults_female: 1,
+        children: 0,
+        stayCalcNow: { breakfastPax: 2, chargedDays: 1, dailyBaseRate: 2350, baseRoomTariff: 2350, effectiveTariff: 2707 }
+      };
+      const html = buildFinalBillA4HTML(singleRoom, singleRoom, {});
+      expect(html).toMatch(/Pax\s*:\s*<\/span>\s*<span[^>]*>2<\/span>/i);
+    });
+
+    it('3. Extra Hours 1–3 Hours Slot: Shows Extra Hours Charge (1–3 Hours) when applicable', () => {
+      const bookingExt3h = {
+        room_number: '101',
+        adults_male: 2,
+        extension_hours: 2,
+        extension_charge: 500,
+        stayCalcNow: {
+          chargedDays: 1,
+          billableDays: 1,
+          dailyBaseRate: 2000,
+          baseRoomTariff: 2000,
+          extensionHours: 2,
+          extensionCharge: 500,
+          extensionSlotLabel: '1–3 Hours',
+          effectiveTariff: 2500
+        }
+      };
+      const html = buildFinalBillA4HTML(bookingExt3h, bookingExt3h.stayCalcNow, {});
+      expect(html).toContain('Extra Hours Charge (1–3 Hours)');
+      expect(html).toContain('500.00');
+    });
+
+    it('4. Extra Hours 3–6 Hours Slot: Shows Extra Hours Charge (3–6 Hours) when applicable', () => {
+      const bookingExt6h = {
+        room_number: '101',
+        adults_male: 2,
+        extension_hours: 5,
+        extension_charge: 1000,
+        stayCalcNow: {
+          chargedDays: 1,
+          billableDays: 1,
+          dailyBaseRate: 2000,
+          baseRoomTariff: 2000,
+          extensionHours: 5,
+          extensionCharge: 1000,
+          extensionSlotLabel: '3–6 Hours',
+          effectiveTariff: 3000
+        }
+      };
+      const html = buildFinalBillA4HTML(bookingExt6h, bookingExt6h.stayCalcNow, {});
+      expect(html).toContain('Extra Hours Charge (3–6 Hours)');
+      expect(html).toContain('1000.00');
+    });
+
+    it('5. Extra Hours 6–9 Hours Slot: Shows Extra Hours Charge (6–9 Hours) when applicable', () => {
+      const bookingExt9h = {
+        room_number: '101',
+        adults_male: 2,
+        extension_hours: 8,
+        extension_charge: 1500,
+        stayCalcNow: {
+          chargedDays: 1,
+          billableDays: 1,
+          dailyBaseRate: 2000,
+          baseRoomTariff: 2000,
+          extensionHours: 8,
+          extensionCharge: 1500,
+          extensionSlotLabel: '6–9 Hours',
+          effectiveTariff: 3500
+        }
+      };
+      const html = buildFinalBillA4HTML(bookingExt9h, bookingExt9h.stayCalcNow, {});
+      expect(html).toContain('Extra Hours Charge (6–9 Hours)');
+      expect(html).toContain('1500.00');
+    });
+
+    it('6. Extension Over 9 Hours: Converted to 1 full day room rent with NO hourly line item', () => {
+      const bookingOver9h = {
+        room_number: '101',
+        adults_male: 2,
+        extension_hours: 15, // > 9 hours
+        extension_charge: 0,
+        stayCalcNow: {
+          chargedDays: 2, // 1 base day + 1 day for extension
+          billableDays: 2,
+          dailyBaseRate: 2000,
+          baseRoomTariff: 4000,
+          extensionHours: 15,
+          extensionCharge: 0,
+          effectiveTariff: 4000
+        }
+      };
+      const html = buildFinalBillA4HTML(bookingOver9h, bookingOver9h.stayCalcNow, {});
+      expect(html).not.toContain('Extra Hours Charge');
+      expect(html).not.toContain('Extra Hours Charge (15 Hours)');
+      expect(html).toContain('4000.00'); // 2 full days charged under Room Tariff
+    });
+
+    it('7. Elapsed 15 Hours on 1-Day Stay: Suppresses 0.00 Extra Hours row', () => {
+      const bookingNoExtFee = {
+        room_number: '404',
+        adults_male: 1,
+        adults_female: 1,
+        stayCalcNow: {
+          chargedDays: 1,
+          billableDays: 1,
+          dailyBaseRate: 2350,
+          baseRoomTariff: 2350,
+          extensionHours: 15, // elapsed hours without penalty
+          extensionCharge: 0,
+          effectiveTariff: 2350
+        }
+      };
+      const html = buildFinalBillA4HTML(bookingNoExtFee, bookingNoExtFee.stayCalcNow, {});
+      expect(html).not.toContain('Extra Hours Charge');
     });
   });
 });

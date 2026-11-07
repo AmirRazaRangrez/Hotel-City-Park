@@ -3664,6 +3664,21 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
       ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.discount_amount) || 0), 0)
       : Number(booking.discount_amount || 0);
 
+    const totalGroupAdultsMale = isGroup
+      ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.adults_male) || 0), 0)
+      : (booking.adults_male !== undefined && booking.adults_male !== null ? Number(booking.adults_male) : 1);
+    const totalGroupAdultsFemale = isGroup
+      ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.adults_female) || 0), 0)
+      : Number(booking.adults_female || 0);
+    const totalGroupAdultsOther = isGroup
+      ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.adults_other) || 0), 0)
+      : Number(booking.adults_other || 0);
+    const totalGroupChildren = isGroup
+      ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.children) || 0), 0)
+      : Number(booking.children || 0);
+    const totalGroupAdults = (totalGroupAdultsMale + totalGroupAdultsFemale + totalGroupAdultsOther) || 1;
+    const totalGroupPax = (totalGroupAdults + totalGroupChildren) || 1;
+
     const extra = totalGroupExtraBedCharge;
     const discount = totalGroupDiscountAmount;
     const tax = Number(booking.early_checkin_gst || Math.max(0, Math.round(roomCharge - (roomCharge / 1.05))));
@@ -3833,6 +3848,18 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
       checkout_time: effectiveCheckoutTime,
       actual_checkout_time: actualCheckoutTime,
       is_group_booking: isGroup,
+      adults_male: totalGroupAdultsMale,
+      adults_female: totalGroupAdultsFemale,
+      adults_other: totalGroupAdultsOther,
+      adultsMale: totalGroupAdultsMale,
+      adultsFemale: totalGroupAdultsFemale,
+      adultsOther: totalGroupAdultsOther,
+      total_adults: totalGroupAdults,
+      totalAdults: totalGroupAdults,
+      children: totalGroupChildren,
+      pax: totalGroupPax,
+      total_pax: totalGroupPax,
+      totalPax: totalGroupPax,
       member_documents: memberDocs,
       memberDocuments: memberDocs,
       payments: payments || [],
@@ -3848,6 +3875,11 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
         total_room_charge: gb.total_room_charge,
         extra_beds: gb.extra_beds,
         extra_bed_charge: gb.extra_bed_charge,
+        adults_male: gb.adults_male,
+        adults_female: gb.adults_female,
+        adultsMale: gb.adults_male,
+        adultsFemale: gb.adults_female,
+        children: gb.children,
         meal_plan: gb.meal_plan,
         status: gb.status
       })),
@@ -4257,6 +4289,18 @@ function calculateActualStayAndExtension({
     stayDurationStr = `${Math.max(1, extraHours)} hr${extraHours > 1 ? 's' : ''} (1 Day Min)`;
   }
 
+  // Slot Label for Extra Hours (1–3 Hours, 3–6 Hours, 6–9 Hours)
+  let extensionSlotLabel = null;
+  if (extensionCharge > 0) {
+    if (extraHours <= 3) {
+      extensionSlotLabel = '1–3 Hours';
+    } else if (extraHours <= 6) {
+      extensionSlotLabel = '3–6 Hours';
+    } else if (extraHours <= 9) {
+      extensionSlotLabel = '6–9 Hours';
+    }
+  }
+
   return {
     isEarlyCheckout,
     expectedNights,
@@ -4265,6 +4309,7 @@ function calculateActualStayAndExtension({
     extraMins,
     chargedDays,
     extensionCharge,
+    extensionSlotLabel,
     recalculatedRoomCharge: Math.round(recalculatedRoomCharge),
     originalRoomCharge: Math.round(originalCharge),
     differenceRefundDue: Math.max(0, Math.round(originalCharge - recalculatedRoomCharge)),
@@ -13041,6 +13086,14 @@ app.get('/api/hospitality/history', (req, res) => {
       if (Array.isArray(entry.room_types) && entry.room_types.length > 0) {
         entry.room_type = Array.from(new Set(entry.room_types.filter(Boolean))).join(', ');
       }
+      entry.adultsMale = entry.adults_male;
+      entry.adultsFemale = entry.adults_female;
+      entry.total_adults = (Number(entry.adults_male) || 0) + (Number(entry.adults_female) || 0) + (Number(entry.adults_other) || 0);
+      if (entry.total_adults === 0) entry.total_adults = 1;
+      entry.totalAdults = entry.total_adults;
+      entry.pax = entry.total_adults + (Number(entry.children) || 0);
+      entry.total_pax = entry.pax;
+      entry.totalPax = entry.pax;
     });
     historyList.sort((a, b) => {
       const tA = a.last_activity_time ? new Date(a.last_activity_time).getTime() : (a.id || 0);
@@ -14411,11 +14464,36 @@ app.get('/api/hospitality/history/:bookingId', (req, res) => {
     let durationStr = `${days > 0 ? days + 'd ' : ''}${hours}h`;
     if (durationStr.trim() === '0h') durationStr = '1h (Active)';
 
+    const totalAdults = (totalAdultsMale + totalAdultsFemale + totalAdultsOther) || 1;
+    const totalPax = (totalAdults + totalChildren) || 1;
+
     const record = {
       ...primaryBooking,
       status: primaryBooking.status,
       rooms: allLinkedBookings.map(b => b.room_number),
-      all_group_rooms: allLinkedBookings.map(b => ({ id: b.room_id, room_number: b.room_number, room_type: b.room_type })),
+      all_group_rooms: allLinkedBookings.map(b => ({
+        id: b.room_id,
+        room_number: b.room_number,
+        room_type: b.room_type,
+        adults_male: b.adults_male,
+        adults_female: b.adults_female,
+        adultsMale: b.adults_male,
+        adultsFemale: b.adults_female,
+        children: b.children,
+        extra_beds: b.extra_beds
+      })),
+      adults_male: totalAdultsMale,
+      adults_female: totalAdultsFemale,
+      adults_other: totalAdultsOther,
+      adultsMale: totalAdultsMale,
+      adultsFemale: totalAdultsFemale,
+      adultsOther: totalAdultsOther,
+      total_adults: totalAdults,
+      totalAdults: totalAdults,
+      children: totalChildren,
+      pax: totalPax,
+      total_pax: totalPax,
+      totalPax: totalPax,
       stay_duration_str: durationStr,
       total_room_charge: totalRoomCharge,
       total_paid: totalPaid,

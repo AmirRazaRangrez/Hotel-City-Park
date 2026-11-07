@@ -72,15 +72,34 @@ export default function DocumentActionModal({
     if (!invData) return { room: null, calc: null, settlement: null };
     const cashierName = currentUser?.full_name || currentUser?.name || currentUser?.username || 'Cashier_1';
     if (invData.room) {
+      const room = invData.room;
+      const baseCalc = invData.calc || invData.room;
+      const activeCalc = room.tax_invoice_snapshot?.stayCalcNow || room.stayCalcNow || baseCalc?.stayCalcNow;
       return {
-        room: invData.room,
-        calc: invData.calc || invData.room,
+        room,
+        calc: {
+          ...baseCalc,
+          adults_male: baseCalc.adults_male ?? room.adults_male,
+          adults_female: baseCalc.adults_female ?? room.adults_female,
+          adultsMale: baseCalc.adultsMale ?? room.adultsMale,
+          adultsFemale: baseCalc.adultsFemale ?? room.adultsFemale,
+          total_adults: baseCalc.total_adults ?? room.total_adults,
+          totalAdults: baseCalc.totalAdults ?? room.totalAdults,
+          children: baseCalc.children ?? room.children,
+          pax: baseCalc.pax ?? room.pax,
+          totalPax: baseCalc.totalPax ?? room.totalPax,
+          group_room_details: baseCalc.group_room_details || room.group_room_details || room.all_group_rooms,
+          all_group_rooms: baseCalc.all_group_rooms || room.all_group_rooms,
+          extensionSlotLabel: baseCalc.extensionSlotLabel || activeCalc?.extensionSlotLabel || room.extensionSlotLabel,
+          extensionHours: baseCalc.extensionHours ?? activeCalc?.extensionHours ?? room.extension_hours,
+          extensionCharge: baseCalc.extensionCharge ?? activeCalc?.extensionCharge ?? room.extension_charge
+        },
         settlement: invData.settlement || {
-          settleAmt: 0,
-          refundAmt: 0,
-          settled_at: new Date(),
-          invoiceNo: invData.room?.invoice_no,
-          checked_out_by: invData.room?.checked_out_by || cashierName
+          settleAmt: room.final_settlement_payment || room.final_settle_amount || 0,
+          refundAmt: room.refund_amount || 0,
+          settled_at: room.actual_checkout_time || room.checkout_time || new Date(),
+          invoiceNo: room.invoice_no,
+          checked_out_by: room.checked_out_by || cashierName
         }
       };
     }
@@ -111,7 +130,21 @@ export default function DocumentActionModal({
       stayCalcNow: activeCalc || null,
       stayCalcDeclared: room.stayCalcDeclared || room.tax_invoice_snapshot?.stayCalcDeclared || null,
       restaurantOrders: room.restaurantOrders || room.restaurant_orders || [],
-      barOrders: room.barOrders || room.bar_orders || []
+      barOrders: room.barOrders || room.bar_orders || [],
+      adults_male: room.adults_male,
+      adults_female: room.adults_female,
+      adultsMale: room.adultsMale ?? room.adults_male,
+      adultsFemale: room.adultsFemale ?? room.adults_female,
+      total_adults: room.total_adults ?? room.totalAdults,
+      totalAdults: room.totalAdults ?? room.total_adults,
+      children: room.children,
+      pax: room.pax,
+      totalPax: room.totalPax ?? room.pax,
+      group_room_details: room.group_room_details || room.all_group_rooms,
+      all_group_rooms: room.all_group_rooms,
+      extensionSlotLabel: activeCalc?.extensionSlotLabel || room.extensionSlotLabel || null,
+      extensionHours: activeCalc?.extensionHours || room.extension_hours || 0,
+      extensionCharge: activeCalc?.extensionCharge || room.extension_charge || 0
     };
     const settlement = {
       settleAmt: room.final_settlement_payment || room.final_settle_amount || 0,
