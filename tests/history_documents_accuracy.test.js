@@ -195,4 +195,125 @@ describe('History Documents Print Accuracy for Group Bookings', () => {
     expect(html).toContain('1,200.00');
     expect(html).toContain('7,681');
   });
+
+  describe('Single Room 404 with Breakfast Plan (User Scenarios Fix Verification)', () => {
+    const room404Booking = {
+      id: 697,
+      voucher_number: '261107-697',
+      guest_name: 'yahya mundewadi',
+      mobile: '9028850715',
+      room_number: '404',
+      room_type: 'Executive Room',
+      booking_source: 'Walk-in',
+      meal_plan: 'with_breakfast',
+      adults_male: 1,
+      adults_female: 1,
+      children: 0,
+      extra_beds: 0,
+      extra_bed_charge: 0,
+      discount_pct: 5,
+      discount_amount: 143,
+      tax_amount: 135,
+      total_room_charge: 2842,
+      advance_payment: 1421,
+      advance_payment_mode: 'cash',
+      total_paid: 2842,
+      final_settlement_payment: 1421,
+      payments: [
+        {
+          id: 4,
+          receipt_no: 'CR04',
+          payment_type: 'advance',
+          payment_mode: 'cash',
+          amount: 1421,
+          split_cash: 1421,
+          created_at: '2026-11-07T09:41:00',
+          notes: 'paid while checkin : Cash'
+        },
+        {
+          id: 5,
+          receipt_no: 'CR05',
+          payment_type: 'settlement',
+          payment_mode: 'cash',
+          amount: 1421,
+          split_cash: 1421,
+          created_at: '2026-11-07T09:45:00',
+          notes: 'Checkout bill settlement for Room 404: Cash'
+        }
+      ],
+      stayCalcNow: {
+        chargedDays: 1,
+        billableDays: 1,
+        dailyBaseRate: 2350,
+        baseRoomTariff: 2350,
+        extraMattressCost: 0,
+        breakfastPax: 2,
+        breakfastDailyRate: 500,
+        breakfastCost: 500,
+        grossTariff: 2850,
+        discountPct: 5,
+        discountAmount: 143,
+        effectiveTariff: 2707,
+        taxAmount: 135,
+        roomGst: 135,
+        totalStayCost: 2842,
+        grandTotal: 2842,
+        advancePaid: 1421,
+        balanceDue: 0
+      },
+      stayCalcDeclared: {
+        expectedNights: 1,
+        chargedDays: 1,
+        dailyBaseRate: 2350,
+        baseRoomTariff: 2350,
+        extraMattressCost: 0,
+        breakfastCost: 500,
+        breakfastPax: 2,
+        grossTariff: 2850,
+        discountPct: 5,
+        discountAmount: 143,
+        effectiveTariff: 2707,
+        taxAmount: 135,
+        roomGst: 135,
+        grandTotal: 2842,
+        advancePaid: 1421,
+        balanceDue: 1421
+      }
+    };
+
+    it('Check-In Form (Initial & Reprint): Consistently displays ₹2,850.00 Gross Tariff and balanced math', () => {
+      const html = buildGuestRegistrationHTML(room404Booking, { includePhotos: false });
+      expect(html).toContain('2,850.00'); // Pre-discount Room Tariff (Net)
+      expect(html).toContain('143.00');   // 5% discount
+      expect(html).toContain('135.00');   // 5% GST
+      expect(html).toContain('2,842.00'); // Grand Total
+      expect(html).toContain('1,421.00'); // Advance paid
+      expect(html).not.toContain('None recorded');
+      expect(html).toContain('Cash: ₹ 1,421');
+    });
+
+    it('Activities Summary: Itemizes breakfast, sets stay bill to ₹2,842.00, and eliminates ₹492 bogus refund', () => {
+      const html = buildGuestActivitiesSummaryHTML(room404Booking);
+      expect(html).toContain('2,350.00'); // Base room
+      expect(html).toContain('Breakfast Included Plan');
+      expect(html).toContain('500.00');   // Breakfast cost
+      expect(html).toContain('143.00');   // Discount
+      expect(html).toContain('135.00');   // Room GST
+      expect(html).toContain('2,842.00'); // Total Room Stay Cost
+      expect(html).not.toContain('492.00'); // NO BOGUS REFUND!
+      expect(html).not.toContain('Refund Due to Guest:');
+      expect(html).toContain('Fully Settled');
+    });
+
+    it('Payment Summary: Table has table-layout: fixed, prevents overflow, and properly formats particulars', () => {
+      const html = buildGuestPaymentSummaryHTML(room404Booking);
+      expect(html).toContain('table-layout: fixed');
+      expect(html).toContain('Amount (₹)');
+      expect(html).toContain('CR04');
+      expect(html).toContain('CR05');
+      expect(html).toContain('1,421.00');
+      expect(html).toContain('2,842.00');
+      expect(html).toContain('word-break: break-word');
+    });
+  });
 });

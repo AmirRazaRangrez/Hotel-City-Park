@@ -2299,8 +2299,18 @@ export function buildGuestRegistrationHTML(data, options = { includePhotos: fals
     grandTotal = Number(data.total_room_charge);
   }
 
-  let tariffNet = Number(declaredCalc?.baseRoomTariff ?? declaredCalc?.effectiveTariff ?? (data.roomTariffNet !== undefined ? data.roomTariffNet : (data.netCharge !== undefined ? data.netCharge : 0)));
-  let taxAmount = Number(declaredCalc?.taxAmount ?? (data.taxAmount !== undefined ? data.taxAmount : (data.tax_amount || 0)));
+  const declaredGrossTariff = Number(
+    declaredCalc?.grossTariff ??
+    declaredCalc?.grossTotal ??
+    (declaredCalc?.baseRoomTariff !== undefined
+      ? (Number(declaredCalc.baseRoomTariff || 0) + Number(declaredCalc.breakfastCost || 0) + Number(declaredCalc.extraMattressCost || 0))
+      : undefined)
+  );
+
+  let tariffNet = declaredGrossTariff > 0
+    ? declaredGrossTariff
+    : Number(data.roomTariffNet !== undefined ? data.roomTariffNet : (data.netCharge !== undefined ? data.netCharge : (data.grossTariff || 0)));
+  let taxAmount = Number(declaredCalc?.taxAmount ?? declaredCalc?.roomGst ?? (data.taxAmount !== undefined ? data.taxAmount : (data.tax_amount || 0)));
 
   // Self-heal: If tariffNet was passed equal to grandTotal but discountAmount > 0,
   // roomTariffNet should reflect pre-discount gross room tariff (Gross Tariff - Discount + Tax = Grand Total)
@@ -3678,22 +3688,22 @@ export function buildGuestPaymentSummaryHTML(data) {
 
     return `
       <tr style="background: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'}; border-bottom: 1px solid #cbd5e1;">
-        <td style="padding: 7px 6px; font-weight: 800; text-align: center; color: #475569; border-right: 1px solid #cbd5e1;">${idx + 1}</td>
-        <td style="padding: 7px 8px; font-weight: 750; color: #0f172a; white-space: nowrap; border-right: 1px solid #cbd5e1;">${pDate}</td>
-        <td style="padding: 7px 8px; font-weight: 900; color: #b91c1c; white-space: nowrap; text-align: center; border-right: 1px solid #cbd5e1;">
-          <span style="border: 1px solid #b91c1c; background: #fee2e2; padding: 2px 7px; border-radius: 4px; font-size: 9pt;">${escapeHtml(rcpFormatted)}</span>
+        <td style="padding: 7px 4px; font-weight: 800; text-align: center; color: #475569; border-right: 1px solid #cbd5e1;">${idx + 1}</td>
+        <td style="padding: 7px 6px; font-weight: 750; color: #0f172a; white-space: nowrap; border-right: 1px solid #cbd5e1; font-size: 8.2pt;">${pDate}</td>
+        <td style="padding: 7px 4px; font-weight: 900; color: #b91c1c; white-space: nowrap; text-align: center; border-right: 1px solid #cbd5e1;">
+          <span style="border: 1px solid #b91c1c; background: #fee2e2; padding: 2px 6px; border-radius: 4px; font-size: 8.5pt;">${escapeHtml(rcpFormatted)}</span>
         </td>
-        <td style="padding: 7px 8px; font-weight: 800; color: #1e3a8a; border-right: 1px solid #cbd5e1;">
+        <td style="padding: 7px 6px; font-weight: 800; color: #1e3a8a; border-right: 1px solid #cbd5e1;">
           <div>${escapeHtml(mode)}</div>
           ${modeDetailStr}
         </td>
-        <td style="padding: 7px 8px; font-size: 8.5pt; font-weight: 700; color: #334155; white-space: nowrap; border-right: 1px solid #cbd5e1;">
+        <td style="padding: 7px 8px; font-size: 8.3pt; font-weight: 700; color: #334155; word-break: break-word; line-height: 1.25; border-right: 1px solid #cbd5e1;">
           ${escapeHtml(purposeStr)}
         </td>
-        <td style="padding: 7px 8px; font-size: 8.5pt; font-weight: 700; color: #475569; text-align: center; border-right: 1px solid #cbd5e1;">
+        <td style="padding: 7px 4px; font-size: 8.2pt; font-weight: 700; color: #475569; text-align: center; border-right: 1px solid #cbd5e1;">
           ${escapeHtml(pCashier)}
         </td>
-        <td style="padding: 7px 10px; font-weight: 950; font-size: 10.5pt; color: #15803d; text-align: right; white-space: nowrap;">
+        <td style="padding: 7px 12px 7px 4px; font-weight: 950; font-size: 10.5pt; color: #15803d; text-align: right; white-space: nowrap;">
           ₹ ${pAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
         </td>
       </tr>
@@ -3788,20 +3798,20 @@ export function buildGuestPaymentSummaryHTML(data) {
           </div>
 
           <!-- ITEMIZED PAYMENTS TABLE -->
-          <div style="border: 1.5px solid #1e3a8a; border-radius: 6px; overflow: hidden; margin-bottom: 12px; background: #ffffff;">
+          <div style="border: 1.5px solid #1e3a8a; border-radius: 6px; overflow: hidden; margin-bottom: 12px; background: #ffffff; width: 100%; box-sizing: border-box;">
             <div style="background: #1e3a8a; color: #fff; padding: 7px 12px; font-weight: 900; font-size: 9.5pt; letter-spacing: 0.03em; border-bottom: 1px solid #1e3a8a;">
               ITEMIZED PAYMENTS &amp; SETTLEMENT LOG
             </div>
-            <table style="width: 100%; border-collapse: collapse; font-size: 8.8pt; margin: 0;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 8.8pt; margin: 0; table-layout: fixed; box-sizing: border-box;">
               <thead>
                 <tr style="background: #f1f5f9; text-transform: uppercase; font-size: 8pt; color: #1e293b; font-weight: 900; border-bottom: 1.5px solid #94a3b8;">
-                  <th style="padding: 8px 6px; text-align: center; width: 6%; border-right: 1px solid #cbd5e1; white-space: nowrap;">No.</th>
-                  <th style="padding: 8px 8px; text-align: left; width: 20%; border-right: 1px solid #cbd5e1; white-space: nowrap;">Date &amp; Time</th>
-                  <th style="padding: 8px 8px; text-align: center; width: 15%; border-right: 1px solid #cbd5e1; white-space: nowrap;">Receipt No</th>
-                  <th style="padding: 8px 8px; text-align: left; width: 12%; border-right: 1px solid #cbd5e1; white-space: nowrap;">Mode</th>
-                  <th style="padding: 8px 8px; text-align: left; width: 26%; border-right: 1px solid #cbd5e1; white-space: nowrap;">Particulars</th>
-                  <th style="padding: 8px 8px; text-align: center; width: 9%; border-right: 1px solid #cbd5e1; white-space: nowrap;">Cashier</th>
-                  <th style="padding: 8px 10px; text-align: right; width: 12%; white-space: nowrap;">Amount (₹)</th>
+                  <th style="padding: 8px 4px; text-align: center; width: 5%; border-right: 1px solid #cbd5e1; white-space: nowrap;">No.</th>
+                  <th style="padding: 8px 6px; text-align: left; width: 18%; border-right: 1px solid #cbd5e1; white-space: nowrap;">Date &amp; Time</th>
+                  <th style="padding: 8px 4px; text-align: center; width: 12%; border-right: 1px solid #cbd5e1; white-space: nowrap;">Receipt No</th>
+                  <th style="padding: 8px 6px; text-align: left; width: 10%; border-right: 1px solid #cbd5e1; white-space: nowrap;">Mode</th>
+                  <th style="padding: 8px 8px; text-align: left; width: 32%; border-right: 1px solid #cbd5e1;">Particulars</th>
+                  <th style="padding: 8px 4px; text-align: center; width: 9%; border-right: 1px solid #cbd5e1; white-space: nowrap;">Cashier</th>
+                  <th style="padding: 8px 12px 8px 4px; text-align: right; width: 14%; white-space: nowrap;">Amount (₹)</th>
                 </tr>
               </thead>
               <tbody>
@@ -3809,10 +3819,10 @@ export function buildGuestPaymentSummaryHTML(data) {
               </tbody>
               <tfoot>
                 <tr style="background: #f8fafc; border-top: 1.5px solid #94a3b8;">
-                  <td colspan="6" style="padding: 9px 12px; font-weight: 900; font-size: 9.5pt; color: #0f172a; text-align: right; text-transform: uppercase; border-right: 1px solid #cbd5e1;">
+                  <td colspan="6" style="padding: 8px 10px; font-weight: 900; font-size: 9.2pt; color: #0f172a; text-align: right; text-transform: uppercase; border-right: 1px solid #cbd5e1;">
                     Total Net Amount Settled &amp; Received:
                   </td>
-                  <td style="padding: 9px 10px; font-weight: 950; font-size: 11pt; color: #15803d; text-align: right; white-space: nowrap;">
+                  <td style="padding: 8px 12px 8px 4px; font-weight: 950; font-size: 11pt; color: #15803d; text-align: right; white-space: nowrap;">
                     ₹ ${totalSettled.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                   </td>
                 </tr>
@@ -4010,11 +4020,26 @@ export function buildGuestActivitiesSummaryHTML(data) {
 
   // Hospitality / Room Charges
   const activeCalc = data.stayCalcNow || data.tax_invoice_snapshot?.stayCalcNow;
-  const stayCharge = Number(activeCalc?.baseRoomTariff ?? (data.baseRoomTariff ?? (data.roomCharge || data.room_charge || r.total_room_charge || 0)));
+  const stayCharge = Number(activeCalc?.baseRoomTariff ?? (data.baseRoomTariff ?? data.room_rate ?? data.room_charge ?? 0));
+  const breakfastCharge = Number(
+    activeCalc?.breakfastCost ??
+    (data.breakfastCost ?? data.breakfast_cost ?? ((data.meal_plan === 'with_breakfast' || data.mealPlan === 'with_breakfast' || (data.room && data.room.meal_plan === 'with_breakfast')) ? (Math.max(1, (Number(data.adults_male || data.adultsMale || 1) + Number(data.adults_female || data.adultsFemale || 0))) * 250) : 0))
+  );
+  const extraBedCharge = Number(
+    activeCalc?.extraMattressCost ??
+    (data.extraBedCharge ?? data.extra_bed_charge ?? (data.room?.extra_bed_charge ?? ((Number(data.extra_beds || data.extraBeds || data.room?.extra_beds || 0)) * 600)))
+  );
   const stayDiscount = Number(activeCalc?.discountAmount ?? (data.discountAmount || data.discount_amount || 0));
-  const stayGst = Number(activeCalc?.taxAmount ?? (data.stayTax || data.totalGst || 0));
-  const extraBedCharge = Number(activeCalc?.extraMattressCost ?? (data.extraBedCharge || data.extra_bed_charge || 0));
-  const stayNetTotal = Number(activeCalc?.totalStayCost ?? (data.stayNetTotal || data.recalculatedRoomCharge || stayCharge));
+  const stayGst = Number(activeCalc?.taxAmount ?? activeCalc?.roomGst ?? (data.taxAmount ?? data.tax_amount ?? data.gst_amount ?? data.stayTax ?? data.totalGst ?? 0));
+  let stayNetTotal = Number(activeCalc?.totalStayCost ?? activeCalc?.grandTotal ?? (data.total_room_charge ?? data.stayNetTotal ?? data.recalculatedRoomCharge ?? 0));
+  if (stayNetTotal <= 0) {
+    stayNetTotal = Math.max(0, stayCharge + extraBedCharge + breakfastCharge - stayDiscount + stayGst);
+  }
+
+  let effectiveStayGst = stayGst;
+  if (effectiveStayGst <= 0 && stayNetTotal > (stayCharge + extraBedCharge + breakfastCharge - stayDiscount)) {
+    effectiveStayGst = Math.round((stayNetTotal - (stayCharge + extraBedCharge + breakfastCharge - stayDiscount)) * 100) / 100;
+  }
 
   // Orders
   const restaurantOrders = Array.isArray(data.restaurantOrders) ? data.restaurantOrders : [];
@@ -4029,10 +4054,12 @@ export function buildGuestActivitiesSummaryHTML(data) {
     : Number(data.bar_total || 0);
   const fnbTotal = foodTotal + barTotal;
 
-  const totalPayments = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) + (payments.length === 0 ? Number(data.advancePaid || data.initialPaid || 0) : 0);
+  const totalPayments = payments.length > 0
+    ? payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+    : Number(data.total_paid || data.advance_payment || data.advancePaid || data.initialPaid || 0);
   const grandTotal = stayNetTotal + fnbTotal;
-  const netDue = Math.max(0, grandTotal - totalPayments);
-  const refundDue = Math.max(0, totalPayments - grandTotal);
+  const netDue = Math.max(0, Math.round((grandTotal - totalPayments) * 100) / 100);
+  const refundDue = Math.max(0, Math.round((totalPayments - grandTotal) * 100) / 100);
 
   return `
     <div class="full-a4-registration-card" style="position: relative; width: 100%; box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; color: #000; padding: 16px 24px; background: #fff; line-height: 1.35; min-height: 275mm; display: flex; flex-direction: column; justify-content: space-between; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">
@@ -4107,6 +4134,13 @@ export function buildGuestActivitiesSummaryHTML(data) {
                 <td style="padding: 4px 8px; text-align: right; border-bottom: 1px solid #e2e8f0;">+ ₹ ${extraBedCharge.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
               </tr>
               ` : ''}
+              ${breakfastCharge > 0 ? `
+              <tr>
+                <td style="padding: 4px 8px; border-bottom: 1px solid #e2e8f0;">Breakfast Included Plan</td>
+                <td style="padding: 4px 8px; text-align: center; border-bottom: 1px solid #e2e8f0;">Meal Plan</td>
+                <td style="padding: 4px 8px; text-align: right; border-bottom: 1px solid #e2e8f0;">+ ₹ ${breakfastCharge.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+              </tr>
+              ` : ''}
               ${stayDiscount > 0 ? `
               <tr>
                 <td style="padding: 4px 8px; border-bottom: 1px solid #e2e8f0; color: #b91c1c;">Stay Discount Applied</td>
@@ -4114,11 +4148,11 @@ export function buildGuestActivitiesSummaryHTML(data) {
                 <td style="padding: 4px 8px; text-align: right; border-bottom: 1px solid #e2e8f0; color: #b91c1c; font-weight: 750;">- ₹ ${stayDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
               </tr>
               ` : ''}
-              ${stayGst > 0 ? `
+              ${effectiveStayGst > 0 ? `
               <tr>
                 <td style="padding: 4px 8px; border-bottom: 1px solid #e2e8f0;">Room GST (CGST + SGST or IGST)</td>
                 <td style="padding: 4px 8px; text-align: center; border-bottom: 1px solid #e2e8f0;">5% Hospitality GST</td>
-                <td style="padding: 4px 8px; text-align: right; border-bottom: 1px solid #e2e8f0;">+ ₹ ${stayGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                <td style="padding: 4px 8px; text-align: right; border-bottom: 1px solid #e2e8f0;">+ ₹ ${effectiveStayGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
               </tr>
               ` : ''}
               <tr style="background: #fafafa; font-weight: 850;">
@@ -4260,12 +4294,12 @@ export function buildGuestActivitiesSummaryHTML(data) {
               <span style="color: #64748b; display: block;">Advance Paid:</span>
               <strong style="font-size: 10.5pt; color: #166534;">₹ ${totalPayments.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
             </div>
-            <div style="padding: 6px; background: ${refundDue > 0 ? '#f0fdf4' : '#fff1f2'}; border: 1.5px solid ${refundDue > 0 ? '#86efac' : '#fca5a5'}; border-radius: 4px;">
-              <span style="color: ${refundDue > 0 ? '#166534' : '#b91c1c'}; display: block; font-weight: 800;">
-                ${refundDue > 0 ? 'Refund Due to Guest:' : 'Net Balance Due:'}
+            <div style="padding: 6px; background: ${refundDue > 0 ? '#f0fdf4' : (netDue === 0 ? '#f0fdf4' : '#fff1f2')}; border: 1.5px solid ${refundDue > 0 ? '#86efac' : (netDue === 0 ? '#86efac' : '#fca5a5')}; border-radius: 4px;">
+              <span style="color: ${refundDue > 0 ? '#166534' : (netDue === 0 ? '#166534' : '#b91c1c')}; display: block; font-weight: 800;">
+                ${refundDue > 0 ? 'Refund Due to Guest:' : (netDue === 0 ? 'Folio Settlement Status:' : 'Net Balance Due:')}
               </span>
-              <strong style="font-size: 11pt; color: ${refundDue > 0 ? '#166534' : '#b91c1c'};">
-                ₹ ${(refundDue > 0 ? refundDue : netDue).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              <strong style="font-size: 11pt; color: ${refundDue > 0 ? '#166534' : (netDue === 0 ? '#166534' : '#b91c1c')};">
+                ${refundDue > 0 ? `₹ ${refundDue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : (netDue === 0 ? '₹ 0.00 (Fully Settled)' : `₹ ${netDue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`)}
               </strong>
             </div>
           </div>
