@@ -3594,7 +3594,7 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
     const vNo = booking.voucher_number ? String(booking.voucher_number).trim() : null;
     const linkedGroupBookings = (inTime && booking.guest_id)
       ? db.prepare(`
-          SELECT b.id as booking_id, b.room_id, r.room_number, r.room_type, r.price as base_room_price, b.room_rate, b.total_room_charge
+          SELECT b.id as booking_id, b.room_id, r.room_number, r.room_type, r.price as base_room_price, b.room_rate, b.total_room_charge, b.actual_checkout_time, b.approx_checkout_time, b.status, b.extra_beds, b.extra_bed_charge, b.meal_plan, b.adults_male, b.adults_female, b.children, b.total_paid, b.discount_amount, b.discount_pct, b.advance_payment, b.final_settlement_payment
           FROM bookings b
           JOIN rooms r ON b.room_id = r.id
           WHERE (b.guest_id = ? AND b.checkin_time = ?)
@@ -3603,6 +3603,13 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
         `).all(booking.guest_id, inTime, vNo, vNo, vNo)
       : [];
 
+    const allGroupBookingIds = linkedGroupBookings.length > 0
+      ? Array.from(new Set(linkedGroupBookings.map(gb => gb.booking_id)))
+      : [booking.id];
+    const groupRoomIds = linkedGroupBookings.length > 0
+      ? Array.from(new Set(linkedGroupBookings.map(gb => gb.room_id)))
+      : [booking.room_id];
+
     let memberDocs = [];
     try {
       memberDocs = booking.member_documents_json ? JSON.parse(booking.member_documents_json) : [];
@@ -3610,55 +3617,194 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
       memberDocs = [];
     }
 
-    // Fetch all recorded payments for this booking
-    const payments = db.prepare('SELECT * FROM payments WHERE booking_id = ? ORDER BY created_at ASC').all(booking.id);
+    // Fetch all recorded payments for this booking (or group bookings if multi-room)
+    const bookingPlaceholders = allGroupBookingIds.map(() => '?').join(',');
+    const payments = db.prepare(`SELECT * FROM payments WHERE booking_id IN (${bookingPlaceholders}) ORDER BY created_at ASC`).all(...allGroupBookingIds);
 
     // Fetch Restaurant & Bar orders during stay if any
     let restaurantOrders = [];
     let barOrders = [];
     try {
+      const roomPlaceholders = groupRoomIds.map(() => '?').join(',');
       restaurantOrders = db.prepare(`
         SELECT ro.*, r.room_number 
         FROM restaurant_orders ro
         LEFT JOIN rooms r ON ro.room_id = r.id
-        WHERE ro.booking_id = ?
-           OR (ro.booking_id IS NULL AND ro.room_id = ? AND datetime(ro.created_at) >= ? AND datetime(ro.created_at) <= datetime(?, '+2 hours'))
+        WHERE ro.booking_id IN (${bookingPlaceholders})
+           OR (ro.booking_id IS NULL AND ro.room_id IN (${roomPlaceholders}) AND datetime(ro.created_at) >= ? AND datetime(ro.created_at) <= datetime(?, '+2 hours'))
         ORDER BY ro.created_at ASC
-      `).all(booking.id, booking.room_id, booking.checkin_time || '2000-01-01', booking.actual_checkout_time || booking.checkout_time || '2099-01-01');
+      `).all(...allGroupBookingIds, ...groupRoomIds, booking.checkin_time || '2000-01-01', booking.actual_checkout_time || booking.checkout_time || '2099-01-01');
     } catch (_) {}
 
     try {
+      const roomPlaceholders = groupRoomIds.map(() => '?').join(',');
       barOrders = db.prepare(`
         SELECT bo.*, r.room_number 
         FROM bar_orders bo
         LEFT JOIN rooms r ON bo.room_id = r.id
-        WHERE bo.booking_id = ?
-           OR (bo.booking_id IS NULL AND bo.room_id = ? AND datetime(bo.created_at) >= ? AND datetime(bo.created_at) <= datetime(?, '+2 hours'))
+        WHERE bo.booking_id IN (${bookingPlaceholders})
+           OR (bo.booking_id IS NULL AND bo.room_id IN (${roomPlaceholders}) AND datetime(bo.created_at) >= ? AND datetime(bo.created_at) <= datetime(?, '+2 hours'))
         ORDER BY bo.created_at ASC
-      `).all(booking.id, booking.room_id, booking.checkin_time || '2000-01-01', booking.actual_checkout_time || booking.checkout_time || '2099-01-01');
+      `).all(...allGroupBookingIds, ...groupRoomIds, booking.checkin_time || '2000-01-01', booking.actual_checkout_time || booking.checkout_time || '2099-01-01');
     } catch (_) {}
 
-    const roomCharge = Number(booking.total_room_charge || booking.room_rate || 0);
-    const extra = Number(booking.extra_bed_charge || 0);
-    const discount = Number(booking.discount_amount || 0);
+    const isGroup = linkedGroupBookings.length > 1;
+    const totalGroupRoomCharge = isGroup
+      ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.total_room_charge) || Number(gb.room_rate) || 0), 0)
+      : Number(booking.total_room_charge || booking.room_rate || 0);
+    const roomCharge = totalGroupRoomCharge > 0 ? totalGroupRoomCharge : Number(booking.total_room_charge || booking.room_rate || 0);
+
+    const totalGroupExtraBeds = isGroup
+      ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.extra_beds) || 0), 0)
+      : Number(booking.extra_beds || 0);
+    const totalGroupExtraBedCharge = isGroup
+      ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.extra_bed_charge) || 0), 0)
+      : Number(booking.extra_bed_charge || 0);
+    const totalGroupDiscountAmount = isGroup
+      ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.discount_amount) || 0), 0)
+      : Number(booking.discount_amount || 0);
+
+    const extra = totalGroupExtraBedCharge;
+    const discount = totalGroupDiscountAmount;
     const tax = Number(booking.early_checkin_gst || Math.max(0, Math.round(roomCharge - (roomCharge / 1.05))));
     const foodTotal = restaurantOrders.filter(o => o.is_paid === 0).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
     const barTotal = barOrders.filter(o => o.is_paid === 0).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
-    const grandTotal = Math.max(0, roomCharge + foodTotal + barTotal + extra - discount);
-    const paid = payments
+    const grandTotal = Math.max(0, roomCharge + foodTotal + barTotal + (booking.status === 'checked_out' || isGroup ? 0 : extra - discount));
+
+    let paid = payments
       .filter(p => p.payment_type !== 'refund')
       .reduce((sum, p) => {
         const surcharge = (parseFloat(p.card_surcharge) || 0) + (parseFloat(p.upi_tax) || 0);
         return sum + Math.max(0, (Number(p.amount) || 0) - surcharge);
-      }, 0) || Number(booking.total_paid || booking.advance_payment || 0);
+      }, 0);
+
+    if (paid <= 0) {
+      paid = isGroup
+        ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.total_paid) || 0), 0)
+        : Number(booking.total_paid || booking.advance_payment || 0);
+    }
+
     const pending = Math.max(0, grandTotal - paid);
 
-    const actualAdvance = booking.advance_payment !== undefined && booking.advance_payment !== null && Number(booking.advance_payment) > 0
-      ? Number(booking.advance_payment)
-      : Math.max(0, paid - Number(booking.final_settlement_payment || 0));
+    const groupAdvanceSum = isGroup
+      ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.advance_payment) || 0), 0)
+      : Number(booking.advance_payment || 0);
+    const actualAdvance = groupAdvanceSum > 0
+      ? groupAdvanceSum
+      : (booking.advance_payment !== undefined && booking.advance_payment !== null && Number(booking.advance_payment) > 0
+        ? Number(booking.advance_payment)
+        : Math.max(0, paid - Number(booking.final_settlement_payment || 0)));
+
+    const allRoomsList = linkedGroupBookings.map(gb => gb.room_number).filter(Boolean);
+    const sortedUniqueRooms = Array.from(new Set(allRoomsList)).sort((a, b) => Number(a) - Number(b));
+    const combinedRoomsStr = sortedUniqueRooms.join(', ');
+    const allUniqueTypes = Array.from(new Set(linkedGroupBookings.map(gb => gb.room_type).filter(Boolean))).join(', ');
+
+    const actualCheckoutTime = booking.actual_checkout_time || linkedGroupBookings.find(gb => gb.actual_checkout_time)?.actual_checkout_time || null;
+    const effectiveCheckoutTime = actualCheckoutTime || booking.checkout_time || booking.approx_checkout_time;
+
+    let taxInvoiceSnapshot = null;
+    if (booking.tax_invoice_snapshot_json) {
+      try {
+        taxInvoiceSnapshot = JSON.parse(booking.tax_invoice_snapshot_json);
+      } catch (_) {}
+    }
+
+    const inDate = new Date(booking.checkin_time || '2026-11-06T20:33');
+    const outDate = new Date(actualCheckoutTime || booking.checkout_time || new Date());
+    const stayDurationMs = Math.max(0, outDate.getTime() - inDate.getTime());
+    const stayDurationHours = stayDurationMs / (1000 * 60 * 60);
+    const stayDays = Math.max(1, Math.ceil(stayDurationHours / 24));
+
+    const dailyBaseRate = isGroup
+      ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.room_rate || gb.base_room_price || 0)), 0)
+      : Number(booking.room_rate || booking.base_room_price || 0);
+
+    const baseRoomTariff = dailyBaseRate * stayDays;
+    const extraMattressDailyRate = totalGroupExtraBeds * 600;
+    const extraMattressCost = extraMattressDailyRate * stayDays;
+
+    const hasBreakfast = linkedGroupBookings.some(gb => gb.meal_plan === 'with_breakfast') || booking.meal_plan === 'with_breakfast';
+    const breakfastPax = isGroup
+      ? linkedGroupBookings.reduce((sum, gb) => sum + Math.max(1, (gb.adults_male || 0) + (gb.adults_female || 0)), 0)
+      : Math.max(1, (booking.adults_male || 1) + (booking.adults_female || 0));
+    const breakfastDailyRate = hasBreakfast ? (breakfastPax * 250) : 0;
+    const breakfastCost = breakfastDailyRate * stayDays;
+
+    const grossTariff = baseRoomTariff + extraMattressCost + breakfastCost;
+    const discountPct = Number(booking.discount_pct || 0);
+    let discountAmount = 0;
+    if (discountPct > 0) {
+      discountAmount = Math.round(grossTariff * (discountPct / 100));
+    } else if (booking.discount_amount > 0) {
+      const declaredDays = Math.max(1, Math.round((new Date(booking.approx_checkout_time || booking.checkout_time || outDate) - inDate) / (24 * 3600 * 1000)));
+      discountAmount = Math.round(Number(booking.discount_amount) * (stayDays / declaredDays));
+    }
+
+    const effectiveTariff = Math.max(0, grossTariff - discountAmount);
+    const taxAmount = Math.round(effectiveTariff * 0.05 * 100) / 100;
+    const totalStayCost = Math.round(effectiveTariff + taxAmount);
+
+    const stayCalcNow = taxInvoiceSnapshot?.stayCalcNow || {
+      chargedDays: stayDays,
+      billableDays: stayDays,
+      dailyBaseRate,
+      baseRoomTariff,
+      extraMattressDailyRate,
+      extraMattressCost,
+      breakfastPax,
+      breakfastDailyRate,
+      breakfastCost,
+      grossTariff,
+      discountPct,
+      discountAmount,
+      effectiveTariff,
+      taxAmount,
+      roomGst: taxAmount,
+      totalStayCost,
+      grandTotal: totalStayCost,
+      advancePaid: actualAdvance,
+      balanceDue: Math.max(0, totalStayCost - paid)
+    };
+
+    const declaredOutDate = new Date(booking.approx_checkout_time || booking.checkout_time || outDate);
+    const declaredDurationMs = Math.max(0, declaredOutDate.getTime() - inDate.getTime());
+    const declaredDays = Math.max(1, Math.round(declaredDurationMs / (24 * 3600 * 1000)));
+    const declaredBaseRoomTariff = dailyBaseRate * declaredDays;
+    const declaredExtraMattress = extraMattressDailyRate * declaredDays;
+    const declaredBreakfast = breakfastDailyRate * declaredDays;
+    const declaredGross = declaredBaseRoomTariff + declaredExtraMattress + declaredBreakfast;
+    const declaredDiscount = discountPct > 0 ? Math.round(declaredGross * (discountPct / 100)) : (Number(booking.discount_amount) || 0);
+    const declaredEffective = Math.max(0, declaredGross - declaredDiscount);
+    const declaredTax = Math.round(declaredEffective * 0.05 * 100) / 100;
+    const declaredTotal = Math.round(declaredEffective + declaredTax);
+
+    const stayCalcDeclared = taxInvoiceSnapshot?.stayCalcDeclared || {
+      expectedNights: declaredDays,
+      chargedDays: declaredDays,
+      dailyBaseRate,
+      baseRoomTariff: declaredBaseRoomTariff,
+      extraMattressCost: declaredExtraMattress,
+      breakfastCost: declaredBreakfast,
+      breakfastPax,
+      grossTariff: declaredGross,
+      discountPct,
+      discountAmount: declaredDiscount,
+      effectiveTariff: declaredEffective,
+      taxAmount: declaredTax,
+      roomGst: declaredTax,
+      grandTotal: declaredTotal,
+      advancePaid: actualAdvance,
+      balanceDue: Math.max(0, declaredTotal - actualAdvance)
+    };
 
     const formattedBooking = {
       ...booking,
+      room_number: combinedRoomsStr || booking.room_number,
+      room_numbers: combinedRoomsStr || booking.room_number,
+      room_type: allUniqueTypes || booking.room_type,
+      rooms: sortedUniqueRooms.length > 0 ? sortedUniqueRooms : [booking.room_number],
+      room_types: Array.from(new Set(linkedGroupBookings.map(gb => gb.room_type).filter(Boolean))),
       room_charge: roomCharge,
       total_room_charge: roomCharge,
       food_total: foodTotal,
@@ -3672,15 +3818,40 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
       balance_due: pending,
       tax_amount: tax,
       extra_bed_charge: extra,
+      extra_beds: totalGroupExtraBeds,
       discount_amount: discount,
+      stayCalcNow,
+      stayCalcDeclared,
+      tax_invoice_snapshot: taxInvoiceSnapshot || { stayCalcNow, stayCalcDeclared },
+      grossTariff: stayCalcNow.grossTariff,
+      baseRoomTariff: stayCalcNow.baseRoomTariff,
+      extraMattressCost: stayCalcNow.extraMattressCost,
+      breakfastCost: stayCalcNow.breakfastCost,
+      breakfastPax: stayCalcNow.breakfastPax,
+      declared_grand_total: declaredTotal,
+      declared_room_charge: declaredEffective,
+      checkout_time: effectiveCheckoutTime,
+      actual_checkout_time: actualCheckoutTime,
+      is_group_booking: isGroup,
       member_documents: memberDocs,
       memberDocuments: memberDocs,
       payments: payments || [],
       restaurantOrders: restaurantOrders || [],
       barOrders: barOrders || [],
       orders: [...restaurantOrders.map(o => ({ ...o, dept: 'Restaurant' })), ...barOrders.map(o => ({ ...o, dept: 'Bar Lounge' }))],
-      all_group_rooms: linkedGroupBookings.map(gb => ({ room_number: gb.room_number, room_type: gb.room_type, room_id: gb.room_id })),
-      all_group_room_numbers: linkedGroupBookings.map(gb => gb.room_number),
+      all_group_rooms: linkedGroupBookings.map(gb => ({
+        id: gb.room_id,
+        booking_id: gb.booking_id,
+        room_number: gb.room_number,
+        room_type: gb.room_type,
+        room_rate: gb.room_rate || gb.base_room_price,
+        total_room_charge: gb.total_room_charge,
+        extra_beds: gb.extra_beds,
+        extra_bed_charge: gb.extra_bed_charge,
+        meal_plan: gb.meal_plan,
+        status: gb.status
+      })),
+      all_group_room_numbers: sortedUniqueRooms,
       group_room_details: linkedGroupBookings
     };
 
@@ -6247,7 +6418,8 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
           refund_mode = ?,
           refund_voucher_no = ?,
           refund_reason = ?,
-          refund_utr = ?
+          refund_utr = ?,
+          tax_invoice_snapshot_json = COALESCE(?, tax_invoice_snapshot_json)
         WHERE id = ?
       `).run(
         checkoutTime,
@@ -6278,6 +6450,7 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
         idx === 0 && bRefund > 0 ? refundVoucherNo : null,
         idx === 0 && bRefund > 0 ? (refund_reason || 'Early checkout refund') : null,
         idx === 0 && bRefund > 0 ? return_utr : null,
+        (b.tax_invoice_snapshot ? JSON.stringify(b.tax_invoice_snapshot) : (b.taxInvoiceSnapshot ? JSON.stringify(b.taxInvoiceSnapshot) : null)),
         gb.booking_id
       );
 
@@ -12609,11 +12782,19 @@ app.get('/api/hospitality/history', (req, res) => {
     const params = [];
     const start = from_date || startDate;
     const end = to_date || endDate;
+    const dateExpr = `CASE 
+      WHEN b.actual_checkout_time LIKE '%Z' THEN DATE(b.actual_checkout_time, 'localtime')
+      WHEN b.actual_checkout_time IS NOT NULL AND b.actual_checkout_time != '' THEN SUBSTR(b.actual_checkout_time, 1, 10)
+      WHEN b.checkin_time LIKE '%Z' THEN DATE(b.checkin_time, 'localtime')
+      WHEN b.checkin_time IS NOT NULL AND b.checkin_time != '' THEN SUBSTR(b.checkin_time, 1, 10)
+      WHEN b.created_at LIKE '%Z' THEN DATE(b.created_at, 'localtime')
+      ELSE SUBSTR(COALESCE(b.created_at, '2000-01-01'), 1, 10)
+    END`;
     if (start && end) {
-      query += ` AND (DATE(COALESCE(b.actual_checkout_time, b.checkin_time, b.created_at), 'localtime') BETWEEN DATE(?) AND DATE(?))`;
+      query += ` AND (${dateExpr} BETWEEN DATE(?) AND DATE(?))`;
       params.push(start, end);
     } else if (start) {
-      query += ` AND (DATE(COALESCE(b.actual_checkout_time, b.checkin_time, b.created_at), 'localtime') = DATE(?))`;
+      query += ` AND (${dateExpr} = DATE(?))`;
       params.push(start);
     }
 
@@ -12636,11 +12817,12 @@ app.get('/api/hospitality/history', (req, res) => {
 
     const rows = db.prepare(query).all(...params);
 
-    // Group multi-room bookings by guest_id and checkin session
+    // Group multi-room bookings by voucher_number or (guest_id and checkin session)
     const groupedMap = new Map();
     rows.forEach(row => {
-      const inTimeKey = row.checkin_time ? new Date(row.checkin_time).toISOString().substring(0, 16) : row.booking_id;
-      const key = `${row.guest_id}_${inTimeKey}`;
+      const vClean = (row.voucher_number && String(row.voucher_number).trim()) ? String(row.voucher_number).trim() : null;
+      const inTimeKey = row.checkin_time ? String(row.checkin_time).substring(0, 16) : row.booking_id;
+      const key = vClean ? `v_${vClean}` : `${row.guest_id}_${inTimeKey}`;
 
       const checkinDate = row.checkin_time ? new Date(row.checkin_time) : new Date();
       const checkoutDate = row.actual_checkout_time ? new Date(row.actual_checkout_time) : (row.approx_checkout_time ? new Date(row.approx_checkout_time) : new Date());
@@ -12726,11 +12908,11 @@ app.get('/api/hospitality/history', (req, res) => {
           member_documents_json: '[]',
           voucher_number: row.voucher_number || null,
           rooms: [row.room_number],
-          room_types: [row.room_type],
+          room_types: row.room_type ? [row.room_type] : [],
           all_group_rooms: [{ id: row.room_id, room_number: row.room_number, room_type: row.room_type }],
           checkin_time: row.checkin_time,
           approx_checkout_time: row.approx_checkout_time,
-          checkout_time: row.actual_checkout_time,
+          checkout_time: row.actual_checkout_time || row.approx_checkout_time,
           actual_checkout_time: row.actual_checkout_time,
           stay_duration_str: durationStr,
           expected_stay_str: expectedDays ? `${expectedDays}d` : null,
@@ -12791,12 +12973,28 @@ app.get('/api/hospitality/history', (req, res) => {
       } else {
         const entry = groupedMap.get(key);
         entry.all_booking_ids.push(row.booking_id);
+        if (row.booking_id < entry.id) {
+          entry.primary_booking_id = row.booking_id;
+        }
         if (row.last_activity_time && (!entry.last_activity_time || new Date(row.last_activity_time) > new Date(entry.last_activity_time))) {
           entry.last_activity_time = row.last_activity_time;
         }
         if (!entry.rooms.includes(row.room_number)) {
           entry.rooms.push(row.room_number);
+          entry.rooms.sort((a, b) => Number(a) - Number(b));
+          entry.room_number = entry.rooms.join(', ');
           entry.all_group_rooms.push({ id: row.room_id, room_number: row.room_number, room_type: row.room_type });
+        }
+        if (row.room_type && !entry.room_types.includes(row.room_type)) {
+          entry.room_types.push(row.room_type);
+          entry.room_type = entry.room_types.join(', ');
+        }
+        if (row.actual_checkout_time) {
+          entry.actual_checkout_time = row.actual_checkout_time;
+          entry.checkout_time = row.actual_checkout_time;
+        }
+        if (row.checked_out_by && !entry.checked_out_by) {
+          entry.checked_out_by = row.checked_out_by;
         }
         if (row.is_prepaid) entry.is_prepaid = row.is_prepaid;
         if (row.ota_bill_amount) entry.ota_bill_amount = (entry.ota_bill_amount || 0) + (row.ota_bill_amount || 0);
@@ -12835,6 +13033,15 @@ app.get('/api/hospitality/history', (req, res) => {
     });
 
     const historyList = Array.from(groupedMap.values());
+    historyList.forEach(entry => {
+      if (Array.isArray(entry.rooms) && entry.rooms.length > 0) {
+        entry.rooms.sort((a, b) => Number(a) - Number(b));
+        entry.room_number = entry.rooms.join(', ');
+      }
+      if (Array.isArray(entry.room_types) && entry.room_types.length > 0) {
+        entry.room_type = Array.from(new Set(entry.room_types.filter(Boolean))).join(', ');
+      }
+    });
     historyList.sort((a, b) => {
       const tA = a.last_activity_time ? new Date(a.last_activity_time).getTime() : (a.id || 0);
       const tB = b.last_activity_time ? new Date(b.last_activity_time).getTime() : (b.id || 0);
