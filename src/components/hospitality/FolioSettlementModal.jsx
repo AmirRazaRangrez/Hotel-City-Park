@@ -590,7 +590,31 @@ export default function FolioSettlementModal({
         discount_pct: activeDiscountPct,
         discountPct: activeDiscountPct,
         discount_approved: activeDiscountAmt > 0,
-        approval_id: discountApproval.approvalId
+        approval_id: discountApproval.approvalId,
+        tax_invoice_snapshot: {
+          stayCalcNow: folioData.stayCalcNow,
+          stayCalcDeclared: folioData.stayCalcDeclared,
+          activeStayCalc,
+          recalculatedRoomCharge: finalRecalcRoom,
+          originalRoomCharge: folioData.originalRoomCharge,
+          roomCharge: folioData.roomCharge,
+          dailyBaseRate: activeStayCalc?.dailyBaseRate || folioData.room_rate,
+          baseRoomTariff: activeStayCalc?.baseRoomTariff,
+          extraMattressCost: activeStayCalc?.extraMattressCost,
+          breakfastCost: activeStayCalc?.breakfastCost,
+          breakfastPax: activeStayCalc?.breakfastPax,
+          grossTariff: activeStayCalc?.grossTariff || folioData.grossTariff,
+          discountAmount: activeStayCalc?.discountAmount || activeDiscountAmt,
+          discountPct: activeStayCalc?.discountPct || activeDiscountPct,
+          effectiveTariff: activeStayCalc?.effectiveTariff,
+          taxAmount: activeStayCalc?.taxAmount || activeStayCalc?.roomGst,
+          totalStayCost: activeStayCalc?.totalStayCost || finalRecalcRoom,
+          grandTotal: activeStayCalc?.grandTotal || finalRecalcRoom,
+          advancePaid: effectiveAdvancePaid,
+          balanceDue: balanceDue,
+          settledAmount: settleAmt,
+          refundAmount: refundAmt
+        }
       };
 
       if (typeof onCheckoutStart === 'function') {
@@ -740,28 +764,8 @@ export default function FolioSettlementModal({
               });
             }
 
-            // If no checkout payment was needed because advance covered the full stay:
-            if (checkoutReceipts.length === 0 && (effectiveAdvancePaid > 0 || folioData.advancePaid > 0)) {
-              const advAmt = Number(effectiveAdvancePaid || folioData.advancePaid || 0);
-              const advMode = folioData.paymentMode || folioData.payment_mode || room.payment_mode || 'Cash';
-              checkoutReceipts.push({
-                voucher_number: baseVoucher,
-                receipt_no: res.finalReceiptNo || res.receipt_no || folioData.receiptNumber || 'CR01',
-                receipt_date: new Date(),
-                guest_name: guestName,
-                amount: advAmt,
-                base_amount: advAmt,
-                payment_mode: advMode,
-                mode: String(advMode).toLowerCase(),
-                room_numbers: roomNums,
-                particulars: `Room #${roomNums} - Stay Bill Paid in Advance`,
-                cashier_name: cashierName,
-                stageLabel: 'Paid For CheckIn'
-              });
-            }
-
-            // Silently auto-save payment receipts to device
-            if (checkoutReceipts.length > 0) {
+            // Silently auto-save payment receipts to device ONLY if payment was collected at checkout
+            if (checkoutReceipts.length > 0 && totalSettled > 0) {
               checkoutReceipts.forEach(r => {
                 try {
                   const receiptHtml = buildMoneyReceiptHTML(r);
@@ -811,11 +815,13 @@ export default function FolioSettlementModal({
             };
 
             // Helper to trigger payment receipt print right after Tax Invoice print dialog closes
+            // User requirement: If not paid amount now (totalSettled <= 0), do NOT release receipt.
+            // If paid while checkout (totalSettled > 0), only then release receipt after tax invoice.
             let receiptPrintTriggered = false;
             const triggerPaidReceiptPrint = () => {
               if (receiptPrintTriggered) return;
               receiptPrintTriggered = true;
-              if (checkoutReceipts.length > 0 && !isRefund) {
+              if (checkoutReceipts.length > 0 && totalSettled > 0 && !isRefund) {
                 setTimeout(() => {
                   try {
                     printCashReceipt(checkoutReceipts);

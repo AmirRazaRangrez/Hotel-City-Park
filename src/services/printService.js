@@ -2151,7 +2151,7 @@ export function buildGuestRegistrationHTML(data, options = { includePhotos: fals
   const checkinFormatted = formatDT(checkinTime);
   const checkoutTime = data.approxCheckout || data.approx_checkout_time || data.actual_checkout_time || data.checkout_time || '';
   const checkoutFormatted = checkoutTime ? formatDT(checkoutTime) : 'Not specified';
-  const stayNights = data.stayNights || data.stay_nights || 1;
+  const stayNights = data.stayNights || data.stay_nights || data.stayCalcDeclared?.expectedNights || (data.approx_checkout_time && data.checkin_time ? Math.max(1, Math.round((new Date(data.approx_checkout_time) - new Date(data.checkin_time)) / (24 * 3600 * 1000))) : 1);
   const isEarlyCheckin = Boolean(data.isEarlyCheckin || data.is_early_checkin);
   const originalCheckinTime = data.originalCheckinTime || data.original_checkin_time || '12:00 PM';
   const earlyCheckinTime = data.earlyCheckinTime || data.early_checkin_time || '';
@@ -2291,19 +2291,20 @@ export function buildGuestRegistrationHTML(data, options = { includePhotos: fals
   }
 
   // 5. Billing & Payment Breakdown
-  const discountAmount = Number(data.discountAmount !== undefined ? data.discountAmount : (data.discount_amount || 0));
-  const discountPct = Number(data.discountPct !== undefined ? data.discountPct : (data.discount_pct || 0));
-  let grandTotal = Number(data.totalDue !== undefined ? data.totalDue : (data.grandTotal !== undefined ? data.grandTotal : 0));
+  const declaredCalc = data.stayCalcDeclared || data.tax_invoice_snapshot?.stayCalcDeclared;
+  const discountAmount = Number(declaredCalc?.discountAmount ?? (data.discountAmount !== undefined ? data.discountAmount : (data.discount_amount || 0)));
+  const discountPct = Number(declaredCalc?.discountPct ?? (data.discountPct !== undefined ? data.discountPct : (data.discount_pct || 0)));
+  let grandTotal = Number(declaredCalc?.grandTotal ?? (data.declared_grand_total ?? (data.totalDue !== undefined ? data.totalDue : (data.grandTotal !== undefined ? data.grandTotal : 0))));
   if (grandTotal <= 0 && data.total_room_charge) {
     grandTotal = Number(data.total_room_charge);
   }
 
-  let tariffNet = Number(data.roomTariffNet !== undefined ? data.roomTariffNet : (data.netCharge !== undefined ? data.netCharge : 0));
-  let taxAmount = Number(data.taxAmount !== undefined ? data.taxAmount : (data.tax_amount || 0));
+  let tariffNet = Number(declaredCalc?.baseRoomTariff ?? declaredCalc?.effectiveTariff ?? (data.roomTariffNet !== undefined ? data.roomTariffNet : (data.netCharge !== undefined ? data.netCharge : 0)));
+  let taxAmount = Number(declaredCalc?.taxAmount ?? (data.taxAmount !== undefined ? data.taxAmount : (data.tax_amount || 0)));
 
   // Self-heal: If tariffNet was passed equal to grandTotal but discountAmount > 0,
   // roomTariffNet should reflect pre-discount gross room tariff (Gross Tariff - Discount + Tax = Grand Total)
-  if (discountAmount > 0 && Math.abs(tariffNet - grandTotal) <= 2) {
+  if (!declaredCalc && discountAmount > 0 && Math.abs(tariffNet - grandTotal) <= 2) {
     if (taxAmount > 0) {
       tariffNet = Math.round((grandTotal - taxAmount + discountAmount) * 100) / 100;
     } else {
@@ -2344,7 +2345,13 @@ export function buildGuestRegistrationHTML(data, options = { includePhotos: fals
   const fnbTotal = foodTotal + barTotal;
   const fnbPendingTotal = Number(data.foodPending !== undefined ? data.foodPending : (data.fnbPendingTotal !== undefined ? data.fnbPendingTotal : (data.summary?.fnbPendingTotal || 0)));
 
-  const totalPaid = Number(data.totalPaid !== undefined ? data.totalPaid : (data.initial_paid || data.advancePaid || 0));
+  const totalPaid = Number(
+    data.totalPaid !== undefined ? data.totalPaid :
+    (data.advance_payment !== undefined && data.advance_payment !== null && Number(data.advance_payment) > 0 ? Number(data.advance_payment) :
+      (data.advancePaid !== undefined && data.advancePaid !== null && Number(data.advancePaid) > 0 ? Number(data.advancePaid) :
+        (data.total_paid !== undefined && data.total_paid !== null && Number(data.total_paid) > 0 ? Number(data.total_paid) :
+          (data.initial_paid || 0))))
+  );
   const balanceDue = Math.max(0, grandTotal - totalPaid);
 
   // Pre-booked OTA calculation & Hotel Extra Booking breakdown
@@ -2410,10 +2417,28 @@ export function buildGuestRegistrationHTML(data, options = { includePhotos: fals
     effectiveBalanceDue = balanceDue;
   }
 
-  const splitCash = Number(data.splitCash !== undefined ? data.splitCash : (data.split_cash || 0));
-  const splitCard = Number(data.splitCard !== undefined ? data.splitCard : (data.split_card || 0));
-  const splitOnline = Number(data.splitOnline !== undefined ? data.splitOnline : (data.split_online || 0));
-  const splitCheque = Number(data.splitCheque !== undefined ? data.splitCheque : (data.split_cheque || 0));
+  let splitCash = Number(data.splitCash !== undefined ? data.splitCash : (data.split_cash || 0));
+  let splitCard = Number(data.splitCard !== undefined ? data.splitCard : (data.split_card || 0));
+  let splitOnline = Number(data.splitOnline !== undefined ? data.splitOnline : (data.split_online || 0));
+  let splitCheque = Number(data.splitCheque !== undefined ? data.splitCheque : (data.split_cheque || 0));
+
+  if (splitCash === 0 && splitCard === 0 && splitOnline === 0 && splitCheque === 0 && Array.isArray(data.payments) && data.payments.length > 0) {
+    const advPayment = data.payments.find(p => p.payment_type === 'advance' || (p.notes && String(p.notes).toLowerCase().includes('checkin'))) || data.payments[0];
+    if (advPayment) {
+      if (Number(advPayment.split_cash) > 0) splitCash = Number(advPayment.split_cash);
+      else if (String(advPayment.payment_mode).toLowerCase() === 'cash') splitCash = Number(advPayment.amount);
+
+      if (Number(advPayment.split_card) > 0) splitCard = Number(advPayment.split_card);
+      else if (String(advPayment.payment_mode).toLowerCase() === 'card') splitCard = Number(advPayment.amount);
+
+      if (Number(advPayment.split_online) > 0) splitOnline = Number(advPayment.split_online);
+      else if (['online', 'upi'].includes(String(advPayment.payment_mode).toLowerCase())) splitOnline = Number(advPayment.amount);
+
+      if (Number(advPayment.split_cheque) > 0) splitCheque = Number(advPayment.split_cheque);
+      else if (String(advPayment.payment_mode).toLowerCase() === 'cheque') splitCheque = Number(advPayment.amount);
+    }
+  }
+
   const onlineUtr = (data.onlineUtr || data.utrNumber || data.utr_number || data.advance_utr_number || '').trim();
   const chequeNo = (data.chequeNo || data.cheque_no || data.advance_cheque_no || '').trim();
   const chequeBank = (data.chequeBank || data.bank_name || data.advance_cheque_bank || '').trim();
@@ -2445,7 +2470,7 @@ export function buildGuestRegistrationHTML(data, options = { includePhotos: fals
     splitBadges.push(`<span style="background: #faf5ff; border: 1.5px solid #d8b4fe; color: #6b21a8; padding: 3px 8px; border-radius: 4px; font-weight: 850; font-size: 9.5pt;">Cheque: ₹ ${splitCheque.toLocaleString('en-IN')} (#${escapeHtml(chequeNo || '-')}${chequeBank ? ` ${escapeHtml(chequeBank)}` : ''})</span>`);
   }
   if (splitBadges.length === 0 && totalPaid > 0) {
-    const rawMode = String(data.paymentMode || data.payment_mode || '').toLowerCase();
+    const rawMode = String(data.advance_payment_mode || data.paymentMode || data.payment_mode || 'cash').toLowerCase();
     if (rawMode.includes('card')) {
       const fee = effectiveCardFee > 0 ? effectiveCardFee : Math.round(totalPaid * 0.025);
       const finalCard = totalPaid + fee;
@@ -2640,7 +2665,7 @@ export function buildGuestRegistrationHTML(data, options = { includePhotos: fals
   }
 
   const page1Html = `
-    <div class="full-a4-registration-card registration-page-1" style="position: relative; width: 100%; height: 276mm; min-height: 276mm; max-height: 278mm; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif; color: #000; border: 3.5px solid #1e3a8a; padding: 8px 12px; background: #fff; line-height: 1.25; display: flex; flex-direction: column; justify-content: space-between; page-break-inside: avoid; break-inside: avoid; page-break-after: avoid; break-after: avoid; overflow: hidden;">
+    <div class="full-a4-registration-card registration-page-1" style="position: relative; width: 100%; height: 265mm; min-height: 260mm; max-height: 268mm; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif; color: #000; border: 3.5px solid #1e3a8a; padding: 6px 10px; background: #fff; line-height: 1.25; display: flex; flex-direction: column; justify-content: space-between; page-break-inside: avoid; break-inside: avoid; page-break-after: avoid; break-after: avoid; overflow: hidden;">
       <!-- Top-Right Voucher / Reg No & Check-in Date Box (Top & Right Overlapped with Main Border) -->
       <div style="position: absolute; top: -3.5px; right: -3.5px; z-index: 10;">
         <table style="border-collapse: collapse; border: 1.5px solid #1e3a8a; border-top: 3.5px solid #1e3a8a; border-right: 3.5px solid #1e3a8a; font-size: 8pt; background: #ffffff;">
@@ -3504,8 +3529,32 @@ export function buildGuestPaymentSummaryHTML(data) {
   if (!data) return '';
 
   const guestName = data.guest_name || data.guestName || data.primaryGuest?.name || data.customer_name || 'Valued Guest';
-  const roomNo = data.room_numbers || data.room_number || data.roomNumber || data.room_name || data.room || '-';
-  const roomType = data.room_type || data.roomType || '-';
+
+  const allNumsSet = new Set();
+  const addNums = (val) => {
+    if (!val) return;
+    if (Array.isArray(val)) { val.forEach(v => addNums(v)); return; }
+    String(val).split(',').forEach(item => { const clean = item.trim(); if (clean) allNumsSet.add(clean); });
+  };
+  addNums(data.all_group_room_numbers);
+  addNums(data.rooms);
+  addNums(data.room_numbers);
+  addNums(data.room_number);
+  addNums(data.roomNumber);
+  const cleanNums = Array.from(allNumsSet).sort((a, b) => Number(a) - Number(b));
+  const roomNo = cleanNums.length > 0 ? cleanNums.join(', ') : (data.room_number || '-');
+
+  const allTypesSet = new Set();
+  const addTypes = (val) => {
+    if (!val) return;
+    if (Array.isArray(val)) { val.forEach(v => addTypes(v)); return; }
+    String(val).split(',').forEach(item => { const clean = item.trim(); if (clean) allTypesSet.add(clean); });
+  };
+  addTypes(data.room_types);
+  addTypes(data.room_type);
+  addTypes(data.roomType);
+  const roomType = Array.from(allTypesSet).join(', ') || '-';
+
   const rawVoucherNo = data.voucher_no || data.voucher_number || data.voucherNumber || (data.id ? `VCH-${data.id}` : '-');
   const voucherNo = cleanVoucherNumber(rawVoucherNo);
   const formatStayDateTime = (dateVal, timeVal) => {
@@ -3928,20 +3977,44 @@ export function buildGuestActivitiesSummaryHTML(data) {
   const r = data.room || data;
   const guestName = data.guest_name || data.guestName || r.guest_name || 'Guest';
   const mobile = data.mobile || data.phone || r.guest_phone || r.mobile || '-';
-  const roomNo = data.room_numbers || data.room_number || r.room_number || '-';
-  const roomType = data.room_type || r.room_type || 'Deluxe Room';
+  const allNumsSet = new Set();
+  const addNums = (val) => {
+    if (!val) return;
+    if (Array.isArray(val)) { val.forEach(v => addNums(v)); return; }
+    String(val).split(',').forEach(item => { const clean = item.trim(); if (clean) allNumsSet.add(clean); });
+  };
+  addNums(data.all_group_room_numbers);
+  addNums(data.rooms);
+  addNums(data.room_numbers);
+  addNums(data.room_number);
+  addNums(r.room_number);
+  const cleanNums = Array.from(allNumsSet).sort((a, b) => Number(a) - Number(b));
+  const roomNo = cleanNums.length > 0 ? cleanNums.join(', ') : '-';
+
+  const allTypesSet = new Set();
+  const addTypes = (val) => {
+    if (!val) return;
+    if (Array.isArray(val)) { val.forEach(v => addTypes(v)); return; }
+    String(val).split(',').forEach(item => { const clean = item.trim(); if (clean) allTypesSet.add(clean); });
+  };
+  addTypes(data.room_types);
+  addTypes(data.room_type);
+  addTypes(r.room_type);
+  const roomType = Array.from(allTypesSet).join(', ') || 'Deluxe Room';
+
   const checkinTime = (data.checkin_time || data.checkinTime || r.checkin_time) ? new Date(data.checkin_time || data.checkinTime || r.checkin_time).toLocaleString('en-IN', { hour12: true }) : '-';
-  const checkoutTime = (data.checkout_time || data.checkoutTime || data.actual_checkout_time || data.actualCheckoutTime || data.approx_checkout_time || data.approxCheckoutTime || r.checkout_time || r.approx_checkout_time)
-    ? new Date(data.checkout_time || data.checkoutTime || data.actual_checkout_time || data.actualCheckoutTime || data.approx_checkout_time || data.approxCheckoutTime || r.checkout_time || r.approx_checkout_time).toLocaleString('en-IN', { hour12: true })
+  const checkoutTime = (data.actual_checkout_time || data.actualCheckoutTime || data.checkout_time || data.checkoutTime || data.approx_checkout_time || data.approxCheckoutTime || r.checkout_time || r.approx_checkout_time)
+    ? new Date(data.actual_checkout_time || data.actualCheckoutTime || data.checkout_time || data.checkoutTime || data.approx_checkout_time || data.approxCheckoutTime || r.checkout_time || r.approx_checkout_time).toLocaleString('en-IN', { hour12: true })
     : '-';
   const source = data.booking_source || data.source || r.booking_source || 'Walk-in';
 
   // Hospitality / Room Charges
-  const stayCharge = Number(data.roomCharge || data.room_charge || r.total_room_charge || 0);
-  const stayDiscount = Number(data.discountAmount || data.discount_amount || 0);
-  const stayGst = Number(data.stayTax || data.totalGst || 0);
-  const extraBedCharge = Number(data.extraBedCharge || data.extra_bed_charge || 0);
-  const stayNetTotal = Number(data.stayNetTotal || data.recalculatedRoomCharge || stayCharge);
+  const activeCalc = data.stayCalcNow || data.tax_invoice_snapshot?.stayCalcNow;
+  const stayCharge = Number(activeCalc?.baseRoomTariff ?? (data.baseRoomTariff ?? (data.roomCharge || data.room_charge || r.total_room_charge || 0)));
+  const stayDiscount = Number(activeCalc?.discountAmount ?? (data.discountAmount || data.discount_amount || 0));
+  const stayGst = Number(activeCalc?.taxAmount ?? (data.stayTax || data.totalGst || 0));
+  const extraBedCharge = Number(activeCalc?.extraMattressCost ?? (data.extraBedCharge || data.extra_bed_charge || 0));
+  const stayNetTotal = Number(activeCalc?.totalStayCost ?? (data.stayNetTotal || data.recalculatedRoomCharge || stayCharge));
 
   // Orders
   const restaurantOrders = Array.isArray(data.restaurantOrders) ? data.restaurantOrders : [];
@@ -4464,11 +4537,17 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
             ? s.all_group_room_numbers
             : groupRoomsList.map(gr => gr.room_number || gr.roomNumber)))));
 
-  const allNumsSet = new Set(rawGroupNums.filter(Boolean).map(n => String(n).trim()));
-  if (r.room_number) allNumsSet.add(String(r.room_number).trim());
-  if (r.roomNumber) allNumsSet.add(String(r.roomNumber).trim());
-  if (c.room_number) allNumsSet.add(String(c.room_number).trim());
-  if (c.room?.room_number) allNumsSet.add(String(c.room.room_number).trim());
+  const allNumsSet = new Set();
+  const addNums = (val) => {
+    if (!val) return;
+    if (Array.isArray(val)) { val.forEach(v => addNums(v)); return; }
+    String(val).split(',').forEach(item => { const clean = item.trim(); if (clean) allNumsSet.add(clean); });
+  };
+  addNums(rawGroupNums);
+  addNums(r.room_number);
+  addNums(r.roomNumber);
+  addNums(c.room_number);
+  addNums(c.room?.room_number);
 
   const cleanGroupNums = Array.from(allNumsSet).sort((a, b) => {
     const na = Number(a), nb = Number(b);
@@ -4478,11 +4557,15 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
   const roomNum = cleanGroupNums.length > 0 ? cleanGroupNums.join(', ') : (r.room_number || r.roomNumber || c.room_number || '310');
 
   // Room Type categories (if more than one category room selected, show unique types comma-separated)
-  const rawGroupTypes = [
-    ...groupRoomsList.map(gr => gr.room_type || gr.roomType),
-    r.room_type || r.roomType || c.room_type || c.roomType || c.room?.room_type
-  ];
-  const cleanGroupTypes = [...new Set(rawGroupTypes.filter(Boolean).map(t => String(t).trim()))];
+  const allTypesSet = new Set();
+  const addTypes = (val) => {
+    if (!val) return;
+    if (Array.isArray(val)) { val.forEach(v => addTypes(v)); return; }
+    String(val).split(',').forEach(item => { const clean = item.trim(); if (clean) allTypesSet.add(clean); });
+  };
+  groupRoomsList.forEach(gr => addTypes(gr.room_type || gr.roomType));
+  addTypes(r.room_type || r.roomType || c.room_type || c.roomType || c.room?.room_type);
+  const cleanGroupTypes = Array.from(allTypesSet);
   const roomType = cleanGroupTypes.length > 0 ? cleanGroupTypes.join(', ') : (r.room_type || r.roomType || c.room_type || 'Executive Room');
 
   // Mode of Booking / Channel (Requirement 7 & OTA payment mode specification)
@@ -4716,7 +4799,9 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
   let baseRoomTariffTotal = 0;
   if (explicitBaseRoomTariff !== null && !isNaN(explicitBaseRoomTariff)) {
     baseRoomTariffTotal = explicitBaseRoomTariff;
-  } else if (Number(c.roomGrossTariff || c.grossTariff || 0) > 0) {
+  } else if (c.stayCalcNow?.baseRoomTariff !== undefined) {
+    baseRoomTariffTotal = Number(c.stayCalcNow.baseRoomTariff);
+  } else if (Number(c.roomGrossTariff || c.grossTariff || 0) > 0 && !isAlreadyCheckedOut) {
     baseRoomTariffTotal = Math.max(0, Number(c.roomGrossTariff || c.grossTariff) - breakfastPlanTotal);
   } else {
     baseRoomTariffTotal = baseRoomDailyRate * billableDays;
@@ -4738,18 +4823,20 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
   const advancePaymentRecord = paymentsList.find(p => p.payment_type === 'advance' || (p.notes && String(p.notes).toLowerCase().includes('checkin')));
 
   let deskAdvance = 0;
-  if (advancePaymentRecord && Number(advancePaymentRecord.amount) > 0) {
+  if (c.stayCalcNow?.advancePaid !== undefined) {
+    deskAdvance = Number(c.stayCalcNow.advancePaid);
+  } else if (advancePaymentRecord && Number(advancePaymentRecord.amount) > 0) {
     deskAdvance = Number(advancePaymentRecord.amount);
   } else if (Number(r.final_settlement_payment) > 0 && Number(r.total_paid) > Number(r.final_settlement_payment)) {
     deskAdvance = Number((Number(r.total_paid) - Number(r.final_settlement_payment)).toFixed(2));
-  } else if (c.advancePaid !== undefined && c.advancePaid !== null && Number(c.advancePaid) > 0 && Number(c.advancePaid) !== Number(r.total_paid || 0)) {
+  } else if (c.advancePaid !== undefined && c.advancePaid !== null && Number(c.advancePaid) > 0) {
     deskAdvance = Number(c.advancePaid);
-  } else if (summary.advancePaid !== undefined && summary.advancePaid !== null && Number(summary.advancePaid) > 0 && Number(summary.advancePaid) !== Number(r.total_paid || 0)) {
+  } else if (summary.advancePaid !== undefined && summary.advancePaid !== null && Number(summary.advancePaid) > 0) {
     deskAdvance = Number(summary.advancePaid);
-  } else if (r.advance_receipt_no && Number(r.advance_payment) > 0 && Number(r.advance_payment) !== Number(r.total_paid || 0)) {
+  } else if (r.advance_payment !== undefined && r.advance_payment !== null && Number(r.advance_payment) > 0) {
     deskAdvance = Number(r.advance_payment);
-  } else if (r.advance_payment !== undefined && r.advance_payment !== null && Number(r.advance_payment) > 0 && (Number(r.final_settlement_payment || 0) === 0 || Number(r.advance_payment) < Number(r.total_paid || 0))) {
-    deskAdvance = Number(r.advance_payment);
+  } else if (Number(r.total_paid) > 0 && Number(r.final_settlement_payment || 0) === 0) {
+    deskAdvance = Number(r.total_paid);
   } else if (Number(r.split_cash || 0) > 0 || Number(r.split_online || 0) > 0 || Number(r.split_card || 0) > 0) {
     deskAdvance = Number(r.split_cash || 0) + Number(r.split_online || 0) + Number(r.split_card || 0);
   } else {
@@ -4806,7 +4893,9 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
   const recordDiscPct = Number(r.discount_pct ?? r.discountPct ?? 0);
 
   let discountAmt = 0;
-  if (s.isCheckoutSettlement) {
+  if (c.stayCalcNow?.discountAmount !== undefined) {
+    discountAmt = Number(c.stayCalcNow.discountAmount);
+  } else if (s.isCheckoutSettlement) {
     // Actively checking out in modal: check-in discount + checkout modal discount
     discountAmt = Number((checkinDiscAmt + checkoutDiscAmt).toFixed(2));
   } else if (isAlreadyCheckedOut) {

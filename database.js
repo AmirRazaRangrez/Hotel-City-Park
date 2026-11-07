@@ -1002,6 +1002,7 @@ try { db.exec("ALTER TABLE bookings ADD COLUMN company_name TEXT DEFAULT NULL;")
 try { db.exec("ALTER TABLE bookings ADD COLUMN gst_number TEXT DEFAULT NULL;"); } catch (e) {}
 try { db.exec("ALTER TABLE bookings ADD COLUMN company_address TEXT DEFAULT NULL;"); } catch (e) {}
 try { db.exec("ALTER TABLE bookings ADD COLUMN checkout_discount_amount REAL DEFAULT 0;"); } catch (e) {}
+try { db.exec("ALTER TABLE bookings ADD COLUMN tax_invoice_snapshot_json TEXT DEFAULT NULL;"); } catch (e) {}
 try { db.exec("ALTER TABLE guests ADD COLUMN company_name TEXT DEFAULT NULL;"); } catch (e) {}
 try { db.exec("ALTER TABLE guests ADD COLUMN gst_number TEXT DEFAULT NULL;"); } catch (e) {}
 

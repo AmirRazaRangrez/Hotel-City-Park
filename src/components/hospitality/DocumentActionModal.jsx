@@ -86,21 +86,30 @@ export default function DocumentActionModal({
     }
     // Flat booking or room object
     const room = invData;
+    const activeCalc = room.tax_invoice_snapshot?.stayCalcNow || room.stayCalcNow;
     const calc = {
-      grossTariff: room.grossTariff || room.total_room_charge || room.room_rate,
-      roomCharge: room.total_room_charge || room.room_rate,
-      roomTariffNet: Math.max(0, (Number(room.total_room_charge || room.room_rate || 0)) - (Number(room.discount_amount || 0))),
-      tariffTax5Pct: room.tax_amount || room.total_tax || Math.max(0, Math.round((room.total_room_charge || 0) - ((room.total_room_charge || 0) / 1.05))),
+      grossTariff: activeCalc?.grossTariff || room.grossTariff || room.total_room_charge || room.room_rate,
+      roomCharge: activeCalc?.baseRoomTariff || room.total_room_charge || room.room_rate,
+      baseRoomTariff: activeCalc?.baseRoomTariff ?? room.baseRoomTariff,
+      extraMattressCost: activeCalc?.extraMattressCost ?? room.extraMattressCost,
+      extraMattressDailyRate: activeCalc?.extraMattressDailyRate,
+      breakfastCost: activeCalc?.breakfastCost ?? room.breakfastCost,
+      breakfastPax: activeCalc?.breakfastPax ?? room.breakfastPax,
+      breakfastDailyRate: activeCalc?.breakfastDailyRate,
+      roomTariffNet: activeCalc?.effectiveTariff || Math.max(0, (Number(room.total_room_charge || room.room_rate || 0)) - (Number(room.discount_amount || 0))),
+      tariffTax5Pct: activeCalc?.taxAmount || room.tax_amount || room.total_tax || Math.max(0, Math.round((room.total_room_charge || 0) - ((room.total_room_charge || 0) / 1.05))),
       foodTotal: room.food_total || 0,
       barTotal: room.bar_total || 0,
-      hotelExtrasCharge: room.extra_bed_charge || 0,
-      advancePaid: room.advance_payment !== undefined && room.advance_payment !== null && Number(room.advance_payment) > 0
+      hotelExtrasCharge: activeCalc?.extraMattressCost || room.extra_bed_charge || 0,
+      advancePaid: activeCalc?.advancePaid ?? (room.advance_payment !== undefined && room.advance_payment !== null && Number(room.advance_payment) > 0
         ? Number(room.advance_payment)
-        : Math.max(0, Number(room.total_paid || 0) - Number(room.final_settlement_payment || 0)),
-      chargedDays: room.charged_days || 1,
-      billableDays: room.charged_days || 1,
-      discountPct: room.discount_pct || 0,
-      discountAmount: room.discount_amount || 0,
+        : Math.max(0, Number(room.total_paid || 0) - Number(room.final_settlement_payment || 0))),
+      chargedDays: activeCalc?.chargedDays || room.charged_days || 1,
+      billableDays: activeCalc?.billableDays || room.charged_days || 1,
+      discountPct: activeCalc?.discountPct ?? room.discount_pct ?? 0,
+      discountAmount: activeCalc?.discountAmount ?? room.discount_amount ?? 0,
+      stayCalcNow: activeCalc || null,
+      stayCalcDeclared: room.stayCalcDeclared || room.tax_invoice_snapshot?.stayCalcDeclared || null,
       restaurantOrders: room.restaurantOrders || room.restaurant_orders || [],
       barOrders: room.barOrders || room.bar_orders || []
     };
@@ -108,8 +117,8 @@ export default function DocumentActionModal({
       settleAmt: room.final_settlement_payment || room.final_settle_amount || 0,
       refundAmt: room.refund_amount || 0,
       settled_at: room.actual_checkout_time || room.checkout_time || new Date(),
-      discount_amount: room.discount_amount || 0,
-      discount_pct: room.discount_pct || 0,
+      discount_amount: activeCalc?.discountAmount ?? room.discount_amount ?? 0,
+      discount_pct: activeCalc?.discountPct ?? room.discount_pct ?? 0,
       invoiceNo: room.invoice_no || formatTaxInvoiceNumber(room.voucher_number || room.voucher_no || room.checkin_voucher_no || room.id),
       checked_out_by: room.checked_out_by || cashierName
     };

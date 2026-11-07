@@ -1415,7 +1415,14 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                 ).toUpperCase();
               }
 
-              const roomNumberClean = r.room_number || (r.all_group_rooms ? r.all_group_rooms.map(x => typeof x === 'object' && x !== null ? (x.room_number || x.number) : x).filter(Boolean).join(', ') : '-');
+              const groupRoomsList = Array.isArray(r.rooms) && r.rooms.length > 0
+                ? r.rooms
+                : (Array.isArray(r.all_group_rooms) && r.all_group_rooms.length > 0
+                  ? r.all_group_rooms.map(x => typeof x === 'object' && x !== null ? (x.room_number || x.number) : x).filter(Boolean)
+                  : (r.room_number ? String(r.room_number).split(',').map(s => s.trim()) : []));
+              const roomNumberClean = groupRoomsList.length > 0
+                ? Array.from(new Set(groupRoomsList)).sort((a, b) => Number(a) - Number(b)).join(', ')
+                : (r.room_number || '-');
 
               return (
                 <tr
@@ -1534,7 +1541,7 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                         whiteSpace: 'nowrap'
                       }}
                     >
-                      {formatShortDT(r.checkout_time || r.approx_checkout_time)}
+                      {formatShortDT(isCheckedOut ? (r.actual_checkout_time || r.checkout_time) : (r.checkout_time || r.approx_checkout_time))}
                     </div>
                     <div>
                       <span
@@ -1565,7 +1572,7 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                             color: '#dc2626'
                           }}
                         >
-                          {formatCurrency(Math.max(0, (Number(r.total_room_charge || r.total_cost || 0) + Number(r.extra_bed_charge || 0)) - Number(r.total_paid || 0)) || Number(r.total_room_charge || 0))} Due
+                          {formatCurrency(Math.max(0, Number(r.balance_due !== undefined ? r.balance_due : ((Number(r.total_room_charge || 0) + Number(r.food_total || 0) + Number(r.bar_total || 0)) - Number(r.total_paid || 0)))))} Due
                         </div>
                         <div style={{ fontSize: '0.72rem', color: '#dc2626', fontWeight: 700, marginTop: '1px' }}>
                           (pending btc)
@@ -1580,7 +1587,7 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                             color: isPrepaid && hotelPaid === 0 ? '#6b21a8' : (isPending ? '#b45309' : '#15803d')
                           }}
                         >
-                          {formatCurrency(isPrepaid && hotelPaid === 0 ? 0 : (r.total_paid || r.total_room_charge || 0))}
+                          {formatCurrency(isPrepaid && hotelPaid === 0 ? 0 : (r.total_paid !== undefined && r.total_paid !== null ? r.total_paid : 0))}
                         </div>
                         <div style={{ fontSize: '0.72rem', color: isPrepaid ? '#7c3aed' : '#64748b', fontWeight: 600, marginTop: '1px' }}>
                           ({modeLabel.toLowerCase()})
@@ -1685,7 +1692,11 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                 <span style={{ fontSize: '1.5rem', padding: '4px 8px', background: 'rgba(56, 189, 248, 0.15)', borderRadius: '8px' }}>📜</span>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary, #0f172a)' }}>
-                    Stay Details &amp; Payment Folio {detailBooking ? `— Booking #${detailBooking.id} (Room ${detailBooking.room_number || '-'})` : ''}
+                    Stay Details &amp; Payment Folio {detailBooking ? (
+                      Array.isArray(detailBooking.all_group_rooms) && detailBooking.all_group_rooms.length > 1
+                        ? `— Group Booking #${detailBooking.id} (Rooms ${detailBooking.room_number || '-'})`
+                        : `— Booking #${detailBooking.id} (Room ${detailBooking.room_number || '-'})`
+                    ) : ''}
                   </h3>
                   <p style={{ margin: '1px 0 0', fontSize: '0.78rem', color: 'var(--text-secondary, #64748b)' }}>
                     Archived stay folio, billing breakdown, cashier audit trail, and corporate settlement
@@ -1700,33 +1711,42 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                   <button
                     type="button"
                     onClick={() => {
+                      const activeCalc = detailBooking.tax_invoice_snapshot?.stayCalcNow || detailBooking.stayCalcNow;
                       setDocActionModal({
                         isOpen: true,
                         type: 'invoice',
                         data: {
                           room: detailBooking,
                           calc: {
-                            grossTariff: detailBooking.total_room_charge || detailBooking.room_rate,
-                            roomCharge: detailBooking.total_room_charge || detailBooking.room_rate,
-                            roomTariffNet: Math.max(0, (Number(detailBooking.total_room_charge || detailBooking.room_rate || 0)) - (Number(detailBooking.discount_amount || 0))),
-                            tariffTax5Pct: detailBooking.tax_amount || detailBooking.total_tax,
+                            grossTariff: activeCalc?.grossTariff || detailBooking.grossTariff || detailBooking.total_room_charge || detailBooking.room_rate,
+                            roomCharge: activeCalc?.baseRoomTariff || detailBooking.total_room_charge || detailBooking.room_rate,
+                            baseRoomTariff: activeCalc?.baseRoomTariff ?? detailBooking.baseRoomTariff,
+                            extraMattressCost: activeCalc?.extraMattressCost ?? detailBooking.extraMattressCost,
+                            extraMattressDailyRate: activeCalc?.extraMattressDailyRate,
+                            breakfastCost: activeCalc?.breakfastCost ?? detailBooking.breakfastCost,
+                            breakfastPax: activeCalc?.breakfastPax ?? detailBooking.breakfastPax,
+                            breakfastDailyRate: activeCalc?.breakfastDailyRate,
+                            roomTariffNet: activeCalc?.effectiveTariff || Math.max(0, (Number(detailBooking.total_room_charge || detailBooking.room_rate || 0)) - (Number(detailBooking.discount_amount || 0))),
+                            tariffTax5Pct: activeCalc?.taxAmount || detailBooking.tax_amount || detailBooking.total_tax,
                             foodTotal: detailBooking.food_total || 0,
                             barTotal: detailBooking.bar_total || 0,
-                            hotelExtrasCharge: detailBooking.extra_bed_charge || 0,
-                            advancePaid: detailBooking.advance_payment !== undefined && detailBooking.advance_payment !== null && Number(detailBooking.advance_payment) > 0
+                            hotelExtrasCharge: activeCalc?.extraMattressCost || detailBooking.extra_bed_charge || 0,
+                            advancePaid: activeCalc?.advancePaid ?? (detailBooking.advance_payment !== undefined && detailBooking.advance_payment !== null && Number(detailBooking.advance_payment) > 0
                               ? Number(detailBooking.advance_payment)
-                              : Math.max(0, Number(detailBooking.total_paid || 0) - Number(detailBooking.final_settlement_payment || 0)),
-                            chargedDays: detailBooking.charged_days || 1,
-                            billableDays: detailBooking.charged_days || 1,
-                            discountPct: detailBooking.discount_pct || 0,
-                            discountAmount: detailBooking.discount_amount || 0
+                              : Math.max(0, Number(detailBooking.total_paid || 0) - Number(detailBooking.final_settlement_payment || 0))),
+                            chargedDays: activeCalc?.chargedDays || detailBooking.charged_days || 1,
+                            billableDays: activeCalc?.billableDays || detailBooking.charged_days || 1,
+                            discountPct: activeCalc?.discountPct ?? detailBooking.discount_pct ?? 0,
+                            discountAmount: activeCalc?.discountAmount ?? detailBooking.discount_amount ?? 0,
+                            stayCalcNow: activeCalc || null,
+                            stayCalcDeclared: detailBooking.stayCalcDeclared || detailBooking.tax_invoice_snapshot?.stayCalcDeclared || null
                           },
                           settlement: {
                             settleAmt: detailBooking.final_settlement_payment || detailBooking.final_settle_amount || 0,
                             refundAmt: detailBooking.refund_amount || 0,
                             settled_at: detailBooking.actual_checkout_time || detailBooking.checkout_time || new Date(),
-                            discount_amount: detailBooking.discount_amount || 0,
-                            discount_pct: detailBooking.discount_pct || 0,
+                            discount_amount: activeCalc?.discountAmount ?? detailBooking.discount_amount ?? 0,
+                            discount_pct: activeCalc?.discountPct ?? detailBooking.discount_pct ?? 0,
                             invoiceNo: detailBooking.invoice_no || formatTaxInvoiceNumber(detailBooking.voucher_number || detailBooking.voucher_no || detailBooking.checkin_voucher_no || detailBooking.id),
                             checked_out_by: detailBooking.checked_out_by || (currentUser ? (currentUser.full_name || currentUser.username) : 'Cashier_1')
                           }
@@ -2131,8 +2151,10 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                             </div>
                           )}
                         </div>
-                        <span style={{ fontSize: '0.8rem', fontWeight: 800, padding: '4px 10px', background: '#eff6ff', color: '#1d4ed8', borderRadius: '6px' }}>
-                          Room #{detailBooking.room_number || '-'}
+                        <span style={{ fontSize: '0.8rem', fontWeight: 850, padding: '4px 10px', background: '#eff6ff', color: '#1d4ed8', borderRadius: '6px' }}>
+                          {Array.isArray(detailBooking.all_group_rooms) && detailBooking.all_group_rooms.length > 1
+                            ? `Rooms #${detailBooking.room_number || '-'} (Group - ${detailBooking.all_group_rooms.length} Rooms)`
+                            : `Room #${detailBooking.room_number || '-'}`}
                         </span>
                       </div>
 
@@ -2293,9 +2315,11 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                     </div>
 
                     <div style={{ padding: '12px', background: '#ffffff', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                      <span style={{ fontSize: '0.74rem', fontWeight: 750, color: '#64748b', textTransform: 'uppercase' }}>Check-Out</span>
+                      <span style={{ fontSize: '0.74rem', fontWeight: 750, color: '#64748b', textTransform: 'uppercase' }}>
+                        {detailBooking.status === 'checked_out' || detailBooking.actual_checkout_time ? 'Check-Out (Actual)' : 'Check-Out (Expected)'}
+                      </span>
                       <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0f172a', marginTop: '2px' }}>
-                        {formatDateTime(detailBooking.checkout_time || detailBooking.approx_checkout_time)}
+                        {formatDateTime((detailBooking.status === 'checked_out' || detailBooking.actual_checkout_time) ? (detailBooking.actual_checkout_time || detailBooking.checkout_time) : (detailBooking.checkout_time || detailBooking.approx_checkout_time))}
                       </div>
                       <div style={{ fontSize: '0.74rem', color: '#15803d' }}>Out by: {detailBooking.checked_out_by || 'Cashier'}</div>
                     </div>
@@ -2331,7 +2355,7 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                         <div style={{ padding: '12px', background: isDetailPrepaidStay && isZeroHotelPaid ? '#faf5ff' : '#f0fdf4', borderRadius: '10px', border: `1px solid ${isDetailPrepaidStay && isZeroHotelPaid ? '#e9d5ff' : '#bbf7d0'}` }}>
                           <span style={{ fontSize: '0.74rem', fontWeight: 750, color: isDetailPrepaidStay && isZeroHotelPaid ? '#6b21a8' : '#166534', textTransform: 'uppercase' }}>Total Stay Revenue</span>
                           <div style={{ fontSize: '1.25rem', fontWeight: 900, color: isDetailPrepaidStay && isZeroHotelPaid ? '#7c3aed' : '#15803d', marginTop: '2px' }}>
-                            {isDetailPrepaidStay && isZeroHotelPaid && detailBooking.ota_bill_amount > 0 ? formatCurrency(detailBooking.ota_bill_amount) : formatCurrency(detailBooking.total_paid || detailBooking.total_room_charge || 0)}
+                            {isDetailPrepaidStay && isZeroHotelPaid && detailBooking.ota_bill_amount > 0 ? formatCurrency(detailBooking.ota_bill_amount) : formatCurrency(detailBooking.grand_total || detailBooking.total_room_charge || detailBooking.total_paid || 0)}
                           </div>
                           <div style={{ fontSize: '0.74rem', color: isDetailPrepaidStay && isZeroHotelPaid ? '#7c3aed' : '#166534', fontWeight: 600 }}>
                             {isDetailPrepaidStay && isZeroHotelPaid ? `Prepaid Online (${detailBooking.ota_platform || 'OTA'}) • Hotel Paid: ₹0` : 'Settled & Completed'}
@@ -2340,6 +2364,45 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                       );
                     })()}
                   </div>
+
+                  {/* Group Rooms Breakdown Card */}
+                  {Array.isArray(detailBooking.all_group_rooms) && detailBooking.all_group_rooms.length > 1 && (
+                    <div style={{ padding: '14px 18px', background: '#f0f9ff', borderRadius: '12px', border: '1.5px solid #bae6fd' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '1.2rem' }}>🏢</span>
+                          <strong style={{ fontSize: '0.95rem', color: '#0369a1' }}>
+                            Allocated Group Rooms ({detailBooking.all_group_rooms.length} Rooms Linked to Group Stay)
+                          </strong>
+                        </div>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 800, background: '#e0f2fe', color: '#0284c7', padding: '3px 8px', borderRadius: '6px' }}>
+                          Rooms: {detailBooking.room_number}
+                        </span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+                        {detailBooking.all_group_rooms.map((gr, idx) => (
+                          <div key={idx} style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e0f2fe', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontWeight: 850, fontSize: '0.92rem', color: '#0f172a' }}>
+                                Room #{gr.room_number || gr.number}
+                              </div>
+                              <div style={{ fontSize: '0.76rem', color: '#64748b', marginTop: '2px' }}>
+                                {gr.room_type || 'Standard'} {gr.extra_beds > 0 ? `• ${gr.extra_beds} Mattress` : ''}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#0369a1' }}>
+                                {formatCurrency(gr.total_room_charge || gr.room_rate || gr.price || 0)}
+                              </div>
+                              <div style={{ fontSize: '0.70rem', color: '#94a3b8' }}>
+                                {gr.status === 'checked_out' ? 'Checked Out' : 'Room Stay'}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Housekeeping & Cleanliness Info (Point 12) */}
                   <div style={{ padding: '14px 18px', background: '#f8fafc', borderRadius: '12px', border: '1.5px solid #e2e8f0' }}>
@@ -3255,33 +3318,42 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                           type="button"
                           className="filter-chip"
                           onClick={() => {
+                            const activeCalc = detailBooking.tax_invoice_snapshot?.stayCalcNow || detailBooking.stayCalcNow;
                             setDocActionModal({
                               isOpen: true,
                               type: 'invoice',
                               data: {
                                 room: detailBooking,
                                 calc: {
-                                  grossTariff: detailBooking.grossTariff || detailBooking.total_room_charge || detailBooking.room_rate,
-                                  roomCharge: detailBooking.total_room_charge || detailBooking.room_rate,
-                                  roomTariffNet: Math.max(0, (Number(detailBooking.total_room_charge || detailBooking.room_rate || 0)) - (Number(detailBooking.discount_amount || 0))),
-                                  tariffTax5Pct: detailBooking.tax_amount || detailBooking.total_tax,
+                                  grossTariff: activeCalc?.grossTariff || detailBooking.grossTariff || detailBooking.total_room_charge || detailBooking.room_rate,
+                                  roomCharge: activeCalc?.baseRoomTariff || detailBooking.total_room_charge || detailBooking.room_rate,
+                                  baseRoomTariff: activeCalc?.baseRoomTariff ?? detailBooking.baseRoomTariff,
+                                  extraMattressCost: activeCalc?.extraMattressCost ?? detailBooking.extraMattressCost,
+                                  extraMattressDailyRate: activeCalc?.extraMattressDailyRate,
+                                  breakfastCost: activeCalc?.breakfastCost ?? detailBooking.breakfastCost,
+                                  breakfastPax: activeCalc?.breakfastPax ?? detailBooking.breakfastPax,
+                                  breakfastDailyRate: activeCalc?.breakfastDailyRate,
+                                  roomTariffNet: activeCalc?.effectiveTariff || Math.max(0, (Number(detailBooking.total_room_charge || detailBooking.room_rate || 0)) - (Number(detailBooking.discount_amount || 0))),
+                                  tariffTax5Pct: activeCalc?.taxAmount || detailBooking.tax_amount || detailBooking.total_tax,
                                   foodTotal: detailBooking.food_total || 0,
                                   barTotal: detailBooking.bar_total || 0,
-                                  hotelExtrasCharge: detailBooking.extra_bed_charge || 0,
-                                  advancePaid: detailBooking.advance_payment !== undefined && detailBooking.advance_payment !== null && Number(detailBooking.advance_payment) > 0
+                                  hotelExtrasCharge: activeCalc?.extraMattressCost || detailBooking.extra_bed_charge || 0,
+                                  advancePaid: activeCalc?.advancePaid ?? (detailBooking.advance_payment !== undefined && detailBooking.advance_payment !== null && Number(detailBooking.advance_payment) > 0
                                     ? Number(detailBooking.advance_payment)
-                                    : Math.max(0, Number(detailBooking.total_paid || 0) - Number(detailBooking.final_settlement_payment || 0)),
-                                  chargedDays: detailBooking.charged_days || 1,
-                                  billableDays: detailBooking.charged_days || 1,
-                                  discountPct: detailBooking.discount_pct || 0,
-                                  discountAmount: detailBooking.discount_amount || 0
+                                    : Math.max(0, Number(detailBooking.total_paid || 0) - Number(detailBooking.final_settlement_payment || 0))),
+                                  chargedDays: activeCalc?.chargedDays || detailBooking.charged_days || 1,
+                                  billableDays: activeCalc?.billableDays || detailBooking.charged_days || 1,
+                                  discountPct: activeCalc?.discountPct ?? detailBooking.discount_pct ?? 0,
+                                  discountAmount: activeCalc?.discountAmount ?? detailBooking.discount_amount ?? 0,
+                                  stayCalcNow: activeCalc || null,
+                                  stayCalcDeclared: detailBooking.stayCalcDeclared || detailBooking.tax_invoice_snapshot?.stayCalcDeclared || null
                                 },
                                 settlement: {
                                   settleAmt: detailBooking.final_settlement_payment || detailBooking.final_settle_amount || 0,
                                   refundAmt: detailBooking.refund_amount || 0,
                                   settled_at: detailBooking.actual_checkout_time || detailBooking.checkout_time || new Date(),
-                                  discount_amount: detailBooking.discount_amount || 0,
-                                  discount_pct: detailBooking.discount_pct || 0,
+                                  discount_amount: activeCalc?.discountAmount ?? detailBooking.discount_amount ?? 0,
+                                  discount_pct: activeCalc?.discountPct ?? detailBooking.discount_pct ?? 0,
                                   invoiceNo: detailBooking.invoice_no || formatTaxInvoiceNumber(detailBooking.voucher_number || detailBooking.voucher_no || detailBooking.checkin_voucher_no || detailBooking.id),
                                   checked_out_by: detailBooking.checked_out_by || (currentUser ? (currentUser.full_name || currentUser.username) : 'Cashier_1')
                                 }
