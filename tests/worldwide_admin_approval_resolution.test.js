@@ -27,10 +27,10 @@ describe('Worldwide Admin Approval & Realtime Resolution Test Suite', () => {
     expect(notifCode).toContain("socketServer.broadcast('APPROVAL_STATUS_CHANGED'");
   });
 
-  it('4. verifies server.js handles APP- prefix and resolves sibling room approvals', () => {
+  it('4. verifies server.js handles APP- prefix and does not auto-approve from past history', () => {
     const serverCode = fs.readFileSync(path.resolve(__dirname, '../server.js'), 'utf8');
     expect(serverCode).toContain("const cleanId = String(req.params.id || '').replace(/^APP-/, '').trim();");
-    expect(serverCode).toContain("WHERE room_number = ? AND type = ? AND status = 'APPROVED'");
+    expect(serverCode).not.toContain("WHERE room_number = ? AND type = ? AND status = 'APPROVED'");
     expect(serverCode).toContain("app.post('/api/owner/approvals/:id/approve'");
   });
 
@@ -52,3 +52,4 @@ describe('Worldwide Admin Approval & Realtime Resolution Test Suite', () => {
     expect(tunnelCode).toContain('adminConfigPath');
   });
 });
+

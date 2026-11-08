@@ -1266,13 +1266,13 @@ function updateApprovalStatus(id, newStatus, user = 'Admin', reason = '') {
       WHERE id = ?
     `).run(newStatus, user, reason, cleanId);
 
-    // Smart Room Deduplication: Also update all other pending requests for the same room & type!
+    // Smart Room Deduplication: Also update other active pending requests for the same room & type within the last 30 minutes!
     if (existing.room_number) {
       try {
         db.prepare(`
           UPDATE owner_approvals
           SET status = ?, action_by = ?, action_at = CURRENT_TIMESTAMP, action_reason = ?
-          WHERE room_number = ? AND type = ? AND status = 'PENDING'
+          WHERE room_number = ? AND type = ? AND status = 'PENDING' AND requested_at >= datetime('now', '-30 minutes')
         `).run(newStatus, user, reason, existing.room_number, existing.type);
       } catch (_) {}
     }

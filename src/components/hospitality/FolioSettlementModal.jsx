@@ -233,21 +233,29 @@ export default function FolioSettlementModal({
     effectiveRoomTariff ||
     0
   );
-  const maxAllowableDiscount = Math.max(0, dynamicBalanceDue > 0 ? dynamicBalanceDue : (baseTariff > 0 ? baseTariff : grossStayTariff));
+  const totalBaseTariff = Number(
+    activeStayCalc?.grossTariff ||
+    folioData?.stayCalcNow?.grossTariff ||
+    folioData?.grossTariff ||
+    ((Number(activeStayCalc?.baseRoomTariff || folioData?.baseRoomTariff || 0)) + (Number(activeStayCalc?.breakfastCost || folioData?.breakfastCost || 0))) ||
+    baseTariff
+  );
+  const maxAllowableDiscount = Math.max(0, dynamicBalanceDue > 0 ? dynamicBalanceDue : (totalBaseTariff > 0 ? totalBaseTariff : grossStayTariff));
 
   let enteredDiscountAmt = 0;
   let enteredDiscountPct = 0;
   const rawDiscountVal = parseFloat(discountValue) || 0;
   if (rawDiscountVal > 0) {
+    const tariffForDiscount = totalBaseTariff > 0 ? totalBaseTariff : (baseTariff > 0 ? baseTariff : maxAllowableDiscount);
     if (discountType === 'pct') {
       const targetPct = Math.min(100, Math.max(0, rawDiscountVal));
-      const calcAmt = baseTariff > 0 ? Math.round((baseTariff * targetPct) / 100) : Math.round((maxAllowableDiscount * targetPct) / 100);
+      const calcAmt = tariffForDiscount > 0 ? Math.round((tariffForDiscount * targetPct) / 100) : Math.round((maxAllowableDiscount * targetPct) / 100);
       enteredDiscountAmt = Math.min(maxAllowableDiscount, calcAmt);
       enteredDiscountPct = targetPct;
     } else {
       const calcAmt = Math.max(0, Math.round(rawDiscountVal));
       enteredDiscountAmt = Math.min(maxAllowableDiscount, calcAmt);
-      enteredDiscountPct = baseTariff > 0 ? Number(((enteredDiscountAmt / baseTariff) * 100).toFixed(1)) : (maxAllowableDiscount > 0 ? Math.round((enteredDiscountAmt / maxAllowableDiscount) * 100) : 0);
+      enteredDiscountPct = tariffForDiscount > 0 ? Number(((enteredDiscountAmt / tariffForDiscount) * 100).toFixed(1)) : (maxAllowableDiscount > 0 ? Math.round((enteredDiscountAmt / maxAllowableDiscount) * 100) : 0);
     }
   }
 
@@ -350,7 +358,7 @@ export default function FolioSettlementModal({
     // 2. Continuous 1-second polling fallback
     const checkStatus = async () => {
       try {
-        const res = await api.get(`/owner/approvals/${discountApproval.approvalId}/status?room=${encodeURIComponent(currentRoomNum)}`);
+        const res = await api.get(`/owner/approvals/${discountApproval.approvalId}/status`);
         if (!isMounted) return;
         if (res && res.status === 'APPROVED') {
           handleApprovalResolved('APPROVED', res.approval?.action_by);
@@ -1354,7 +1362,7 @@ export default function FolioSettlementModal({
                       }}>
                         <div>
                           <span style={{ color: '#64748b', fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 700 }}>Base Tariff: </span>
-                          <strong style={{ color: '#0f172a' }}>{formatCurrency(baseTariff)}</strong>
+                          <strong style={{ color: '#0f172a' }}>{formatCurrency(totalBaseTariff > 0 ? totalBaseTariff : baseTariff)}</strong>
                         </div>
                         <div style={{ borderLeft: '1.5px solid #cbd5e1', paddingLeft: '10px' }}>
                           <span style={{ color: '#64748b', fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 700 }}>Previous Payable: </span>
@@ -1362,7 +1370,7 @@ export default function FolioSettlementModal({
                         </div>
                         <div style={{ borderLeft: '1.5px solid #cbd5e1', paddingLeft: '10px' }}>
                           <span style={{ color: '#dc2626', fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 700 }}>
-                            {discountType === 'pct' ? `${enteredDiscountPct}% Discount:` : 'Flat Discount:'}
+                            {discountType === 'pct' ? `${enteredDiscountPct}% Discount:` : `Flat Discount (${enteredDiscountPct}%):`}
                           </span>{' '}
                           <strong style={{ color: '#dc2626' }}>- {formatCurrency(enteredDiscountAmt)}</strong>
                         </div>

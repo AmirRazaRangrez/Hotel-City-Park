@@ -272,7 +272,7 @@ export default function Step6Stay({
     // 2. Continuous 1-second polling fallback
     const checkDiscountStatus = async () => {
       try {
-        const res = await api.get(`/owner/approvals/${discountPermissionModal.approvalId}/status?room=${encodeURIComponent(roomNumStr)}`);
+        const res = await api.get(`/owner/approvals/${discountPermissionModal.approvalId}/status`);
         if (!isMounted) return;
         if (res && res.status === 'APPROVED') {
           handleApprovalSuccess();

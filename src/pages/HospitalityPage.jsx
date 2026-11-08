@@ -532,7 +532,7 @@ export default function HospitalityPage({ onStartCheckin, onOpenFolio, onOpenVis
     // 2. Continuous 1-second polling fallback
     const checkStatus = async () => {
       try {
-        const res = await api.get(`/owner/approvals/${transferConfirmData.approvalId}/status?room=${encodeURIComponent(fromNum)}`);
+        const res = await api.get(`/owner/approvals/${transferConfirmData.approvalId}/status`);
         if (!isMounted) return;
         if (res && res.status === 'APPROVED') {
           handleApproved();

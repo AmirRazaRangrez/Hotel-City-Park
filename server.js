@@ -17229,22 +17229,7 @@ app.get('/api/owner/approvals/:id/status', async (req, res) => {
   try {
     const cleanId = String(req.params.id || '').replace(/^APP-/, '').trim();
     let approval = db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(cleanId);
-    if (!approval && req.query.room) {
-      approval = db.prepare('SELECT * FROM owner_approvals WHERE room_number = ? ORDER BY id DESC LIMIT 1').get(String(req.query.room));
-    }
     if (!approval) return res.status(404).json({ success: false, error: 'Approval request not found' });
-
-    // If pending, check if another approval request for the same room & type was already approved!
-    if (approval.status === 'PENDING' && approval.room_number) {
-      const roomApproved = db.prepare(`
-        SELECT * FROM owner_approvals
-        WHERE room_number = ? AND type = ? AND status = 'APPROVED'
-        ORDER BY id DESC LIMIT 1
-      `).get(approval.room_number, approval.type);
-      if (roomApproved) {
-        approval = notificationService.updateApprovalStatus(approval.id, 'APPROVED', roomApproved.action_by || 'Admin', roomApproved.action_reason || '');
-      }
-    }
 
     // If still pending locally, check Firebase Firestore on-demand for instant approval adoption!
     if (approval.status === 'PENDING') {
