@@ -4199,16 +4199,22 @@ function calculateActualStayAndExtension({
 
       if (extraTotalMins <= graceMins) {
         extensionCharge = 0;
+        extraHours = 0;
+        extraMins = 0;
       } else if (extraTotalMins <= 180) {
         extensionCharge = r3h;
+        extraHours = Math.ceil(extraTotalMins / 60);
       } else if (extraTotalMins <= 360) {
         extensionCharge = r6h;
+        extraHours = Math.ceil(extraTotalMins / 60);
       } else if (extraTotalMins <= 540) {
         extensionCharge = r9h;
+        extraHours = Math.ceil(extraTotalMins / 60);
       } else {
         chargedDays = expectedNights + 1;
         extensionCharge = 0;
         extraHours = 0;
+        extraMins = 0;
       }
     }
   } else {
@@ -4232,17 +4238,23 @@ function calculateActualStayAndExtension({
 
       if (extraTotalMins <= graceMins) {
         extensionCharge = 0;
+        extraHours = 0;
+        extraMins = 0;
       } else if (extraTotalMins <= 180) {
         extensionCharge = r3h;
+        extraHours = Math.ceil(extraTotalMins / 60);
       } else if (extraTotalMins <= 360) {
         extensionCharge = r6h;
+        extraHours = Math.ceil(extraTotalMins / 60);
       } else if (extraTotalMins <= 540) {
         extensionCharge = r9h;
+        extraHours = Math.ceil(extraTotalMins / 60);
       } else {
         // Past 9 hours counts as a full day
         chargedDays = completedDays + 1;
         extensionCharge = 0;
         extraHours = 0;
+        extraMins = 0;
       }
     }
   }

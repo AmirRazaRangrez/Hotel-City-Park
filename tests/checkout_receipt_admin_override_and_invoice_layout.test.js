@@ -78,15 +78,47 @@ describe('Checkout Receipt, Admin Password Override, and Tax Invoice Layout', ()
       expect(html).not.toContain('minutes');
     });
 
-    it('rounds decimal/minute elapsed hours to integer hours (e.g. 4.2 hrs -> 4 hrs)', () => {
-      const calcWithDecimalHours = {
+    it('rounds decimal/minute elapsed hours to commenced integer hours (e.g. 3.17 hrs [3h10m] with 1000 charge -> 4 hrs)', () => {
+      const calcWithCommencedHours = {
         ...mockCalc,
-        extensionHours: 4.25,
+        extensionHours: 3.17,
         extensionCharge: 1000,
         extensionSlotLabel: '3–6 Hours'
       };
-      const html = buildFinalBillA4HTML(mockRoom, calcWithDecimalHours, mockSettlement);
+      const html = buildFinalBillA4HTML(mockRoom, calcWithCommencedHours, mockSettlement);
       expect(html).toContain('Extra Hours Charge (4 hrs)');
+    });
+
+    it('enforces 3-6 hrs slab consistency: if slab is 3-6 hrs with ₹1000, hours will be at least 4 hrs', () => {
+      const calc3to6WithLegacy3 = {
+        ...mockCalc,
+        extensionHours: 3,
+        extensionCharge: 1000,
+        extensionSlotLabel: '3–6 Hours'
+      };
+      const html = buildFinalBillA4HTML(mockRoom, calc3to6WithLegacy3, mockSettlement);
+      expect(html).toContain('Extra Hours Charge (4 hrs)');
+    });
+
+    it('enforces 6-9 hrs slab consistency: if slab is 6-9 hrs with ₹1500, hours will be at least 7 hrs', () => {
+      const calc6to9 = {
+        ...mockCalc,
+        extensionHours: 6.25,
+        extensionCharge: 1500,
+        extensionSlotLabel: '6–9 Hours'
+      };
+      const html = buildFinalBillA4HTML(mockRoom, calc6to9, mockSettlement);
+      expect(html).toContain('Extra Hours Charge (7 hrs)');
+    });
+
+    it('suppresses hourly extension charge if stay extension exceeds 9 hours (rolls over to full day)', () => {
+      const calcOver9Hours = {
+        ...mockCalc,
+        extensionHours: 10,
+        extensionCharge: 0
+      };
+      const html = buildFinalBillA4HTML(mockRoom, calcOver9Hours, mockSettlement);
+      expect(html).not.toContain('Extra Hours Charge');
     });
 
     it('safely falls back to extensionSlotLabel if extensionHours cannot be resolved', () => {

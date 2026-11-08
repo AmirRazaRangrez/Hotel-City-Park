@@ -4866,7 +4866,14 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
   }
 
   // Extra Hours display label: User requirement - display actual whole hours e.g. "Extra Hours Charge (4 hrs)", no minutes
-  const displayExtHours = extensionHours > 0 ? Math.max(1, Math.round(Number(extensionHours) || 0)) : 0;
+  let displayExtHours = extensionHours > 0 ? Math.max(1, Math.ceil(Number(extensionHours) || 0)) : 0;
+  const slabRate3h = Number(r.ext_3h_rate || 500);
+  const slabRate6h = Number(r.ext_6h_rate || 1000);
+  if ((extensionSlotLabel === '3–6 Hours' || extensionPreTax > slabRate3h) && displayExtHours < 4) {
+    displayExtHours = 4;
+  } else if ((extensionSlotLabel === '6–9 Hours' || extensionPreTax > slabRate6h) && displayExtHours < 7) {
+    displayExtHours = 7;
+  }
   const extHoursLabel = displayExtHours > 0
     ? `${displayExtHours} hrs`
     : (extensionSlotLabel || 'Extra Hours');
