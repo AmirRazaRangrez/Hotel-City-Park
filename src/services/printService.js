@@ -5883,17 +5883,17 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
     return `
     <div class="full-a4-registration-card tax-invoice-a4-sheet" style="position: relative; width: 100%; box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; color: #000; border: none; padding: 5px 10px; background: #fff; line-height: 1.32; ${containerHeightStyle} display: flex; flex-direction: column; justify-content: space-between; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">
       
-      <!-- Elegant Centered Watermark Background Logo (Aligned slightly lower into clear whitespace to prevent text overlap) -->
-      <div style="position: absolute; top: 57%; left: 50%; transform: translate(-50%, -50%); opacity: 0.20; pointer-events: none; z-index: 0; text-align: center; width: 100%; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">
+      <!-- Elegant Centered Watermark Background Logo (Aligned into clear whitespace to prevent text overlap) -->
+      <div style="position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%); opacity: 0.20; pointer-events: none; z-index: 0; text-align: center; width: 100%; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">
         <img src="/hcp-logo-with-name-transparent.png" alt="Hotel City Paark Watermark" style="width: 500px; max-width: 82%; height: auto; filter: contrast(120%) saturate(115%);" loading="eager" decoding="sync" />
       </div>
 
       <div style="position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; height: 100%; min-height: 100%; justify-content: space-between; background: transparent;">
         <div>
-          <!-- TOP HEADER: Address (Left), Brand Logo with Name (Centered), and Official Website QR Code (Right) -->
-          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 4px; background: transparent;">
+          <!-- TOP HEADER: Address (Left 1fr), Brand Logo with Name (Exact 50% Center), and Official Website QR Code (Right 1fr) -->
+          <div style="display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; margin-bottom: 4px; background: transparent;">
             <!-- Left Hotel Address & Contact -->
-            <div style="font-size: 8.5pt; color: #111; line-height: 1.38; width: 33%; font-weight: 400; align-self: flex-end; padding-bottom: 3px;">
+            <div style="font-size: 8.5pt; color: #111; line-height: 1.38; font-weight: 400; justify-self: start; padding-bottom: 3px;">
               <div>119 Murarji Peth, Char Hutatma Chowk</div>
               <div>Solapur - 413001 (Maharashtra)</div>
               <div>Tel.: 0217-2729791, 92, 93 Mob.: 9960013388</div>
@@ -5901,8 +5901,8 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
               <div>website : hotelcityparksolapur.com</div>
             </div>
 
-            <!-- Center Brand Logo with Name & by JMG HOSPITALITY AND INFRA LLP -->
-            <div style="display: flex; flex-direction: column; align-items: center; text-align: center; flex: 1; max-width: 44%;">
+            <!-- Center Brand Logo with Name & by JMG HOSPITALITY AND INFRA LLP (Locked to Exact 50.0% Page Midpoint) -->
+            <div style="display: flex; flex-direction: column; align-items: center; text-align: center; justify-self: center; padding: 0 10px;">
               <img src="/hcp-logo-with-name-transparent.png" alt="Hotel City Paark" style="height: 110px; width: auto; object-fit: contain;" loading="eager" decoding="sync" />
               <div style="width: 100%; font-size: 7.2pt; font-weight: 600; color: #000; letter-spacing: 0.2px; margin-top: 2px; white-space: nowrap; font-family: 'Segoe UI', Arial, sans-serif; text-align: center;">
                 <span style="font-weight: 400; text-transform: lowercase;">by</span> <span style="font-weight: 600; text-transform: uppercase;">JMG HOSPITALITY AND INFRA LLP</span>
@@ -5910,7 +5910,7 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
             </div>
 
             <!-- Right Official Website QR Code -->
-            <div style="width: 23%; display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; align-self: flex-end; padding-bottom: 3px;">
+            <div style="display: flex; flex-direction: column; align-items: flex-end; justify-self: end; padding-bottom: 3px;">
               <div style="text-align: center; display: inline-flex; flex-direction: column; align-items: center;">
                 <img src="/hotelcitypark-website-qr.png" alt="Scan for Website" style="width: 66px; height: 66px; object-fit: contain; border: 1px solid #cbd5e1; border-radius: 4px; padding: 2px; background: #ffffff;" loading="eager" decoding="sync" />
                 <div style="font-size: 6.8pt; font-weight: 700; color: #1e293b; margin-top: 3px; letter-spacing: 0.3px; text-transform: uppercase;">Scan for Website</div>

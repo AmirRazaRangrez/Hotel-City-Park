@@ -46,15 +46,16 @@ describe('Checkout Receipt, Admin Password Override, and Tax Invoice Layout', ()
       checked_out_by: 'cap-1'
     };
 
-    it('watermark logo is shifted lower to top: 57% to prevent overlapping with net payable text', () => {
+    it('watermark logo is shifted lower to top: 60% to prevent overlapping with net payable text', () => {
       const html = buildFinalBillA4HTML(mockRoom, mockCalc, mockSettlement);
-      expect(html).toContain('top: 57%');
+      expect(html).toContain('top: 60%');
       expect(html).toContain('hcp-logo-with-name-transparent.png');
     });
 
-    it('header has brand logo centered and website QR code on right side', () => {
+    it('header has brand logo centered in symmetric 3-column grid and website QR code on right side', () => {
       const html = buildFinalBillA4HTML(mockRoom, mockCalc, mockSettlement);
-      // Centered logo
+      // Symmetrical grid locking center logo to 50%
+      expect(html).toContain('grid-template-columns: 1fr auto 1fr');
       expect(html).toContain('Center Brand Logo with Name');
       expect(html).toContain('JMG HOSPITALITY AND INFRA LLP');
       
