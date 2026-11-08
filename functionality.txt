@@ -1,6 +1,6 @@
 ====================================================================================================
                         HOTEL CITY PARK CRM - COMPLETE END-TO-END TEST SUITE
-                                   FILE: functoinality.txt
+                                   FILE: functionality.txt
                    100% EXHAUSTIVE SPECIFICATION OF EVERY MINUTE FUNCTIONALITY
 ====================================================================================================
 Hotel: Hotel City Park
@@ -728,6 +728,53 @@ TC-TAX-003: Sequential Tax Invoice Numbering
 * Expected Result:
   - Invoices generated with contiguous numbers (e.g. INV-2026-001, INV-2026-002, INV-2026-003).
   - Zero duplicate invoice numbers.
+
+TC-TAX-004: Accurate Pax Count on History Tax Invoice Reprints (Group & Single Rooms)
+----------------------------------------------------------------------------------------------------
+* Steps:
+  1. Navigate to Hospitality History table (/hospitality -> History tab).
+  2. Locate a single-room booking (e.g. 2 Pax) or group booking (e.g. Rooms 502 & 506 with 6 Pax).
+  3. Click "Documents" -> Reprint Tax Invoice.
+* Expected Result:
+  - Header metadata block displays exact Pax (e.g. `Pax: 2` or `Pax: 6`).
+  - NEVER falls back to 1 Pax.
+
+TC-TAX-005: Extra Hours Slot Tiers on Tax Invoice (1–3h, 3–6h, 6–9h, & >9h Rollover)
+----------------------------------------------------------------------------------------------------
+* Steps:
+  1. Apply stay extension at checkout:
+     - 1 to 3 hours: prints "Extra Hours Charge (1–3 Hours)" (e.g. Rs 500.00).
+     - 3 to 6 hours: prints "Extra Hours Charge (3–6 Hours)" (e.g. Rs 1,000.00).
+     - 6 to 9 hours: prints "Extra Hours Charge (6–9 Hours)" (e.g. Rs 1,500.00).
+     - > 9 hours: converts automatically to 1 full day room rent under Room Tariff; hourly row is suppressed.
+* Expected Result:
+  - Slot labels format accurately.
+  - Zero-extension stays hide the Extra Hours row completely.
+
+TC-TAX-006: Stay Base Trade Discount Reconciliation & Zero Double-Counting
+----------------------------------------------------------------------------------------------------
+* Steps:
+  1. Create 1-day stay (Room Rs 2,350 + Breakfast Rs 500 = Rs 2,850) with 10% check-in discount.
+  2. Add late checkout extension (1–3 Hours: Rs 500).
+  3. Generate Tax Invoice.
+* Expected Result:
+  - Less Discount (10%): Rs -285.00 (calculated strictly on Rs 2,850 stay base, not Rs 3,350).
+  - Day 1 Effective Tariff: Rs 2,565.00.
+  - Day 1 CGST / SGST: Rs 64.13 / Rs 64.12. Day 1 Total: Rs 2,693.25.
+  - Extension 08/11: Rs 500.00 + Rs 12.50 CGST + Rs 12.50 SGST = Rs 525.00.
+  - Total Column: Rs 3,218.25 (exact horizontal sum: Rs 2,693.25 + Rs 525.00).
+  - Zero Rs 500 double counting.
+  - Net Payable: Rs 3,218.00 - Rs 1,347.00 Advance = Rs 1,871.00.
+
+TC-TAX-007: Single-Page Strict A4 Tax Invoice Guarantee & Layout Alignment
+----------------------------------------------------------------------------------------------------
+* Steps:
+  1. Print preview Tax Invoice for any stay (up to 10 days).
+* Expected Result:
+  - Strictly 1 page printout (height capped at 268mm).
+  - High-contrast centered watermark.
+  - Hotel address/contact on left aligned with brand logo on right.
+  - Bank details on left aligned with signature blocks on right.
 
 
 ====================================================================================================

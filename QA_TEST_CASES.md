@@ -79,6 +79,73 @@
   * The layout matches the print preview exactly (Original Copy on Top, Hotel Copy on Bottom).
 * **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
 
+### TC-REC-06: Accurate Pax Count on History Tax Invoice Reprints (Group & Single Rooms)
+* **Priority:** Critical
+* **Pre-condition:** Room checked out from History, or multi-room group booking checked out (e.g., Rooms 502 & 506 with 6 adults).
+* **Steps:**
+  1. Navigate to **Hospitality History** table (`/hospitality` -> History tab).
+  2. Locate a checked-out booking and click **Documents / Tax Invoice** reprint.
+  3. Inspect the `Pax:` field in the top right metadata block of the printed A4 Tax Invoice.
+* **Expected Result:**
+  * For single rooms: Displays true number of guests (e.g., `Pax: 2` or `Pax: 3`), **NEVER defaults or falls back to 1 Pax**.
+  * For linked group bookings: Accurately aggregates the full guest count across all rooms in the group (e.g., `Pax: 6` across Rooms 502 & 506).
+* **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
+
+### TC-REC-07: Extra Hours Slot Tiers on Tax Invoice (1–3h, 3–6h, 6–9h, & >9h Rollover)
+* **Priority:** Critical
+* **Pre-condition:** Guest check-out delayed beyond checkout time.
+* **Steps:**
+  1. Test 1 (1–3 Hours): Guest extends checkout by 2 hours.
+  2. Test 2 (3–6 Hours): Guest extends checkout by 5 hours.
+  3. Test 3 (6–9 Hours): Guest extends checkout by 8 hours.
+  4. Test 4 (>9 Hours): Guest extends checkout by 12 hours.
+* **Expected Result:**
+  * Test 1 prints: `Extra Hours Charge (1–3 Hours)` with configured tier rate (e.g., ₹500.00).
+  * Test 2 prints: `Extra Hours Charge (3–6 Hours)` with configured tier rate (e.g., ₹1,000.00).
+  * Test 3 prints: `Extra Hours Charge (6–9 Hours)` with configured tier rate (e.g., ₹1,500.00).
+  * Test 4 (>9 Hours): Automatically converts to **1 full day of room tariff** under Room Tariff, and completely **suppresses the hourly line item**.
+  * Zero-extension stays (0 hours or normal checkout) show **no Extra Hours row** (0.00 row is hidden).
+* **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
+
+### TC-REC-08: Tax Invoice Math Reconciliation with Check-in Discount & Extensions
+* **Priority:** Critical
+* **Pre-condition:** 1-day stay (Room ₹2,350 + Breakfast ₹500 = ₹2,850) with 10% check-in discount + 1–3h extension (₹500).
+* **Steps:**
+  1. Open Room Folio or Checkout Modal for Room 407.
+  2. Generate and inspect the final Tax Invoice.
+* **Expected Result:**
+  * **Less Discount (10%):** Strictly `-₹285.00` (10% of stay base ₹2,850), **NEVER -₹335.00**.
+  * **Day 1 Effective Tariff:** `₹2,565.00` (₹2,850 - ₹285).
+  * **Day 1 CGST / SGST:** `₹64.13` and `₹64.12` (5% GST on ₹2,565).
+  * **Day 1 Room Bill Total:** `₹2,693.25`.
+  * **Extension Column (08/11):** `₹500.00` + `₹12.50` CGST + `₹12.50` SGST = `₹525.00`.
+  * **Table Column Sum:** ₹2,693.25 + ₹525.00 = **`₹3,218.25`** (Total column matches column sum exactly; **zero ₹500 double counting**).
+  * **Round-off:** `-₹0.25` -> **Invoice Total: `₹3,218.00`**.
+  * **Net Payable:** ₹3,218.00 - ₹1,347.00 Advance = **`₹1,871.00`** (NEVER ₹2,344.00).
+  * **In Words:** Matches printed figures to the exact rupee.
+* **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
+
+### TC-REC-09: Single-Page A4 Tax Invoice Strict Height & Layout Guarantee
+* **Priority:** High
+* **Steps:**
+  1. Open Tax Invoice for any single-room or multi-room stay (up to 10 days).
+  2. Press Ctrl+P or open Print Preview in Chrome/Edge/Electron.
+* **Expected Result:**
+  * Page count indicator reads strictly **"1 page"** (never overflows to a blank or 2nd page).
+  * Watermark logo is centered with contrast.
+  * Header (Hotel details on left, logo on right) and Footer (Bank details on left, signature blocks on right) are perfectly aligned.
+* **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
+
+### TC-REC-10: Dual-Drive Redundant Database Auto-Backups (C:\ & D:\ Drives)
+* **Priority:** High
+* **Steps:**
+  1. Inspect backup service log on server startup.
+  2. Check backup folder in `C:\Aamir Delta\city_backup\backups` and `D:\HCP_Backups` (if D: exists).
+* **Expected Result:**
+  * `[BackupService] Dual-Drive Redundant Backup service initialized (C:\ & D:\)` logged.
+  * Automated SQLite timestamped snapshots created without locking active database.
+* **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
+
 ---
 
 ## Suite 2: Front Office — Guest Check-In & Registration
