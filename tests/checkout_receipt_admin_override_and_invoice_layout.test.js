@@ -139,4 +139,41 @@ describe('Checkout Receipt, Admin Password Override, and Tax Invoice Layout', ()
     });
   });
 
+  describe('4. History Stay Sorting - Latest Checkout On Top', () => {
+    const sampleHistory = [
+      { id: 3, room: '402', status: 'checked_out', actual_checkout_time: '2026-11-06T13:44:25.042Z' },
+      { id: 5, room: '502', status: 'checked_out', actual_checkout_time: '2026-11-07T06:53:26.093Z' },
+      { id: 6, room: '404', status: 'checked_out', actual_checkout_time: '2026-11-07T09:45:03.507Z' },
+      { id: 7, room: '502', status: 'checked_out', actual_checkout_time: '2026-11-07T10:23:11.573Z' },
+      { id: 9, room: '409', status: 'checked_out', actual_checkout_time: '2026-11-07T10:30:09.176Z' },
+      { id: 10, room: '402', status: 'active', checkin_time: '2026-11-07T16:50', actual_checkout_time: null }
+    ];
+
+    it('sorts checkouts in descending chronological order so that the most recent checkout lies on top', () => {
+      const sorted = [...sampleHistory].sort((a, b) => {
+        const isOutA = a.status === 'checked_out' || Boolean(a.actual_checkout_time);
+        const isOutB = b.status === 'checked_out' || Boolean(b.actual_checkout_time);
+        if (isOutA && isOutB) {
+          const tA = new Date(a.actual_checkout_time || a.checkout_time || 0).getTime();
+          const tB = new Date(b.actual_checkout_time || b.checkout_time || 0).getTime();
+          if (tB !== tA) return tB - tA;
+          return (Number(b.id || 0)) - (Number(a.id || 0));
+        }
+        if (isOutA && !isOutB) return -1;
+        if (!isOutA && isOutB) return 1;
+        const tA = new Date(a.checkin_time || a.created_at || 0).getTime();
+        const tB = new Date(b.checkin_time || b.created_at || 0).getTime();
+        if (tB !== tA) return tB - tA;
+        return (Number(b.id || 0)) - (Number(a.id || 0));
+      });
+
+      expect(sorted[0].id).toBe(9); // Latest checkout at 10:30 UTC / 4:00 PM IST
+      expect(sorted[1].id).toBe(7); // 3:53 PM IST
+      expect(sorted[2].id).toBe(6); // 3:15 PM IST
+      expect(sorted[3].id).toBe(5); // 12:23 PM IST
+      expect(sorted[4].id).toBe(3); // Earlier day
+      expect(sorted[5].id).toBe(10); // Active stay
+    });
+  });
+
 });

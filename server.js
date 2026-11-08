@@ -12858,7 +12858,11 @@ app.get('/api/hospitality/history', (req, res) => {
       params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
     }
 
-    query += ` ORDER BY last_activity_time DESC, b.id DESC LIMIT ?`;
+    query += ` ORDER BY 
+      CASE WHEN b.status = 'checked_out' OR b.actual_checkout_time IS NOT NULL THEN 1 ELSE 2 END ASC,
+      COALESCE(b.actual_checkout_time, b.checkin_time, b.created_at) DESC, 
+      b.id DESC 
+      LIMIT ?`;
     params.push(parseInt(limit));
 
     const rows = db.prepare(query).all(...params);
@@ -13097,9 +13101,20 @@ app.get('/api/hospitality/history', (req, res) => {
       entry.totalPax = entry.pax;
     });
     historyList.sort((a, b) => {
-      const tA = a.last_activity_time ? new Date(a.last_activity_time).getTime() : (a.id || 0);
-      const tB = b.last_activity_time ? new Date(b.last_activity_time).getTime() : (b.id || 0);
-      return tB - tA;
+      const isOutA = a.status === 'checked_out' || Boolean(a.actual_checkout_time);
+      const isOutB = b.status === 'checked_out' || Boolean(b.actual_checkout_time);
+      if (isOutA && isOutB) {
+        const tA = new Date(a.actual_checkout_time || a.checkout_time || 0).getTime();
+        const tB = new Date(b.actual_checkout_time || b.checkout_time || 0).getTime();
+        if (tB !== tA) return tB - tA;
+        return (Number(b.id || 0)) - (Number(a.id || 0));
+      }
+      if (isOutA && !isOutB) return -1;
+      if (!isOutA && isOutB) return 1;
+      const tA = new Date(a.checkin_time || a.created_at || 0).getTime();
+      const tB = new Date(b.checkin_time || b.created_at || 0).getTime();
+      if (tB !== tA) return tB - tA;
+      return (Number(b.id || 0)) - (Number(a.id || 0));
     });
     res.json({ success: true, count: historyList.length, history: historyList, records: historyList });
   } catch (err) {

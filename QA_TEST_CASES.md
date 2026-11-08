@@ -516,11 +516,22 @@
   * Entire document remains strictly on 1 single A4 page.
 * **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
 
+### TC-HST-01: History Stay Sorting — Latest Checkout on Top
+* **Priority:** Critical
+* **Steps:**
+  1. Navigate to Hospitality -> History tab.
+  2. Inspect the order of completed checkouts.
+* **Expected Result:**
+  * The most recently checked-out stay (e.g. today at 04:00 PM) lies at the very top of the table.
+  * All checkouts follow strict descending chronological order of `actual_checkout_time` (e.g. 04:00 PM above 03:53 PM, above 03:15 PM, above 12:23 PM, above yesterday).
+  * No older checkouts are placed above recent checkouts.
+* **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
+
 ---
 
 ## Summary Sign-off
 
 | Total Test Cases | Passed | Failed | Blocked | Tester Signature | Sign-off Date |
 |:---:|:---:|:---:|:---:|:---:|:---:|
-| **32** | ____ | ____ | ____ | ________________ | ____________ |
+| **33** | ____ | ____ | ____ | ________________ | ____________ |
 

@@ -912,6 +912,17 @@ TC-INV-018: Tax Invoice Centered Logo, Official Website QR Code & Repositioned W
   - QR Code redirects to 'https://www.hotelcityparksolapur.com'.
   - Strict 1-page A4 format maintained.
 
+TC-HST-019: History Stay Sorting — Latest Checkout on Top
+----------------------------------------------------------------------------------------------------
+* Preconditions: Multiple rooms checked out over time.
+* Steps:
+  1. Open History tab in Hospitality.
+  2. Inspect the checkout chronology.
+* Expected Result:
+  - The most recently completed checkout lies at the very top.
+  - All completed stays follow strict chronological descending order of checkout time.
+  - Active stays do not displace recent checkouts from the top.
+
 ====================================================================================================
                                       END OF TEST SUITE
 ====================================================================================================

@@ -247,15 +247,17 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
     return true;
   };
 
-  // Helper to get latest modified/activity timestamp for sorting
-  const getActivityTimestamp = (r) => {
-    if (r.last_activity_time) {
-      const t = new Date(r.last_activity_time).getTime();
-      if (!isNaN(t)) return t;
+  // Helper to get latest modified/checkout timestamp for sorting
+  const getSortTimestamp = (r) => {
+    if (r.status === 'checked_out' || r.actual_checkout_time) {
+      const coTime = r.actual_checkout_time || r.checkout_time;
+      if (coTime) {
+        const t = new Date(coTime).getTime();
+        if (!isNaN(t) && t > 0) return t;
+      }
     }
     const dates = [
-      r.actual_checkout_time,
-      r.checkout_time,
+      r.last_activity_time,
       r.checkin_time,
       r.created_at
     ].map(d => (d ? new Date(d).getTime() : 0)).filter(t => !isNaN(t) && t > 0);
@@ -286,7 +288,22 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
     }
 
     return true;
-  }).sort((a, b) => getActivityTimestamp(b) - getActivityTimestamp(a));
+  }).sort((a, b) => {
+    const isOutA = a.status === 'checked_out' || Boolean(a.actual_checkout_time);
+    const isOutB = b.status === 'checked_out' || Boolean(b.actual_checkout_time);
+    if (isOutA && isOutB) {
+      const tA = getSortTimestamp(a);
+      const tB = getSortTimestamp(b);
+      if (tB !== tA) return tB - tA;
+      return (Number(b.id || 0)) - (Number(a.id || 0));
+    }
+    if (isOutA && !isOutB) return -1;
+    if (!isOutA && isOutB) return 1;
+    const tA = getSortTimestamp(a);
+    const tB = getSortTimestamp(b);
+    if (tB !== tA) return tB - tA;
+    return (Number(b.id || 0)) - (Number(a.id || 0));
+  });
 
   const totalRev = filteredRecords.reduce(
     (acc, r) => acc + parseFloat(r.total_room_charge || r.total_paid || 0),
