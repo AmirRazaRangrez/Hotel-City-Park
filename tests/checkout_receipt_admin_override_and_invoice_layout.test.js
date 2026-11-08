@@ -64,6 +64,46 @@ describe('Checkout Receipt, Admin Password Override, and Tax Invoice Layout', ()
       expect(html).toContain('Scan for Website');
       expect(html).toContain('hotelcityparksolapur.com');
     });
+
+    it('renders Extra Hours Charge with actual hours e.g. (4 hrs) for 3-6 hrs slab without minutes', () => {
+      const calcWith4HoursExtension = {
+        ...mockCalc,
+        extensionHours: 4,
+        extensionCharge: 1000,
+        extensionSlotLabel: '3–6 Hours'
+      };
+      const html = buildFinalBillA4HTML(mockRoom, calcWith4HoursExtension, mockSettlement);
+      expect(html).toContain('Extra Hours Charge (4 hrs)');
+      expect(html).not.toContain('Extra Hours Charge (3–6 Hours)');
+      expect(html).not.toContain('minutes');
+    });
+
+    it('rounds decimal/minute elapsed hours to integer hours (e.g. 4.2 hrs -> 4 hrs)', () => {
+      const calcWithDecimalHours = {
+        ...mockCalc,
+        extensionHours: 4.25,
+        extensionCharge: 1000,
+        extensionSlotLabel: '3–6 Hours'
+      };
+      const html = buildFinalBillA4HTML(mockRoom, calcWithDecimalHours, mockSettlement);
+      expect(html).toContain('Extra Hours Charge (4 hrs)');
+    });
+
+    it('safely falls back to extensionSlotLabel if extensionHours cannot be resolved', () => {
+      const roomWithoutDates = {
+        ...mockRoom,
+        checkin_time: null,
+        actual_checkout_time: null
+      };
+      const calcWithSlotOnly = {
+        ...mockCalc,
+        extensionHours: 0,
+        extensionCharge: 500,
+        extensionSlotLabel: '1–3 Hours'
+      };
+      const html = buildFinalBillA4HTML(roomWithoutDates, calcWithSlotOnly, mockSettlement);
+      expect(html).toContain('Extra Hours Charge (1–3 Hours)');
+    });
   });
 
   describe('2. Checkout Settlement Receipt Continuous Serial Logic', () => {

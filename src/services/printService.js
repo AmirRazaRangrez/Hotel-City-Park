@@ -4749,7 +4749,7 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
   const extraBreakfastCharge = Number(r.extra_breakfast_charge || c.extraBreakfastCharge || 0);
 
   // Extra Hours / Stay Extension resolution
-  const extensionHours = Number(
+  let extensionHours = Number(
     c.extensionHours ??
     c.extension_hours ??
     c.extraHours ??
@@ -4788,8 +4788,32 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
           if (ext && ext.type !== 'room_transfer') {
             const extAmt = Number(ext.amount || ext.charge || ext.cost || ext.extension_charge || 0);
             if (extAmt > 0) rawExtensionCharge += extAmt;
+            if (extensionHours <= 0) {
+              if (ext.hours || ext.extension_hours || ext.extra_hours) {
+                extensionHours += Number(ext.hours || ext.extension_hours || ext.extra_hours || 0);
+              } else if (ext.from_time && ext.to_time) {
+                const diffH = (new Date(ext.to_time) - new Date(ext.from_time)) / (1000 * 60 * 60);
+                if (diffH > 0) extensionHours += diffH;
+              }
+            }
           }
         });
+      }
+    } catch (_) { }
+  }
+
+  if (extensionHours <= 0 && rawExtensionCharge > 0 && arrivalDt && departureDt) {
+    try {
+      const dIn = new Date(arrivalDt);
+      const dOut = new Date(departureDt);
+      if (!isNaN(dIn.getTime()) && !isNaN(dOut.getTime()) && dOut > dIn) {
+        const totalElapsedHours = (dOut.getTime() - dIn.getTime()) / (1000 * 60 * 60);
+        if (totalElapsedHours > 24) {
+          const modHours = totalElapsedHours % 24;
+          if (modHours > 0) {
+            extensionHours = modHours;
+          }
+        }
       }
     } catch (_) { }
   }
@@ -4840,6 +4864,12 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
       }
     }
   }
+
+  // Extra Hours display label: User requirement - display actual whole hours e.g. "Extra Hours Charge (4 hrs)", no minutes
+  const displayExtHours = extensionHours > 0 ? Math.max(1, Math.round(Number(extensionHours) || 0)) : 0;
+  const extHoursLabel = displayExtHours > 0
+    ? `${displayExtHours} hrs`
+    : (extensionSlotLabel || 'Extra Hours');
 
   const foodTotal = Number(c.foodTotal || summary.foodTotal || 0);
   const barTotal = Number(c.barTotal || summary.barTotal || 0);
@@ -5670,7 +5700,7 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
           ${(extensionPreTax > 0 && blockExtension > 0 && !isExtensionOver9Hours) ? `
           <tr style="background: transparent;">
             <td style="padding: 2.2px 6px; font-weight: 400; color: #000; width: ${particularsWidth};">
-              Extra Hours Charge (${extensionSlotLabel || (extensionHours > 0 ? `${extensionHours} Hour${extensionHours === 1 ? '' : 's'}` : '1–3 Hours')})
+              Extra Hours Charge (${extHoursLabel})
             </td>
             ${dates.map(d => {
         const val = (d === targetExtensionDate) ? extensionPreTax : 0;
