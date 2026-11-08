@@ -9,6 +9,7 @@ import HospitalityHistory from '../components/hospitality/HospitalityHistory';
 import AdvanceBookingModal from '../components/hospitality/AdvanceBookingModal';
 import OccupancyChartModal from '../components/hospitality/OccupancyChartModal';
 import CashHandoverModal from '../components/hospitality/CashHandoverModal';
+import AdminPasswordModal from '../components/hospitality/AdminPasswordModal';
 import { formatCurrency } from '../utils/formatters';
 
 const FLOOR_ORDER = [
@@ -131,6 +132,13 @@ export default function HospitalityPage({ onStartCheckin, onOpenFolio, onOpenVis
   const [dropTargetRoomId, setDropTargetRoomId] = useState(null);
   const [transferConfirmData, setTransferConfirmData] = useState(null);
   const [isTransferring, setIsTransferring] = useState(false);
+  const [isTransferPasswordModalOpen, setIsTransferPasswordModalOpen] = useState(false);
+
+  const handleTransferPasswordSuccess = async (authResult) => {
+    setIsTransferPasswordModalOpen(false);
+    showToast('✓ Admin password authorized! Executing room category shift...', 'green', 3000);
+    await executeTransfer();
+  };
 
   const [dashboardFilter, setDashboardFilter] = useState('all'); // 'all' | 'occupied' | 'empty'
 
@@ -1049,21 +1057,41 @@ export default function HospitalityPage({ onStartCheckin, onOpenFolio, onOpenVis
 
               {transferConfirmData.isCrossCategory ? (
                 transferConfirmData.approvalStatus === 'waiting' ? (
-                  <button
-                    type="button"
-                    disabled
-                    style={{
-                      padding: '8px 24px',
-                      borderRadius: '12px',
-                      background: '#94a3b8',
-                      color: '#fff',
-                      fontWeight: 800,
-                      border: 'none',
-                      cursor: 'wait'
-                    }}
-                  >
-                    Waiting for Admin ⏳
-                  </button>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      disabled
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '12px',
+                        background: '#94a3b8',
+                        color: '#fff',
+                        fontWeight: 800,
+                        border: 'none',
+                        cursor: 'wait'
+                      }}
+                    >
+                      Waiting for Admin ⏳
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsTransferPasswordModalOpen(true)}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '12px',
+                        background: '#fef3c7',
+                        color: '#92400e',
+                        border: '1.5px solid #f59e0b',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      🔑 Enter Password
+                    </button>
+                  </div>
                 ) : transferConfirmData.approvalStatus === 'approved' ? (
                   <button
                     type="button"
@@ -1080,25 +1108,46 @@ export default function HospitalityPage({ onStartCheckin, onOpenFolio, onOpenVis
                     Shift Completed ✓
                   </button>
                 ) : transferConfirmData.approvalStatus === 'rejected' ? null : (
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    id="btn-request-shift-approval-submit"
-                    disabled={isTransferring}
-                    onClick={requestTransferApproval}
-                    style={{
-                      padding: '8px 24px',
-                      borderRadius: '12px',
-                      background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
-                      color: '#fff',
-                      fontWeight: 800,
-                      border: 'none',
-                      cursor: isTransferring ? 'wait' : 'pointer',
-                      boxShadow: '0 4px 14px rgba(217, 119, 6, 0.35)'
-                    }}
-                  >
-                    {isTransferring ? 'Sending Request...' : 'Request Admin Approval 📱'}
-                  </button>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsTransferPasswordModalOpen(true)}
+                      title="Enter Admin / Manager Password"
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '12px',
+                        background: '#fef3c7',
+                        color: '#92400e',
+                        border: '1.5px solid #f59e0b',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      🔑 Password
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      id="btn-request-shift-approval-submit"
+                      disabled={isTransferring}
+                      onClick={requestTransferApproval}
+                      style={{
+                        padding: '8px 20px',
+                        borderRadius: '12px',
+                        background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+                        color: '#fff',
+                        fontWeight: 800,
+                        border: 'none',
+                        cursor: isTransferring ? 'wait' : 'pointer',
+                        boxShadow: '0 4px 14px rgba(217, 119, 6, 0.35)'
+                      }}
+                    >
+                      {isTransferring ? 'Sending Request...' : 'Request Admin Approval 📱'}
+                    </button>
+                  </div>
                 )
               ) : (
                 <button
@@ -1170,6 +1219,23 @@ export default function HospitalityPage({ onStartCheckin, onOpenFolio, onOpenVis
         rooms={rooms}
         initialTab={advInitialTab}
         onStartCheckinFromBooking={handleStartCheckinFromBooking}
+      />
+
+      {/* Admin Password Override Modal for Cross-Category Shift */}
+      <AdminPasswordModal
+        isOpen={isTransferPasswordModalOpen}
+        onClose={() => setIsTransferPasswordModalOpen(false)}
+        onSuccess={handleTransferPasswordSuccess}
+        title="Admin Room Shift Permission"
+        description={`Enter Manager / Admin password to authorize cross-category shift from Room #${transferConfirmData?.sourceRoom?.room_number} (${transferConfirmData?.sourceRoom?.room_type}) to Room #${transferConfirmData?.targetRoom?.room_number} (${transferConfirmData?.targetRoom?.room_type}) with rates strictly preserved.`}
+        approvalId={transferConfirmData?.approvalId}
+        actionType="room_transfer"
+        details={{
+          sourceRoom: transferConfirmData?.sourceRoom?.room_number,
+          targetRoom: transferConfirmData?.targetRoom?.room_number,
+          sourceType: transferConfirmData?.sourceRoom?.room_type,
+          targetType: transferConfirmData?.targetRoom?.room_type
+        }}
       />
     </section>
   );

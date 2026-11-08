@@ -6815,7 +6815,7 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
       console.warn('[GuestDining] Token expiry error on checkout:', expireErr.message);
     }
 
-    res.json({ success: true, data: result });
+    res.json({ success: true, ...result, data: result });
   } catch (error) {
     console.error('Checkout error:', error);
     const isClientError = error.message && (
@@ -17250,6 +17250,95 @@ app.post('/api/owner/approvals/:id/reject', (req, res) => {
     res.json({ success: true, message: 'Discount Rejected', approval: updated });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Verify Admin / Manager Password for on-the-spot permission override
+app.post('/api/owner/approvals/verify-password', async (req, res) => {
+  try {
+    const { password, approvalId, actionType, details } = req.body || {};
+    const inputPassword = (password || '').trim();
+    if (!inputPassword) {
+      return res.status(400).json({ success: false, error: 'Password is required' });
+    }
+
+    let isAuthorized = false;
+    let authorizedBy = 'Admin';
+
+    // 1. Check against Manager / Admin accounts in staff_users
+    try {
+      const privilegedUsers = db.prepare(`
+        SELECT id, username, password, full_name, role, can_access_manager 
+        FROM staff_users 
+        WHERE status = 'active' AND (role IN ('manager', 'admin', 'owner') OR can_access_manager = 1)
+      `).all();
+
+      for (const u of privilegedUsers) {
+        if (u.password) {
+          const valid = await verifyPassword(inputPassword, u.password, db, u.id);
+          if (valid) {
+            isAuthorized = true;
+            authorizedBy = u.full_name || u.username || 'Manager';
+            break;
+          }
+        }
+      }
+    } catch (userErr) {
+      console.warn('[AdminPassword] Privileged user check warning:', userErr.message);
+    }
+
+    // 2. Check system section passwords
+    if (!isAuthorized) {
+      try {
+        const sectionSettings = db.prepare(`
+          SELECT setting_value 
+          FROM system_settings 
+          WHERE setting_key IN ('section_password_hospitality', 'section_password_manager', 'section_password_admin')
+        `).all();
+        for (const row of sectionSettings) {
+          if (row.setting_value && String(row.setting_value).trim() === inputPassword) {
+            isAuthorized = true;
+            authorizedBy = 'Admin (Section PIN)';
+            break;
+          }
+        }
+      } catch (settErr) {
+        console.warn('[AdminPassword] System settings check warning:', settErr.message);
+      }
+    }
+
+    // 3. Fallback to master admin passwords
+    if (!isAuthorized) {
+      const masterPasswords = ['admin123', 'Jaijeet@123', '123456', 'hcpadmin'];
+      if (masterPasswords.includes(inputPassword)) {
+        isAuthorized = true;
+        authorizedBy = 'Admin (Master Override)';
+      }
+    }
+
+    if (!isAuthorized) {
+      return res.status(401).json({ success: false, error: 'Incorrect Admin Password' });
+    }
+
+    // If approvalId provided, update status to APPROVED in notification service
+    let updatedApproval = null;
+    if (approvalId) {
+      try {
+        updatedApproval = notificationService.updateApprovalStatus(approvalId, 'APPROVED', authorizedBy + ' (Password Override)');
+      } catch (apErr) {
+        console.warn('[AdminPassword] Approval status update error:', apErr.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      approved: true,
+      authorizedBy,
+      approval: updatedApproval
+    });
+  } catch (err) {
+    console.error('Verify admin password error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Verification error' });
   }
 });
 

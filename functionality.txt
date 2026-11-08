@@ -875,5 +875,43 @@ TC-CLD-003: Real-time Cloud Synchronization
   - Status updates on Owner Mobile App via push notification and WebSocket within <100ms.
 
 ====================================================================================================
+SECTION 16: CHECKOUT CONTINUOUS RECEIPT NUMBERING, ADMIN PASSWORD OVERRIDE & INVOICE LAYOUT
+====================================================================================================
+
+TC-CHK-016: Continuous Sequence Receipt Number on Paid While Checkout
+----------------------------------------------------------------------------------------------------
+* Preconditions: Room checkout settled with cash or online payment.
+* Steps:
+  1. Complete settlement in Folio Settlement Modal.
+  2. Inspect the printed settlement money receipt.
+* Expected Result:
+  - Money receipt displays continuous sequential serial number (e.g. CR11, CR12, UPI05) instead of '#1' or 'CR01'.
+  - Number matches payments ledger and History tab exactly.
+
+TC-ADM-017: Admin / Manager Password Override for Operations Needing Approval
+----------------------------------------------------------------------------------------------------
+* Preconditions: Staff performs action requiring admin approval (check-in discount exceeding staff freewill limit, checkout discount, cross-category room transfer).
+* Steps:
+  1. Click '🔑 Enter Password' button in approval modal or toolbar.
+  2. Enter Admin / Manager password.
+  3. Submit authorization.
+* Expected Result:
+  - System verifies credentials against staff managers, system section passwords, and master override keys.
+  - Grants instant on-the-spot permission without waiting for remote phone notification polling.
+  - Action completes immediately.
+
+TC-INV-018: Tax Invoice Centered Logo, Official Website QR Code & Repositioned Watermark
+----------------------------------------------------------------------------------------------------
+* Preconditions: Room billing finalized.
+* Steps:
+  1. Print A4 Tax Invoice.
+  2. Review print preview layout.
+* Expected Result:
+  - Watermark background logo shifted lower (top: 57%) into the clear whitespace below Net Payable In Words, eliminating text overlapping.
+  - Header displays 3-column layout: Hotel Address & Contact on left, Brand Logo centered with 'by JMG HOSPITALITY AND INFRA LLP', and crisp QR Code on right.
+  - QR Code redirects to 'https://www.hotelcityparksolapur.com'.
+  - Strict 1-page A4 format maintained.
+
+====================================================================================================
                                       END OF TEST SUITE
 ====================================================================================================

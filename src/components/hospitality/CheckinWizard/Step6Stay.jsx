@@ -5,6 +5,7 @@ import { api } from '../../../services/api';
 import UnifiedTimeInput from '../../common/UnifiedTimeInput';
 import ThemedDatePicker from '../../common/ThemedDatePicker';
 import { useApp } from '../../../context/AppContext';
+import AdminPasswordModal from '../AdminPasswordModal';
 
 export default function Step6Stay({
   room,
@@ -60,6 +61,21 @@ export default function Step6Stay({
     approvalId: null
   });
   const [approvedDiscountPct, setApprovedDiscountPct] = useState(null);
+  const [isAdminPasswordModalOpen, setIsAdminPasswordModalOpen] = useState(false);
+
+  const handleAdminPasswordSuccess = (authResult) => {
+    const pct = Number(discountPermissionModal.requestedPct) || 0;
+    if (pct > 0) {
+      setApprovedDiscountPct(pct);
+      const updates = { discountPct: pct };
+      if (pct >= 20) {
+        updates.mealPlan = 'without_breakfast';
+      }
+      updateDraft(updates);
+      setDiscountPermissionModal({ isOpen: false, requestedPct: null, status: 'idle', approvalId: null });
+      showToast(`✓ Admin password authorized! ${pct}% discount granted.`, 'green');
+    }
+  };
 
   // Pre-booked Advance Reservations State & Handlers
   const [isPrebookedModalOpen, setIsPrebookedModalOpen] = useState(false);
@@ -5756,18 +5772,26 @@ export default function Step6Stay({
                     Clicking below sends an instant high-priority push notification and permission popup to the Admin panel. Once approved, this {discountPermissionModal.requestedPct}% discount unlocks for this check-in only.
                   </p>
 
-                  <div style={{ display: 'flex', gap: '10px' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <button
                       type="button"
                       onClick={() => setDiscountPermissionModal({ isOpen: false, requestedPct: null, status: 'idle', approvalId: null })}
-                      style={{ flex: 1, padding: '10px', borderRadius: '10px', border: '1.5px solid #cbd5e1', background: '#ffffff', color: '#475569', fontWeight: 750, cursor: 'pointer' }}
+                      style={{ flex: 1, minWidth: '70px', padding: '10px', borderRadius: '10px', border: '1.5px solid #cbd5e1', background: '#ffffff', color: '#475569', fontWeight: 750, cursor: 'pointer' }}
                     >
                       Cancel
                     </button>
                     <button
                       type="button"
+                      onClick={() => setIsAdminPasswordModalOpen(true)}
+                      title="Enter Admin / Manager Password"
+                      style={{ flex: 1.2, minWidth: '125px', padding: '10px', borderRadius: '10px', border: '1.5px solid #0284c7', background: '#f0f9ff', color: '#0369a1', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}
+                    >
+                      🔑 Enter Password
+                    </button>
+                    <button
+                      type="button"
                       onClick={handleSendDiscountRequest}
-                      style={{ flex: 1.5, padding: '10px', borderRadius: '10px', border: 'none', background: '#0284c7', color: '#ffffff', fontWeight: 800, cursor: 'pointer', boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)' }}
+                      style={{ flex: 1.5, minWidth: '140px', padding: '10px', borderRadius: '10px', border: 'none', background: '#0284c7', color: '#ffffff', fontWeight: 800, cursor: 'pointer', boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)' }}
                     >
                       📲 Ask for Permission
                     </button>
@@ -5787,13 +5811,22 @@ export default function Step6Stay({
                   <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '8px 12px', fontSize: '0.76rem', color: '#0369a1', marginBottom: '16px' }}>
                     ⚡ Real-time sync active (checking every 2.5 seconds)
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setDiscountPermissionModal({ isOpen: false, requestedPct: null, status: 'idle', approvalId: null })}
-                    style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#64748b', fontSize: '0.78rem', cursor: 'pointer' }}
-                  >
-                    Cancel Request
-                  </button>
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={() => setDiscountPermissionModal({ isOpen: false, requestedPct: null, status: 'idle', approvalId: null })}
+                      style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#64748b', fontSize: '0.78rem', cursor: 'pointer' }}
+                    >
+                      Cancel Request
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsAdminPasswordModalOpen(true)}
+                      style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid #0284c7', background: '#f0f9ff', color: '#0369a1', fontSize: '0.78rem', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      🔑 Enter Password
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -5838,6 +5871,21 @@ export default function Step6Stay({
           </div>
         </div>
       )}
+
+      {/* Admin Password Override Modal */}
+      <AdminPasswordModal
+        isOpen={isAdminPasswordModalOpen}
+        onClose={() => setIsAdminPasswordModalOpen(false)}
+        onSuccess={handleAdminPasswordSuccess}
+        title="Admin Discount Permission"
+        description={`Enter Manager / Admin password to authorize ${discountPermissionModal.requestedPct}% discount for this check-in immediately.`}
+        approvalId={discountPermissionModal.approvalId}
+        actionType="discount_checkin"
+        details={{
+          discount_pct: discountPermissionModal.requestedPct,
+          room: room?.room_number
+        }}
+      />
       {/* Pre-booked Advance Bookings Selection Modal */}
       {isPrebookedModalOpen && (
         <div

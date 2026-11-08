@@ -5,6 +5,7 @@ import { api } from '../../services/api';
 import { printCashReceipt, printPettyCashVoucher, printFinalBillA4, printGuestRegistrationA4, autoSavePdfDocument, buildFinalBillA4HTML, buildMoneyReceiptHTML } from '../../services/printService';
 import DocumentScannerModal from '../common/DocumentScannerModal';
 import { compressBase64Image } from '../../utils/imageCompressor';
+import AdminPasswordModal from './AdminPasswordModal';
 
 export default function FolioSettlementModal({
   isOpen,
@@ -76,6 +77,17 @@ export default function FolioSettlementModal({
     requestedAmt: 0,
     requestedPct: 0
   });
+  const [isAdminPasswordModalOpen, setIsAdminPasswordModalOpen] = useState(false);
+
+  const handleCheckoutPasswordSuccess = (authResult) => {
+    setDiscountApproval(prev => ({
+      ...prev,
+      status: 'approved',
+      approvedAmt: enteredDiscountAmt,
+      approvedPct: enteredDiscountPct
+    }));
+    showToast('✓ Admin password authorized! Discount granted.', 'green');
+  };
 
   // Corporate / GST Details for Tax Invoice (Can be inserted/edited at checkout)
   const [checkoutCompanyName, setCheckoutCompanyName] = useState(() => folioData?.companyName || room?.company_name || folioData?.room?.company_name || '');
@@ -685,10 +697,11 @@ export default function FolioSettlementModal({
             const guestName = folioData.guestName || room.guest_name || 'Valued Guest';
             const cashierName = currentUser ? (currentUser.full_name || currentUser.username) : 'Front Desk';
 
-            const cashReceiptNo = res.receipt_numbers?.cash || res.receiptNumbers?.cash || res.receipts?.find(r => r.mode === 'cash')?.receipt_no || 'CR01';
-            const upiReceiptNo = res.receipt_numbers?.upi || res.receiptNumbers?.upi || res.receipts?.find(r => r.mode === 'upi')?.receipt_no || 'UPI01';
-            const cardReceiptNo = res.receipt_numbers?.card || res.receiptNumbers?.card || res.receipts?.find(r => r.mode === 'card')?.receipt_no || 'POS01';
-            const chqReceiptNo = res.receipt_numbers?.cheque || res.receiptNumbers?.cheque || res.receipts?.find(r => r.mode === 'cheque')?.receipt_no || 'CHQ01';
+            const checkoutData = res?.data || res || {};
+            const cashReceiptNo = checkoutData.receipt_numbers?.cash || checkoutData.receiptNumbers?.cash || checkoutData.receipts?.find(r => r.mode === 'cash')?.receipt_no || res.receipt_numbers?.cash || res.receiptNumbers?.cash || 'CR01';
+            const upiReceiptNo = checkoutData.receipt_numbers?.upi || checkoutData.receiptNumbers?.upi || checkoutData.receipts?.find(r => r.mode === 'upi')?.receipt_no || res.receipt_numbers?.upi || res.receiptNumbers?.upi || 'UPI01';
+            const cardReceiptNo = checkoutData.receipt_numbers?.card || checkoutData.receiptNumbers?.card || checkoutData.receipts?.find(r => r.mode === 'card')?.receipt_no || res.receipt_numbers?.card || res.receiptNumbers?.card || 'POS01';
+            const chqReceiptNo = checkoutData.receipt_numbers?.cheque || checkoutData.receiptNumbers?.cheque || checkoutData.receipts?.find(r => r.mode === 'cheque')?.receipt_no || res.receipt_numbers?.cheque || res.receiptNumbers?.cheque || 'CHQ01';
 
             if (splitCash > 0) {
               checkoutReceipts.push({
@@ -799,8 +812,8 @@ export default function FolioSettlementModal({
               onlineUtr: isRefund ? '' : onlineUtr,
               chequeNo: isRefund ? '' : chequeNo,
               chequeBank: isRefund ? '' : chequeBank,
-              receiptNumbers: res.receipt_numbers || res.receiptNumbers,
-              receipt_no: res.finalReceiptNo || res.final_receipt_no,
+              receiptNumbers: checkoutData.receipt_numbers || checkoutData.receiptNumbers || res.receipt_numbers || res.receiptNumbers,
+              receipt_no: checkoutData.finalReceiptNo || checkoutData.final_receipt_no || res.finalReceiptNo || res.final_receipt_no,
               checked_out_by: currentUser ? (currentUser.full_name || currentUser.username) : 'Cashier_1',
               company_name: checkoutCompanyName.trim() || undefined,
               companyName: checkoutCompanyName.trim() || undefined,
@@ -844,8 +857,8 @@ export default function FolioSettlementModal({
 
             // Step 2: If refund, then print refund voucher with 900ms gap
             if (isRefund && refundAmt > 0) {
-              const rrNo = res.refund_voucher_no || res.refundVoucherNo || res.rr_number || 'RR-01';
-              const refBill = res.ref_bill_no || res.checkin_voucher_no || folioData.voucherNumber || room.voucher_number;
+              const rrNo = checkoutData.refund_voucher_no || checkoutData.refundVoucherNo || checkoutData.rr_number || res.refund_voucher_no || res.refundVoucherNo || res.rr_number || 'RR-01';
+              const refBill = checkoutData.ref_bill_no || checkoutData.checkin_voucher_no || res.ref_bill_no || res.checkin_voucher_no || folioData.voucherNumber || room.voucher_number;
               setTimeout(() => {
                 printPettyCashVoucher({
                   voucher_no: rrNo,
@@ -1306,38 +1319,81 @@ export default function FolioSettlementModal({
                     {enteredDiscountAmt > 0 && (
                       <div style={{ marginLeft: 'auto' }}>
                         {discountApproval.status === 'idle' && (
-                          <button
-                            type="button"
-                            onClick={handleRequestDiscountApproval}
-                            style={{
-                              padding: '6px 14px',
-                              borderRadius: '8px',
-                              background: '#2563eb',
-                              color: '#ffffff',
-                              border: 'none',
-                              fontWeight: 800,
-                              fontSize: '0.78rem',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            🔐 Request Admin Approval
-                          </button>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => setIsAdminPasswordModalOpen(true)}
+                              title="Enter Admin / Manager Password"
+                              style={{
+                                padding: '6px 12px',
+                                borderRadius: '8px',
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1px solid #bfdbfe',
+                                fontWeight: 800,
+                                fontSize: '0.78rem',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              🔑 Password
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleRequestDiscountApproval}
+                              style={{
+                                padding: '6px 14px',
+                                borderRadius: '8px',
+                                background: '#2563eb',
+                                color: '#ffffff',
+                                border: 'none',
+                                fontWeight: 800,
+                                fontSize: '0.78rem',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              🔐 Request Admin Approval
+                            </button>
+                          </div>
                         )}
                         {discountApproval.status === 'waiting' && (
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            background: '#eff6ff',
-                            border: '1px solid #bfdbfe',
-                            color: '#1d4ed8',
-                            padding: '6px 12px',
-                            borderRadius: '8px',
-                            fontSize: '0.78rem',
-                            fontWeight: 800
-                          }}>
-                            <span style={{ width: '10px', height: '10px', border: '2px solid #2563eb', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block' }} />
-                            Waiting for Admin Approval...
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              background: '#eff6ff',
+                              border: '1px solid #bfdbfe',
+                              color: '#1d4ed8',
+                              padding: '6px 10px',
+                              borderRadius: '8px',
+                              fontSize: '0.76rem',
+                              fontWeight: 800
+                            }}>
+                              <span style={{ width: '10px', height: '10px', border: '2px solid #2563eb', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block' }} />
+                              Waiting...
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setIsAdminPasswordModalOpen(true)}
+                              style={{
+                                padding: '6px 10px',
+                                borderRadius: '8px',
+                                background: '#f0fdf4',
+                                color: '#15803d',
+                                border: '1px solid #86efac',
+                                fontWeight: 800,
+                                fontSize: '0.76rem',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '3px'
+                              }}
+                            >
+                              🔑 Enter Password
+                            </button>
                           </div>
                         )}
                         {discountApproval.status === 'approved' && (
@@ -2225,6 +2281,22 @@ export default function FolioSettlementModal({
         onCapture={(photo) => setChequePhoto(photo)}
         title="📸 Scan Physical Cheque Photo"
         subtitle="Align the cheque clearly within frame and click Snap Photo"
+      />
+
+      {/* Admin Password Override Modal */}
+      <AdminPasswordModal
+        isOpen={isAdminPasswordModalOpen}
+        onClose={() => setIsAdminPasswordModalOpen(false)}
+        onSuccess={handleCheckoutPasswordSuccess}
+        title="Admin Checkout Discount Permission"
+        description={`Enter Manager / Admin password to authorize ${discountType === 'pct' ? `${enteredDiscountPct}%` : formatCurrency(enteredDiscountAmt)} discount at checkout.`}
+        approvalId={discountApproval.approvalId}
+        actionType="discount_checkout"
+        details={{
+          discount_amount: enteredDiscountAmt,
+          discount_pct: enteredDiscountPct,
+          room: room?.room_number || folioData?.roomNumber
+        }}
       />
     </div>
   );

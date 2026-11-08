@@ -443,9 +443,84 @@
 
 ---
 
+## Suite 11: Checkout Continuous Receipt Numbering, Admin Password Override & Tax Invoice Layout
+
+### TC-CHK-05: Checkout Payment Receipt Continuous Serial Sequence
+* **Priority:** Critical
+* **Steps:**
+  1. Complete stay settlement for any room with cash or UPI payment (e.g. ₹1,346).
+  2. Confirm checkout in the Folio Settlement Modal.
+  3. Inspect the printed settlement payment receipt.
+  4. Compare with the record listed in History tab.
+* **Expected Result:**
+  * The checkout payment receipt displays the actual database continuous serial number (e.g. `CR11`, `CR12`, `UPI05`) instead of `#1` or `CR01`.
+  * The receipt number matches the serial number shown in History.
+* **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
+
+### TC-ADM-01: Admin Password Modal Override for Check-in Discount
+* **Priority:** High
+* **Steps:**
+  1. In Check-in Wizard Step 6 (Stay), select a discount exceeding staff limit (e.g. 15% or 20%).
+  2. In the discount permission dialog, click the **🔑 Enter Password** button.
+  3. Enter the Manager / Admin password (e.g. `admin123`, `Jaijeet@123`, or manager account).
+  4. Submit authorization.
+* **Expected Result:**
+  * Permission is immediately authorized on the spot without waiting for phone notification polling.
+  * Requested discount applies to the check-in immediately with green toast confirmation.
+* **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
+
+### TC-ADM-02: Admin Password Modal Override for Checkout Discount
+* **Priority:** High
+* **Steps:**
+  1. Open Folio Settlement Modal for an occupied room.
+  2. Enter a checkout discount (e.g. 10% or ₹300).
+  3. Click the **🔑 Password** button next to *Request Admin Approval*.
+  4. Enter Admin password and submit.
+* **Expected Result:**
+  * Admin authorization succeeds immediately.
+  * Discount status switches to approved, recalculating the net balance due without delays.
+* **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
+
+### TC-ADM-03: Admin Password Modal Override for Cross-Category Room Transfer
+* **Priority:** High
+* **Steps:**
+  1. Drag an occupied room into an available room of a different category (e.g. Deluxe to Suite).
+  2. In the Cross-Category Shift confirmation dialog, click **🔑 Password**.
+  3. Enter Admin password and submit.
+* **Expected Result:**
+  * Room shift is authorized instantly.
+  * System executes the transfer directly, preserving declared check-in tariff without requiring mobile approval.
+* **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
+
+### TC-INV-07: Tax Invoice Watermark Repositioning (top: 57%)
+* **Priority:** High
+* **Steps:**
+  1. Print Tax Invoice for any stay.
+  2. Inspect the print preview.
+* **Expected Result:**
+  * Watermark background logo is positioned at `top: 57%`.
+  * The text "HOTEL CityPaark" rests in the clear whitespace below Net Payable Amount in words and above the footer GST/Bank details.
+  * No visual clash or overlapping with invoice total words, gross payable, advance received, or net payable figures.
+* **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
+
+### TC-INV-08: Tax Invoice 3-Column Header (Centered Logo & Website QR Code)
+* **Priority:** High
+* **Steps:**
+  1. Print Tax Invoice for any stay.
+  2. Inspect the header section above the horizontal line.
+* **Expected Result:**
+  * **Left Column:** Hotel City Park address and contact details.
+  * **Center Column:** Brand logo cleanly centered with "by JMG HOSPITALITY AND INFRA LLP".
+  * **Right Column:** Crisp QR code with "Scan for Website" / `hotelcityparksolapur.com`.
+  * Scanning the QR code with a phone redirects to `https://www.hotelcityparksolapur.com`.
+  * Entire document remains strictly on 1 single A4 page.
+* **Status:** `[ ] PASS` | `[ ] FAIL` | Notes: _____________________
+
+---
+
 ## Summary Sign-off
 
 | Total Test Cases | Passed | Failed | Blocked | Tester Signature | Sign-off Date |
 |:---:|:---:|:---:|:---:|:---:|:---:|
-| **26** | ____ | ____ | ____ | ________________ | ____________ |
+| **32** | ____ | ____ | ____ | ________________ | ____________ |
 
