@@ -44,7 +44,7 @@ async function writeFirestoreRest(collection, docId, fields) {
       else restFields[k] = { stringValue: String(v ?? '') };
     }
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeout = controller ? setTimeout(() => controller.abort(), 4000) : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 8000) : null;
     const res = await fetch(url, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -63,7 +63,7 @@ async function readFirestoreRest(collection, docId) {
   try {
     const url = `${FIREBASE_REST_URL}/${collection}/${docId}?key=${FIREBASE_API_KEY}`;
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeout = controller ? setTimeout(() => controller.abort(), 3000) : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 8000) : null;
     const res = await fetch(url, { signal: controller?.signal });
     if (timeout) clearTimeout(timeout);
     if (!res.ok) return null;

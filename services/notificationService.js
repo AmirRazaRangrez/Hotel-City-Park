@@ -113,6 +113,191 @@ async function getAllPushTokens() {
   return localTokens;
 }
 
+let cachedGoogleAccessToken = null;
+let cachedGoogleTokenExpiry = 0;
+let cachedClockOffsetMs = null;
+let lastOffsetCheckTime = 0;
+
+async function getGoogleServerClockOffsetMs() {
+  const now = Date.now();
+  if (cachedClockOffsetMs !== null && now - lastOffsetCheckTime < 10 * 60 * 1000) {
+    return cachedClockOffsetMs;
+  }
+  try {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 3000) : null;
+    const res = await fetch('https://oauth2.googleapis.com', { method: 'HEAD', signal: controller?.signal });
+    if (timer) clearTimeout(timer);
+    const dateStr = res.headers.get('date');
+    if (dateStr) {
+      const googleServerTimeMs = new Date(dateStr).getTime();
+      cachedClockOffsetMs = Date.now() - googleServerTimeMs;
+      lastOffsetCheckTime = now;
+      console.log(`⏱️ [Google Clock Sync] Local clock offset from Google servers: ${(cachedClockOffsetMs / 1000 / 3600).toFixed(2)} hours`);
+      return cachedClockOffsetMs;
+    }
+  } catch (err) {
+    console.warn('[Google Clock Sync] Could not fetch Google server time:', err.message);
+  }
+  return cachedClockOffsetMs || 0;
+}
+
+function loadNotificationServiceAccount() {
+  const saPaths = [
+    path.resolve(__dirname, '..', 'firebase-service-account.json'),
+    path.resolve(__dirname, '..', 'hotelcitypark-crm-firebase-adminsdk-fbsvc-cb2c37b86c.json'),
+    path.resolve(__dirname, 'firebase-service-account.json')
+  ];
+  for (const p of saPaths) {
+    if (fs.existsSync(p)) {
+      try {
+        const sa = JSON.parse(fs.readFileSync(p, 'utf8'));
+        if (sa && sa.private_key && sa.client_email) return sa;
+      } catch (_) {}
+    }
+  }
+  return null;
+}
+
+async function getGoogleOAuthAccessToken() {
+  const now = Date.now();
+  if (cachedGoogleAccessToken && cachedGoogleTokenExpiry > now + 60 * 1000) {
+    return cachedGoogleAccessToken;
+  }
+
+  const sa = loadNotificationServiceAccount();
+  if (!sa) return null;
+
+  const clockOffsetMs = await getGoogleServerClockOffsetMs();
+  const googleNowSec = Math.floor((Date.now() - clockOffsetMs) / 1000);
+
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+  const claim = Buffer.from(JSON.stringify({
+    iss: sa.client_email,
+    scope: 'https://www.googleapis.com/auth/firebase.messaging',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: googleNowSec + 3600,
+    iat: googleNowSec - 10
+  })).toString('base64url');
+
+  const crypto = require('crypto');
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(header + '.' + claim);
+  const sig = signer.sign(sa.private_key, 'base64url');
+  const jwt = header + '.' + claim + '.' + sig;
+
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=' + jwt,
+    signal: controller?.signal
+  });
+  if (timer) clearTimeout(timer);
+
+  if (!tokenRes.ok) {
+    const errText = await tokenRes.text();
+    console.warn('[FCM Token] Failed to fetch Google OAuth token:', errText);
+    return null;
+  }
+
+  const tokenData = await tokenRes.json();
+  if (tokenData.access_token) {
+    cachedGoogleAccessToken = tokenData.access_token;
+    cachedGoogleTokenExpiry = now + (Number(tokenData.expires_in) || 3600) * 1000;
+    return cachedGoogleAccessToken;
+  }
+  return null;
+}
+
+async function sendFcmHttpV1Message({ tokens, title, body, data = {} }) {
+  const sa = loadNotificationServiceAccount();
+  if (!sa || !tokens || tokens.length === 0) return { successCount: 0, failureCount: tokens?.length || 0 };
+
+  const accessToken = await getGoogleOAuthAccessToken();
+  if (!accessToken) {
+    console.warn('[FCM HTTP v1] No OAuth access token available.');
+    return { successCount: 0, failureCount: tokens.length };
+  }
+
+  const projectId = sa.project_id || 'hotelcitypark-crm';
+  const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
+
+  const stringData = {};
+  if (data && typeof data === 'object') {
+    for (const [k, v] of Object.entries(data)) {
+      stringData[k] = (v === null || v === undefined) ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+    }
+  }
+  stringData.title = String(title || '');
+  stringData.body = String(body || '');
+
+  let successCount = 0;
+  let failureCount = 0;
+
+  for (const token of tokens) {
+    try {
+      const messagePayload = {
+        message: {
+          token,
+          notification: {
+            title: String(title),
+            body: String(body)
+          },
+          data: stringData,
+          android: {
+            priority: 'HIGH',
+            notification: {
+              channel_id: 'high_importance_channel',
+              sound: 'default',
+              default_sound: true,
+              default_vibrate_timings: true,
+              notification_priority: 'PRIORITY_MAX'
+            }
+          }
+        }
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + accessToken,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(messagePayload)
+      });
+
+      const resData = await res.json();
+      if (res.ok && resData.name) {
+        successCount++;
+      } else {
+        failureCount++;
+        const errDetails = resData.error || {};
+        const code = String(errDetails.status || errDetails.message || '');
+        if (code.includes('NOT_FOUND') || code.includes('UNREGISTERED')) {
+          try {
+            db.prepare('DELETE FROM owner_push_tokens WHERE token = ?').run(token);
+            console.log('[NotificationService] Cleaned up unregistered FCM token:', token.slice(0, 15) + '...');
+          } catch (_) {}
+          try {
+            const docId = token.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+            const FIREBASE_REST_URL = 'https://firestore.googleapis.com/v1/projects/hotelcitypark-crm/databases/(default)/documents';
+            const FIREBASE_API_KEY = 'AIzaSyCtZnkdk1_q8rWrISnD8P2Rhi-jcPn1QTI';
+            fetch(`${FIREBASE_REST_URL}/owner_devices/${docId}?key=${FIREBASE_API_KEY}`, { method: 'DELETE' }).catch(() => {});
+          } catch (_) {}
+        }
+      }
+    } catch (err) {
+      failureCount++;
+      console.warn(`[FCM HTTP v1] Error sending to token ${token.slice(0, 15)}...:`, err.message);
+    }
+  }
+
+  console.log(`⚡ [NotificationService] Clock-Synced FCM HTTP v1 dispatch: ${successCount} succeeded, ${failureCount} failed`);
+  return { successCount, failureCount };
+}
+
 async function sendPushNotification({ title, body, data = {}, type = 'general' }) {
   // 1. Store in owner_notifications database table
   try {
@@ -133,94 +318,36 @@ async function sendPushNotification({ title, body, data = {}, type = 'general' }
   const allTokens = await getAllPushTokens();
   console.log(`[NotificationService] Dispatching push '${title}' to ${allTokens.length} device tokens:`, allTokens.map(t => t.slice(0, 15) + '...'));
 
-  // 3. Dispatch to Native Android APKs via Firebase Cloud Messaging (FCM)
+  // 3. Dispatch to Native Android APKs via Clock-Synced Firebase Cloud Messaging (FCM)
   const fcmTokens = allTokens.filter(t => t && !t.startsWith('ExponentPushToken[') && !t.startsWith('ExpoPushToken[') && t.length > 20);
   if (fcmTokens.length > 0) {
     try {
-      const admin = require('firebase-admin');
-      const { getMessaging } = require('firebase-admin/messaging');
-      let app = admin.getApps().length > 0 ? admin.getApp() : null;
-      if (!app) {
-        const path = require('path');
-        const fs = require('fs');
-        const saPaths = [
-          path.resolve(__dirname, '..', 'firebase-service-account.json'),
-          path.resolve(__dirname, '..', 'hotelcitypark-crm-firebase-adminsdk-fbsvc-cb2c37b86c.json'),
-          path.resolve(__dirname, 'firebase-service-account.json')
-        ];
-        for (const p of saPaths) {
-          if (fs.existsSync(p)) {
-            try {
-              const sa = JSON.parse(fs.readFileSync(p, 'utf8'));
-              app = admin.initializeApp({ credential: admin.cert(sa) });
-              break;
-            } catch (_) {}
-          }
-        }
-      }
-
-      if (app) {
-        const messaging = getMessaging(app);
-        
-        // Convert all data fields to string format for FCM compatibility
-        const stringData = {};
-        if (data && typeof data === 'object') {
-          for (const [k, v] of Object.entries(data)) {
-            stringData[k] = (v === null || v === undefined) ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
-          }
-        }
-        stringData.title = String(title || '');
-        stringData.body = String(body || '');
-        stringData.type = String(type || 'general');
-
-        // FCM supports up to 500 tokens per multicast batch
-        for (let i = 0; i < fcmTokens.length; i += 500) {
-          const batch = fcmTokens.slice(i, i + 500);
-          const fcmMessage = {
-            tokens: batch,
-            notification: {
-              title: String(title),
-              body: String(body)
-            },
-            data: stringData,
-            android: {
-              priority: 'high',
-              notification: {
-                channelId: 'high_importance_channel',
-                sound: 'default',
-                defaultSound: true,
-                defaultVibrateTimings: true,
-                priority: 'high'
+      const fcmRes = await sendFcmHttpV1Message({ tokens: fcmTokens, title, body, data });
+      if (fcmRes.successCount === 0) {
+        // Fallback to Admin SDK multicast if HTTP v1 had zero successes
+        try {
+          const admin = require('firebase-admin');
+          const { getMessaging } = require('firebase-admin/messaging');
+          let app = admin.getApps().length > 0 ? admin.getApp() : null;
+          if (app) {
+            const messaging = getMessaging(app);
+            const stringData = {};
+            if (data && typeof data === 'object') {
+              for (const [k, v] of Object.entries(data)) {
+                stringData[k] = (v === null || v === undefined) ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
               }
             }
-          };
-
-          const fcmRes = await messaging.sendEachForMulticast(fcmMessage);
-          console.log(`[NotificationService] FCM Multicast dispatch: ${fcmRes.successCount} succeeded, ${fcmRes.failureCount} failed`);
-
-          // Clean up dead/unregistered tokens from SQLite AND Firestore
-          if (fcmRes.failureCount > 0) {
-            fcmRes.responses.forEach((resp, idx) => {
-              if (!resp.success && resp.error) {
-                const code = resp.error.code || resp.error.message || '';
-                if (code.includes('not-registered') || code.includes('invalid-registration') || code.includes('NotRegistered')) {
-                  const deadToken = batch[idx];
-                  try {
-                    db.prepare('DELETE FROM owner_push_tokens WHERE token = ?').run(deadToken);
-                    console.log('[NotificationService] Cleaned up unregistered FCM token from SQLite:', deadToken.slice(0, 15) + '...');
-                  } catch (_) {}
-                  try {
-                    const docId = deadToken.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
-                    const FIREBASE_REST_URL = 'https://firestore.googleapis.com/v1/projects/hotelcitypark-crm/databases/(default)/documents';
-                    const FIREBASE_API_KEY = 'AIzaSyCtZnkdk1_q8rWrISnD8P2Rhi-jcPn1QTI';
-                    fetch(`${FIREBASE_REST_URL}/owner_devices/${docId}?key=${FIREBASE_API_KEY}`, { method: 'DELETE' }).catch(() => {});
-                    console.log('[NotificationService] Cleaned up unregistered FCM token from Firestore:', docId);
-                  } catch (_) {}
-                }
-              }
+            stringData.title = String(title || '');
+            stringData.body = String(body || '');
+            stringData.type = String(type || 'general');
+            await messaging.sendEachForMulticast({
+              tokens: fcmTokens,
+              notification: { title: String(title), body: String(body) },
+              data: stringData,
+              android: { priority: 'high', notification: { channelId: 'high_importance_channel', priority: 'high' } }
             });
           }
-        }
+        } catch (_) {}
       }
     } catch (fcmErr) {
       console.warn('[NotificationService] FCM dispatch error:', fcmErr.message);
