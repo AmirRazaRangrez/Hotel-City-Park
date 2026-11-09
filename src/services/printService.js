@@ -5032,28 +5032,19 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
     ? Math.round((baseGrossTariff * checkinDiscPct) / 100)
     : 0;
 
-  let discountAmt = 0;
-  if (pctCalculatedDiscount > 0) {
-    discountAmt = pctCalculatedDiscount;
-    if (checkoutDiscAmt > 0 && s.isCheckoutSettlement) {
-      discountAmt = Number((discountAmt + checkoutDiscAmt).toFixed(2));
-    }
-  } else if (c.stayCalcNow?.discountAmount !== undefined) {
-    discountAmt = Number(c.stayCalcNow.discountAmount);
-  } else if (s.isCheckoutSettlement) {
-    // Actively checking out in modal: check-in discount + checkout modal discount
-    discountAmt = Number((checkinDiscAmt + checkoutDiscAmt).toFixed(2));
-  } else if (isAlreadyCheckedOut) {
-    // If booking was already checked out in DB, r.discount_amount holds the total aggregated discount
-    discountAmt = recordDiscAmt > 0 ? recordDiscAmt : (checkoutDiscAmt > 0 && checkinDiscAmt > 0 && checkoutDiscAmt !== checkinDiscAmt ? (checkinDiscAmt + checkoutDiscAmt) : (checkoutDiscAmt || checkinDiscAmt));
-  } else {
-    // Live stay or checkout settlement in progress: aggregate check-in + checkout discount
-    if (checkoutDiscAmt > 0 && checkinDiscAmt > 0 && checkoutDiscAmt !== checkinDiscAmt) {
-      discountAmt = Number((checkinDiscAmt + checkoutDiscAmt).toFixed(2));
-    } else {
-      discountAmt = checkoutDiscAmt || checkinDiscAmt || recordDiscAmt || 0;
-    }
+  let effectiveCheckinDiscAmt = checkinDiscAmt;
+  let effectiveCheckoutDiscAmt = checkoutDiscAmt;
+  if (isAlreadyCheckedOut && effectiveCheckoutDiscAmt > 0 && effectiveCheckinDiscAmt >= effectiveCheckoutDiscAmt) {
+    // If record holds total discount in discount_amount:
+    effectiveCheckinDiscAmt = Number((effectiveCheckinDiscAmt - effectiveCheckoutDiscAmt).toFixed(2));
   }
+  if (effectiveCheckinDiscAmt <= 0 && effectiveCheckoutDiscAmt <= 0 && recordDiscAmt > 0) {
+    effectiveCheckinDiscAmt = recordDiscAmt;
+  }
+  const totalDiscountAmt = Number((effectiveCheckinDiscAmt + effectiveCheckoutDiscAmt).toFixed(2));
+  let discountAmt = totalDiscountAmt;
+  let checkinDisplayPct = checkinDiscPct || (baseGrossTariff > 0 && effectiveCheckinDiscAmt > 0 ? Number(((effectiveCheckinDiscAmt / baseGrossTariff) * 100).toFixed(1)) : 0);
+  let checkoutDisplayPct = checkoutDiscPct || (baseGrossTariff > 0 && effectiveCheckoutDiscAmt > 0 ? Number(((effectiveCheckoutDiscAmt / baseGrossTariff) * 100).toFixed(1)) : 0);
 
   // Target Settlement Amount Resolution (to ensure single-rupee reconciliation with checkout modal & drawer)
   const explicitTargetNetPayable = (s.targetNetPayable !== undefined && s.targetNetPayable !== null)
@@ -5121,18 +5112,13 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
 
     if (shouldHarmonizeTarget) {
       const targetGrossPayable = Math.round(totalAdvanceOrVoucher + targetSettlementNet);
-      const targetTotalBill = checkoutDiscAmt > 0 ? (targetGrossPayable + checkoutDiscAmt) : targetGrossPayable;
+      const targetTotalBill = targetGrossPayable;
       const nonRoomBill = (hasFnb ? fnbBillTotal : 0) + cardSurcharge + upiTax;
       const targetRoomBill = Math.max(0, targetTotalBill - nonRoomBill);
       const extTot = extensionPreTax > 0 ? extensionBillTotal : 0;
       const targetRoomNightBill = Math.max(0, Number((targetRoomBill - extTot).toFixed(2)));
 
-      // The body discount is ONLY the trade discount from check-in:
-      const bodyDiscountAmt = (checkinDiscPct > 0 && baseGrossTariff > 0)
-        ? Math.round((baseGrossTariff * checkinDiscPct) / 100)
-        : Math.min(baseGrossTariff, Math.max(0, checkinDiscAmt));
-      discountAmt = bodyDiscountAmt;
-      discountPct = checkinDiscPct || (baseGrossTariff > 0 && discountAmt > 0 ? Number(((discountAmt / baseGrossTariff) * 100).toFixed(2)) : 0);
+      discountAmt = totalDiscountAmt;
 
       const roomNightTaxable = Math.round((targetRoomNightBill / 1.05) * 100) / 100;
       const roomNightGst = Number((targetRoomNightBill - roomNightTaxable).toFixed(2));
@@ -5149,7 +5135,7 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
       roomTaxable = Number((roomNightTaxable + extensionPreTax).toFixed(2));
       roomBillTotal = targetRoomBill;
 
-      effectiveTariff = Number(Math.max(0, (baseRoomTariffTotal + breakfastPlanTotal + extraBedCharge - discountAmt)).toFixed(2));
+      effectiveTariff = Number(Math.max(0, (baseRoomTariffTotal + breakfastPlanTotal + extraBedCharge - totalDiscountAmt)).toFixed(2));
 
       unroundedTotal = targetTotalBill;
       invoiceTotal = targetTotalBill;
@@ -5157,16 +5143,12 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
       grossPayable = targetGrossPayable;
       netPayable = targetSettlementNet;
     } else {
-      const bodyDiscountAmt = (checkinDiscPct > 0 && baseGrossTariff > 0)
-        ? Math.round((baseGrossTariff * checkinDiscPct) / 100)
-        : Math.min(baseGrossTariff, Math.max(0, checkinDiscAmt));
-      discountAmt = bodyDiscountAmt;
-      discountPct = checkinDiscPct || (baseGrossTariff > 0 && discountAmt > 0 ? Number(((discountAmt / baseGrossTariff) * 100).toFixed(2)) : 0);
-      effectiveTariff = Number(Math.max(0, (baseRoomTariffTotal + breakfastPlanTotal + extraBedCharge - discountAmt)).toFixed(2));
+      discountAmt = totalDiscountAmt;
+      effectiveTariff = Number(Math.max(0, (baseRoomTariffTotal + breakfastPlanTotal + extraBedCharge - totalDiscountAmt)).toFixed(2));
 
       const baseRoomPreTax = isBookingOta
         ? Math.round(baseGrossTariff * 0.95 * 100) / 100
-        : Math.max(0, Number((baseGrossTariff - discountAmt).toFixed(2)));
+        : Math.max(0, Number((baseGrossTariff - totalDiscountAmt).toFixed(2)));
       roomTaxable = Number((baseRoomPreTax + extensionPreTax).toFixed(2));
 
       const totalGstAmt = Number((roomTaxable * 0.05).toFixed(2));
@@ -5447,11 +5429,13 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
     const extraMattressBaseVal = extraBedCharge;
     const dailyExtraMattressArr = splitAmountAcrossDays(extraMattressBaseVal, numDays);
     const dailyBreakfastPlanArr = splitAmountAcrossDays(breakfastPlanTotal, numDays);
-    const dailyDiscountArr = splitAmountAcrossDays(discountAmt, numDays);
+    const dailyCheckinDiscountArr = splitAmountAcrossDays(effectiveCheckinDiscAmt, numDays);
+    const dailyCheckoutDiscountArr = splitAmountAcrossDays(effectiveCheckoutDiscAmt, numDays);
+    const dailyDiscountArr = splitAmountAcrossDays(totalDiscountAmt, numDays);
     const dailyEffectiveArr = Array(numDays).fill(0);
     for (let i = 0; i < numDays; i++) {
       const gross = (dailyGrossTariffArr[i] || 0) + (dailyExtraMattressArr[i] || 0) + (dailyBreakfastPlanArr[i] || 0);
-      const disc = dailyDiscountArr[i] || 0;
+      const disc = (dailyCheckinDiscountArr[i] || 0) + (dailyCheckoutDiscountArr[i] || 0);
       dailyEffectiveArr[i] = Number(Math.max(0, gross - disc).toFixed(2));
     }
 
@@ -5531,9 +5515,13 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
       const blockBreakfastPlan = hasMultipleBlocks
         ? dates.reduce((s, d) => { const e = entryMap[d]; return s + ((e && e.isRoomNight && e.dayIndex >= 0) ? (dailyBreakfastPlanArr[e.dayIndex] || 0) : 0); }, 0)
         : breakfastPlanTotal;
-      const blockDiscount = hasMultipleBlocks
-        ? dates.reduce((s, d) => { const e = entryMap[d]; return s + ((e && e.isRoomNight && e.dayIndex >= 0) ? (dailyDiscountArr[e.dayIndex] || 0) : 0); }, 0)
-        : (discountAmt > 0 ? discountAmt : 0);
+      const blockCheckinDiscount = hasMultipleBlocks
+        ? dates.reduce((s, d) => { const e = entryMap[d]; return s + ((e && e.isRoomNight && e.dayIndex >= 0) ? (dailyCheckinDiscountArr[e.dayIndex] || 0) : 0); }, 0)
+        : (effectiveCheckinDiscAmt > 0 ? effectiveCheckinDiscAmt : 0);
+      const blockCheckoutDiscount = hasMultipleBlocks
+        ? dates.reduce((s, d) => { const e = entryMap[d]; return s + ((e && e.isRoomNight && e.dayIndex >= 0) ? (dailyCheckoutDiscountArr[e.dayIndex] || 0) : 0); }, 0)
+        : (effectiveCheckoutDiscAmt > 0 ? effectiveCheckoutDiscAmt : 0);
+      const blockDiscount = Number((blockCheckinDiscount + blockCheckoutDiscount).toFixed(2));
       const blockExtraMattress = hasMultipleBlocks
         ? dates.reduce((s, d) => { const e = entryMap[d]; return s + ((e && e.isRoomNight && e.dayIndex >= 0) ? (dailyExtraMattressArr[e.dayIndex] || 0) : 0); }, 0)
         : extraMattressBaseVal;
@@ -5638,8 +5626,41 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
           </tr>
           ` : ''}
 
-          <!-- Discount if applied -->
-          ${discountAmt > 0 ? `
+          <!-- Check-in Trade Discount ("Less Discount") if applied -->
+          ${effectiveCheckinDiscAmt > 0 ? `
+          <tr style="background: transparent;">
+            <td style="padding: 2.2px 6px; font-weight: 400; color: #000; width: ${particularsWidth};">
+              Less Discount ${checkinDisplayPct > 0 ? `(${checkinDisplayPct}%)` : ''}
+            </td>
+            ${dates.map(d => {
+        const entry = entryMap[d];
+        const val = (entry && entry.isRoomNight && entry.dayIndex >= 0) ? dailyCheckinDiscountArr[entry.dayIndex] : 0;
+        return `<td style="padding: 2.2px 6px; text-align: left; font-weight: 400; color: #000; width: ${dateColWidth};">${val > 0 ? `-${val.toFixed(2)}` : '-'}</td>`;
+      }).join('')}
+            <td style="padding: 2.2px 8px; text-align: right; font-weight: 400; color: #000; width: ${totalColWidth}; border-left: 1.5px dashed #000;">
+              - ${blockCheckinDiscount.toFixed(2)}
+            </td>
+          </tr>
+          ` : ''}
+
+          <!-- Checkout Discount ("Other Discount") below Less Discount -->
+          ${effectiveCheckoutDiscAmt > 0 ? `
+          <tr style="background: transparent;">
+            <td style="padding: 2.2px 6px; font-weight: 400; color: #000; width: ${particularsWidth};">
+              Other Discount ${checkoutDisplayPct > 0 ? `(${checkoutDisplayPct}%)` : ''}
+            </td>
+            ${dates.map(d => {
+        const entry = entryMap[d];
+        const val = (entry && entry.isRoomNight && entry.dayIndex >= 0) ? dailyCheckoutDiscountArr[entry.dayIndex] : 0;
+        return `<td style="padding: 2.2px 6px; text-align: left; font-weight: 400; color: #000; width: ${dateColWidth};">${val > 0 ? `-${val.toFixed(2)}` : '-'}</td>`;
+      }).join('')}
+            <td style="padding: 2.2px 8px; text-align: right; font-weight: 400; color: #000; width: ${totalColWidth}; border-left: 1.5px dashed #000;">
+              - ${blockCheckoutDiscount.toFixed(2)}
+            </td>
+          </tr>
+          ` : ''}
+
+          ${(effectiveCheckinDiscAmt <= 0 && effectiveCheckoutDiscAmt <= 0 && discountAmt > 0) ? `
           <tr style="background: transparent;">
             <td style="padding: 2.2px 6px; font-weight: 400; color: #000; width: ${particularsWidth};">
               Less Discount ${discountPct > 0 ? `(${discountPct}%)` : ''}
@@ -6090,25 +6111,10 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
             <div style="width: 360px; font-size: 9.8pt;">
               <table style="width: 100%; border-collapse: collapse; background: transparent;">
                 <tbody>
-                  ${checkoutDiscAmt > 0 ? `
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 700; color: #000;">Total Bill</td>
-                    <td style="padding: 1.5px 0; text-align: right; font-weight: 700; color: #000;">${invoiceTotal.toFixed(2)}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 700; color: #000;">Other Discount</td>
-                    <td style="padding: 1.5px 0; text-align: right; font-weight: 700; color: #000;">- ${checkoutDiscAmt.toFixed(2)}</td>
-                  </tr>
                   <tr>
                     <td style="padding: 1.5px 0; font-weight: 700; color: #000;">Gross Payable Amount</td>
                     <td style="padding: 1.5px 0; text-align: right; font-weight: 700; color: #000;">${grossPayable.toFixed(2)}</td>
                   </tr>
-                  ` : `
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 700; color: #000;">Gross Payable Amount</td>
-                    <td style="padding: 1.5px 0; text-align: right; font-weight: 700; color: #000;">${grossPayable.toFixed(2)}</td>
-                  </tr>
-                  `}
                   ${isOtaPrepaid ? `
                   <tr>
                     <td style="padding: 1.5px 0; font-weight: 700; color: #000;">OTA Pre-Paid Voucher</td>

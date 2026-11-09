@@ -222,20 +222,31 @@ export default function FolioSettlementModal({
                 ? Math.round(folioData.balanceDue)
                 : Math.max(0, Math.round(computedStayBal)))));
 
-  // Gross stay tariff to cap discount
+  // Gross stay tariff and Base Tariff to calculate discount on
   const grossStayTariff = Number(effectiveRoomTariff || 0) + (isOtaPrepaid ? (Number(hotelExtrasChargeVal || 0) + Number(extensionChargeVal || 0)) : Number(effectiveStayTax || 0));
-  const maxAllowableDiscount = Math.max(0, dynamicBalanceDue > 0 ? dynamicBalanceDue : grossStayTariff);
+  const baseTariff = Number(
+    activeStayCalc?.baseRoomTariff ||
+    folioData?.stayCalcNow?.baseRoomTariff ||
+    folioData?.baseRoomTariff ||
+    folioData?.roomTaxable ||
+    effectiveRoomTariff ||
+    0
+  );
+  const maxAllowableDiscount = Math.max(0, dynamicBalanceDue > 0 ? dynamicBalanceDue : (baseTariff > 0 ? baseTariff : grossStayTariff));
 
   let enteredDiscountAmt = 0;
   let enteredDiscountPct = 0;
   const rawDiscountVal = parseFloat(discountValue) || 0;
   if (rawDiscountVal > 0) {
     if (discountType === 'pct') {
-      enteredDiscountPct = Math.min(100, Math.max(0, rawDiscountVal));
-      enteredDiscountAmt = Math.round((maxAllowableDiscount * enteredDiscountPct) / 100);
+      const targetPct = Math.min(100, Math.max(0, rawDiscountVal));
+      const calcAmt = baseTariff > 0 ? Math.round((baseTariff * targetPct) / 100) : Math.round((maxAllowableDiscount * targetPct) / 100);
+      enteredDiscountAmt = Math.min(maxAllowableDiscount, calcAmt);
+      enteredDiscountPct = targetPct;
     } else {
-      enteredDiscountAmt = Math.min(maxAllowableDiscount, Math.max(0, Math.round(rawDiscountVal)));
-      enteredDiscountPct = maxAllowableDiscount > 0 ? Math.round((enteredDiscountAmt / maxAllowableDiscount) * 100) : 0;
+      const calcAmt = Math.max(0, Math.round(rawDiscountVal));
+      enteredDiscountAmt = Math.min(maxAllowableDiscount, calcAmt);
+      enteredDiscountPct = baseTariff > 0 ? Number(((enteredDiscountAmt / baseTariff) * 100).toFixed(1)) : (maxAllowableDiscount > 0 ? Math.round((enteredDiscountAmt / maxAllowableDiscount) * 100) : 0);
     }
   }
 
@@ -244,6 +255,7 @@ export default function FolioSettlementModal({
   const activeDiscountPct = discountApproval.status === 'approved' ? discountApproval.approvedPct : 0;
 
   const balanceDue = Math.max(0, dynamicBalanceDue - activeDiscountAmt);
+  const isDiscountPendingApproval = enteredDiscountAmt > 0 && discountApproval.status !== 'approved';
 
   useEffect(() => {
     // Only reset/initialize form fields when modal transitions from closed to open,
@@ -512,9 +524,9 @@ export default function FolioSettlementModal({
       return;
     }
 
-    if (enteredDiscountAmt > 0 && discountApproval.status !== 'approved') {
-      showToast('⚠️ Discount requires Admin Approval before checkout can proceed.', 'warning', 4500);
-      handleRequestDiscountApproval();
+    if (isDiscountPendingApproval) {
+      showToast(`⚠️ Discount of ${formatCurrency(enteredDiscountAmt)} requires Admin Approval or Password before checkout can proceed.`, 'warning', 4500);
+      setIsAdminPasswordModalOpen(true);
       return;
     }
 
@@ -801,7 +813,7 @@ export default function FolioSettlementModal({
               checkin_discount_amt: folioData.stayCalcNow?.discountAmount ?? folioData.discountAmount ?? folioData.discountAmt ?? 0,
               checkout_discount_amt: activeDiscountAmt,
               discount_amount: activeDiscountAmt,
-              discount_pct: discountType === 'pct' ? (Number(discountValue) || 0) : (activeDiscountAmt > 0 && dynamicBalanceDue > 0 ? Math.round((activeDiscountAmt / dynamicBalanceDue) * 100) : 0),
+              discount_pct: discountType === 'pct' ? (Number(discountValue) || 0) : (activeDiscountAmt > 0 && baseTariff > 0 ? Number(((activeDiscountAmt / baseTariff) * 100).toFixed(1)) : 0),
               discount: activeDiscountAmt,
               cardSurcharge: isRefund ? 0 : cardSurcharge,
               upiTax: isRefund ? 0 : upiTax,
@@ -1280,7 +1292,7 @@ export default function FolioSettlementModal({
                   <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ fontWeight: 800, fontSize: '0.82rem', color: '#334155' }}>
-                        {discountType === 'pct' ? 'Enter %:' : 'Enter Amount (₹):'}
+                        {discountType === 'pct' ? 'Enter % on Base:' : 'Enter Amount (₹):'}
                       </span>
                       <input
                         type="number"
@@ -1306,13 +1318,37 @@ export default function FolioSettlementModal({
                     </div>
 
                     {enteredDiscountAmt > 0 && (
-                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', fontSize: '0.80rem' }}>
-                        <span style={{ color: '#64748b' }}>
-                          Discount: <strong style={{ color: '#dc2626' }}>- {formatCurrency(enteredDiscountAmt)}</strong> ({enteredDiscountPct}%)
-                        </span>
-                        <span style={{ color: '#64748b' }}>
-                          New Balance: <strong style={{ color: '#16a34a' }}>{formatCurrency(Math.max(0, dynamicBalanceDue - enteredDiscountAmt))}</strong>
-                        </span>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        padding: '6px 14px',
+                        background: '#f8fafc',
+                        border: '1.5px solid #e2e8f0',
+                        borderRadius: '10px',
+                        fontSize: '0.82rem',
+                        flexWrap: 'wrap'
+                      }}>
+                        <div>
+                          <span style={{ color: '#64748b', fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 700 }}>Base Tariff: </span>
+                          <strong style={{ color: '#0f172a' }}>{formatCurrency(baseTariff)}</strong>
+                        </div>
+                        <div style={{ borderLeft: '1.5px solid #cbd5e1', paddingLeft: '10px' }}>
+                          <span style={{ color: '#64748b', fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 700 }}>Previous Payable: </span>
+                          <strong style={{ color: '#475569', textDecoration: 'line-through' }}>{formatCurrency(dynamicBalanceDue)}</strong>
+                        </div>
+                        <div style={{ borderLeft: '1.5px solid #cbd5e1', paddingLeft: '10px' }}>
+                          <span style={{ color: '#dc2626', fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 700 }}>
+                            {discountType === 'pct' ? `${enteredDiscountPct}% Discount:` : 'Flat Discount:'}
+                          </span>{' '}
+                          <strong style={{ color: '#dc2626' }}>- {formatCurrency(enteredDiscountAmt)}</strong>
+                        </div>
+                        <div style={{ borderLeft: '1.5px solid #cbd5e1', paddingLeft: '10px' }}>
+                          <span style={{ color: '#16a34a', fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 700 }}>New Payable: </span>
+                          <strong style={{ color: '#16a34a', fontSize: '0.92rem' }}>
+                            {formatCurrency(Math.max(0, dynamicBalanceDue - enteredDiscountAmt))}
+                          </strong>
+                        </div>
                       </div>
                     )}
 
@@ -2227,7 +2263,7 @@ export default function FolioSettlementModal({
                   checkin_discount_amt: folioData.stayCalcNow?.discountAmount ?? folioData.discountAmount ?? folioData.discountAmt ?? 0,
                   checkout_discount_amt: activeDiscountAmt,
                   discount_amount: activeDiscountAmt,
-                  discount_pct: discountType === 'pct' ? (Number(discountValue) || 0) : (activeDiscountAmt > 0 && dynamicBalanceDue > 0 ? Math.round((activeDiscountAmt / dynamicBalanceDue) * 100) : 0),
+                  discount_pct: discountType === 'pct' ? (Number(discountValue) || 0) : (activeDiscountAmt > 0 && baseTariff > 0 ? Number(((activeDiscountAmt / baseTariff) * 100).toFixed(1)) : 0),
                   discount: activeDiscountAmt,
                   cardSurcharge,
                   upiTax,
@@ -2258,18 +2294,24 @@ export default function FolioSettlementModal({
                 fontSize: '1rem',
                 fontWeight: 800,
                 borderRadius: 'var(--radius-md)',
-                background: isCompanyPayingLater ? '#2563eb' : ((isOtaPrepaid && balanceDue === 0) ? '#16a34a' : undefined)
+                background: isDiscountPendingApproval
+                  ? 'linear-gradient(135deg, #d97706 0%, #b45309 100%)'
+                  : (isCompanyPayingLater ? '#2563eb' : ((isOtaPrepaid && balanceDue === 0) ? '#16a34a' : undefined)),
+                cursor: 'pointer',
+                boxShadow: isDiscountPendingApproval ? '0 4px 14px rgba(217, 119, 6, 0.35)' : undefined
               }}
             >
-              🖨️ {isSubmitting
-                ? 'Finalizing...'
-                : (isCompanyPayingLater
-                    ? 'Checkout (Pending BTC — ₹0 Paid)'
-                    : (isOtaPrepaid && balanceDue === 0
-                        ? 'Complete Checkout (Pre-Paid — ₹0 Due)'
-                        : (isOtaPrepaid && balanceDue > 0
-                            ? `Settle F&B & Checkout (${formatCurrency(balanceDue)})`
-                            : 'Finalize Checkout & Print Bill')))}
+              {isDiscountPendingApproval
+                ? `🔒 Approve Discount to Checkout (-${formatCurrency(enteredDiscountAmt)})`
+                : (isSubmitting
+                    ? 'Finalizing...'
+                    : (isCompanyPayingLater
+                        ? 'Checkout (Pending BTC — ₹0 Paid)'
+                        : (isOtaPrepaid && balanceDue === 0
+                            ? 'Complete Checkout (Pre-Paid — ₹0 Due)'
+                            : (isOtaPrepaid && balanceDue > 0
+                                ? `Settle F&B & Checkout (${formatCurrency(balanceDue)})`
+                                : 'Finalize Checkout & Print Bill'))))}
             </button>
           </div>
         </div>

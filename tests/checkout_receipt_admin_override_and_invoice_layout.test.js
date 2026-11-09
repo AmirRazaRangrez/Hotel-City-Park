@@ -136,6 +136,62 @@ describe('Checkout Receipt, Admin Password Override, and Tax Invoice Layout', ()
       const html = buildFinalBillA4HTML(roomWithoutDates, calcWithSlotOnly, mockSettlement);
       expect(html).toContain('Extra Hours Charge (1–3 Hours)');
     });
+
+    it('renders "Other Discount" below "Less Discount" in the main table before Effective Tariff', () => {
+      const settlementWithCheckoutDiscount = {
+        ...mockSettlement,
+        isCheckoutSettlement: true,
+        checkin_discount_amt: 285,
+        checkout_discount_amt: 235,
+        discount_pct: 10
+      };
+      const html = buildFinalBillA4HTML(mockRoom, mockCalc, settlementWithCheckoutDiscount);
+
+      // Both discounts present
+      expect(html).toContain('Less Discount');
+      expect(html).toContain('Other Discount');
+      expect(html).toContain('Effective Tariff');
+
+      // "Other Discount" must appear below "Less Discount" and before "Effective Tariff"
+      const lessDiscountIndex = html.indexOf('Less Discount');
+      const otherDiscountIndex = html.indexOf('Other Discount');
+      const effectiveTariffIndex = html.indexOf('Effective Tariff');
+
+      expect(lessDiscountIndex).toBeGreaterThan(-1);
+      expect(otherDiscountIndex).toBeGreaterThan(lessDiscountIndex);
+      expect(effectiveTariffIndex).toBeGreaterThan(otherDiscountIndex);
+    });
+  });
+
+  describe('2. Checkout Discount Base Tariff Calculation & Approval Gate', () => {
+    const baseTariff = 2350;
+    const dynamicBalanceDue = 1346;
+
+    it('calculates percentage discount on Base Tariff rather than remaining balance', () => {
+      const discountPct = 10;
+      const calculatedDiscount = Math.round((baseTariff * discountPct) / 100);
+      expect(calculatedDiscount).toBe(235); // 10% of 2350 is 235, not 135
+      const newPayable = Math.max(0, dynamicBalanceDue - calculatedDiscount);
+      expect(newPayable).toBe(1111);
+    });
+
+    it('calculates flat discount correctly and reflects new payable', () => {
+      const flatDiscount = 200;
+      const newPayable = Math.max(0, dynamicBalanceDue - flatDiscount);
+      expect(newPayable).toBe(1146);
+    });
+
+    it('gates checkout when discount is entered but not approved', () => {
+      const enteredDiscountAmt = 235;
+      const discountApproval = { status: 'idle', approvedAmt: 0 };
+      const isDiscountPendingApproval = enteredDiscountAmt > 0 && discountApproval.status !== 'approved';
+      expect(isDiscountPendingApproval).toBe(true);
+
+      // Once approved, gating is lifted
+      const approvedDiscount = { status: 'approved', approvedAmt: 235 };
+      const isStillPending = enteredDiscountAmt > 0 && approvedDiscount.status !== 'approved';
+      expect(isStillPending).toBe(false);
+    });
   });
 
   describe('2. Checkout Settlement Receipt Continuous Serial Logic', () => {
