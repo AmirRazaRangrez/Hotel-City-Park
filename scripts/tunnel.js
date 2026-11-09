@@ -39,15 +39,23 @@ function saveRemoteUrl(url) {
     fs.writeFileSync(path.join(rootDir, 'remote_url.txt'), url, 'utf8');
     fs.writeFileSync(path.join(publicDir, 'remote_url.json'), JSON.stringify(payload, null, 2), 'utf8');
     
-    // Also auto-sync waiter panel client.js with the active tunnel URL
-    const waiterClientPath = path.join(rootDir, 'release-electron', 'Hotel City Park CRM-win32-x64', 'waiter-pannel', 'src', 'api', 'client.js');
-    if (fs.existsSync(waiterClientPath)) {
-      let clientContent = fs.readFileSync(waiterClientPath, 'utf8');
-      clientContent = clientContent.replace(/export const CLOUD_TUNNEL_URL = '[^']*';/, `export const CLOUD_TUNNEL_URL = '${url}';`);
-      fs.writeFileSync(waiterClientPath, clientContent, 'utf8');
+    // Auto-sync admin/src/config.ts with the active tunnel URL
+    const adminConfigPath = path.join(rootDir, 'admin', 'src', 'config.ts');
+    if (fs.existsSync(adminConfigPath)) {
+      let cfgContent = fs.readFileSync(adminConfigPath, 'utf8');
+      cfgContent = cfgContent.replace(/export const CLOUD_TUNNEL_URL: string = '[^']*';/, `export const CLOUD_TUNNEL_URL: string = '${url}';`);
+      fs.writeFileSync(adminConfigPath, cfgContent, 'utf8');
+    }
+
+    // Auto-sync admin/dist/remote_url.json if admin dist folder exists
+    const adminDistDir = path.join(rootDir, 'admin', 'dist');
+    if (fs.existsSync(adminDistDir)) {
+      try {
+        fs.writeFileSync(path.join(adminDistDir, 'remote_url.json'), JSON.stringify(payload, null, 2), 'utf8');
+      } catch (_) {}
     }
   } catch (err) {
-    console.warn('Could not save remote_url.txt or update waiter client:', err.message);
+    console.warn('Could not save remote_url.txt or update configs:', err.message);
   }
 
   // Sync active tunnel URL to Firebase Firestore so remote clients (Netlify, Mobile APK, Waiter) stay connected

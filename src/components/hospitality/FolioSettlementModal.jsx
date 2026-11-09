@@ -6,6 +6,7 @@ import { printCashReceipt, printPettyCashVoucher, printFinalBillA4, printGuestRe
 import DocumentScannerModal from '../common/DocumentScannerModal';
 import { compressBase64Image } from '../../utils/imageCompressor';
 import AdminPasswordModal from './AdminPasswordModal';
+import { socketClient } from '../../services/socketClient';
 
 export default function FolioSettlementModal({
   isOpen,
@@ -310,42 +311,64 @@ export default function FolioSettlementModal({
     }
   }, [activeDiscountAmt, balanceDue]);
 
-  // Polling for Admin Approval
+  // Realtime WebSocket & Polling for Instant Admin Approval (Worldwide Mobile & Local)
   useEffect(() => {
     if (discountApproval.status !== 'waiting' || !discountApproval.approvalId) return;
 
     let isMounted = true;
+    const currentRoomNum = String(room?.room_number || folioData?.roomNumber || '').trim();
+
+    const handleApprovalResolved = (status, actionBy) => {
+      if (!isMounted) return;
+      if (status === 'APPROVED') {
+        setDiscountApproval(prev => ({
+          ...prev,
+          status: 'approved',
+          approvedAmt: prev.requestedAmt,
+          approvedPct: prev.requestedPct
+        }));
+        showToast(`✓ Admin APPROVED discount: ₹${discountApproval.requestedAmt} (${discountApproval.requestedPct}%)!`, 'green');
+      } else if (status === 'REJECTED') {
+        setDiscountApproval(prev => ({
+          ...prev,
+          status: 'rejected'
+        }));
+        showToast('✕ Admin REJECTED the discount request.', 'red');
+      }
+    };
+
+    // 1. Instant WebSocket event (<10ms when owner taps Approve on phone)
+    const unsubSocket = socketClient.on('APPROVAL_STATUS_CHANGED', (payload) => {
+      if (!payload) return;
+      const idMatch = String(payload.id || payload.approvalId) === String(discountApproval.approvalId);
+      const roomMatch = currentRoomNum && String(payload.room_number || '').trim() === currentRoomNum;
+      if (idMatch || roomMatch) {
+        handleApprovalResolved(payload.status, payload.action_by);
+      }
+    });
+
+    // 2. Continuous 1-second polling fallback
     const checkStatus = async () => {
       try {
-        const res = await api.get(`/owner/approvals/${discountApproval.approvalId}/status`);
+        const res = await api.get(`/owner/approvals/${discountApproval.approvalId}/status?room=${encodeURIComponent(currentRoomNum)}`);
         if (!isMounted) return;
         if (res && res.status === 'APPROVED') {
-          clearInterval(timer);
-          setDiscountApproval(prev => ({
-            ...prev,
-            status: 'approved',
-            approvedAmt: prev.requestedAmt,
-            approvedPct: prev.requestedPct
-          }));
-          showToast(`✓ Admin APPROVED discount: ₹${discountApproval.requestedAmt} (${discountApproval.requestedPct}%)!`, 'green');
+          handleApprovalResolved('APPROVED', res.approval?.action_by);
         } else if (res && res.status === 'REJECTED') {
-          clearInterval(timer);
-          setDiscountApproval(prev => ({
-            ...prev,
-            status: 'rejected'
-          }));
-          showToast('✕ Admin REJECTED the discount request.', 'red');
+          handleApprovalResolved('REJECTED', res.approval?.action_by);
         }
       } catch (_) {}
     };
 
     checkStatus();
     const timer = setInterval(checkStatus, 1000);
+
     return () => {
       isMounted = false;
       clearInterval(timer);
+      if (typeof unsubSocket === 'function') unsubSocket();
     };
-  }, [discountApproval.status, discountApproval.approvalId, discountApproval.requestedAmt, discountApproval.requestedPct]);
+  }, [discountApproval.status, discountApproval.approvalId, discountApproval.requestedAmt, discountApproval.requestedPct, room?.room_number, folioData?.roomNumber]);
 
   const handleRequestDiscountApproval = async () => {
     if (enteredDiscountAmt <= 0) {

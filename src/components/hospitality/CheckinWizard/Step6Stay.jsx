@@ -6,6 +6,7 @@ import UnifiedTimeInput from '../../common/UnifiedTimeInput';
 import ThemedDatePicker from '../../common/ThemedDatePicker';
 import { useApp } from '../../../context/AppContext';
 import AdminPasswordModal from '../AdminPasswordModal';
+import { socketClient } from '../../../services/socketClient';
 
 export default function Step6Stay({
   room,
@@ -232,29 +233,51 @@ export default function Step6Stay({
     if (discountPermissionModal.status !== 'waiting' || !discountPermissionModal.approvalId) return;
 
     let isMounted = true;
+    const roomNumStr = String(room?.room_number || '').trim();
+
+    const handleApprovalSuccess = () => {
+      if (!isMounted) return;
+      setDiscountPermissionModal(prev => ({ ...prev, status: 'approved' }));
+      setApprovedDiscountPct(discountPermissionModal.requestedPct);
+      const updates = { discountPct: discountPermissionModal.requestedPct };
+      if (discountPermissionModal.requestedPct >= 20) {
+        updates.mealPlan = 'without_breakfast';
+      }
+      updateDraft(updates);
+      showToast(`✓ Admin APPROVED ${discountPermissionModal.requestedPct}% discount for this check-in!`, 'green');
+      setTimeout(() => {
+        if (isMounted) {
+          setDiscountPermissionModal({ isOpen: false, requestedPct: null, status: 'idle', approvalId: null });
+        }
+      }, 600);
+    };
+
+    const handleApprovalReject = () => {
+      if (!isMounted) return;
+      setDiscountPermissionModal(prev => ({ ...prev, status: 'rejected' }));
+      showToast('✕ Admin rejected the discount request.', 'red');
+    };
+
+    // 1. Instant WebSocket push notification
+    const unsubSocket = socketClient.on('APPROVAL_STATUS_CHANGED', (payload) => {
+      if (!payload) return;
+      const idMatch = String(payload.id || payload.approvalId) === String(discountPermissionModal.approvalId);
+      const roomMatch = roomNumStr && String(payload.room_number || '').trim() === roomNumStr;
+      if (idMatch || roomMatch) {
+        if (payload.status === 'APPROVED') handleApprovalSuccess();
+        else if (payload.status === 'REJECTED') handleApprovalReject();
+      }
+    });
+
+    // 2. Continuous 1-second polling fallback
     const checkDiscountStatus = async () => {
       try {
-        const res = await api.get(`/owner/approvals/${discountPermissionModal.approvalId}/status`);
+        const res = await api.get(`/owner/approvals/${discountPermissionModal.approvalId}/status?room=${encodeURIComponent(roomNumStr)}`);
         if (!isMounted) return;
         if (res && res.status === 'APPROVED') {
-          clearInterval(interval);
-          setDiscountPermissionModal(prev => ({ ...prev, status: 'approved' }));
-          setApprovedDiscountPct(discountPermissionModal.requestedPct);
-          const updates = { discountPct: discountPermissionModal.requestedPct };
-          if (discountPermissionModal.requestedPct >= 20) {
-            updates.mealPlan = 'without_breakfast';
-          }
-          updateDraft(updates);
-          showToast(`✓ Admin APPROVED ${discountPermissionModal.requestedPct}% discount for this check-in!`, 'green');
-          setTimeout(() => {
-            if (isMounted) {
-              setDiscountPermissionModal({ isOpen: false, requestedPct: null, status: 'idle', approvalId: null });
-            }
-          }, 600);
+          handleApprovalSuccess();
         } else if (res && res.status === 'REJECTED') {
-          clearInterval(interval);
-          setDiscountPermissionModal(prev => ({ ...prev, status: 'rejected' }));
-          showToast('✕ Admin rejected the discount request.', 'red');
+          handleApprovalReject();
         }
       } catch (err) {
         // silent retry
@@ -267,8 +290,9 @@ export default function Step6Stay({
     return () => {
       isMounted = false;
       clearInterval(interval);
+      if (typeof unsubSocket === 'function') unsubSocket();
     };
-  }, [discountPermissionModal.status, discountPermissionModal.approvalId, discountPermissionModal.requestedPct]);
+  }, [discountPermissionModal.status, discountPermissionModal.approvalId, discountPermissionModal.requestedPct, room?.room_number]);
 
 
   const handleMemberDocUpload = async (field, file) => {

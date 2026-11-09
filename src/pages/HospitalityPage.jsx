@@ -10,6 +10,7 @@ import AdvanceBookingModal from '../components/hospitality/AdvanceBookingModal';
 import OccupancyChartModal from '../components/hospitality/OccupancyChartModal';
 import CashHandoverModal from '../components/hospitality/CashHandoverModal';
 import AdminPasswordModal from '../components/hospitality/AdminPasswordModal';
+import { socketClient } from '../services/socketClient';
 import { formatCurrency } from '../utils/formatters';
 
 const FLOOR_ORDER = [
@@ -482,43 +483,61 @@ export default function HospitalityPage({ onStartCheckin, onOpenFolio, onOpenVis
     }
   };
 
-  // Polling for Admin Approval on cross-category shift (instant 1-second check)
+  // Realtime WebSocket & Polling for Admin Approval on cross-category shift (instant check)
   useEffect(() => {
     if (transferConfirmData?.approvalStatus !== 'waiting' || !transferConfirmData?.approvalId) return;
 
     let isMounted = true;
+    const fromNum = transferConfirmData.sourceRoom?.room_number || '';
+    const toNum = transferConfirmData.targetRoom?.room_number || '';
+    const toType = transferConfirmData.targetRoom?.room_type || '';
+
+    const handleApproved = async () => {
+      if (!isMounted) return;
+      setTransferConfirmData(null);
+      setIsTransferMode(false);
+      setTransferSourceRoom(null);
+      setDropTargetRoomId(null);
+
+      await loadRooms(true);
+      if (loadStats) loadStats();
+
+      showToast(
+        `✓ Admin APPROVED! Room #${fromNum} shifted to Room #${toNum} (${toType}). Check-in rates preserved.`,
+        'green',
+        5000
+      );
+    };
+
+    const handleRejected = () => {
+      if (!isMounted) return;
+      setTransferConfirmData(null);
+      setIsTransferMode(false);
+      setTransferSourceRoom(null);
+      setDropTargetRoomId(null);
+      showToast('✕ Admin REJECTED the room shift request.', 'error', 4500);
+    };
+
+    // 1. Instant WebSocket event (<10ms)
+    const unsubSocket = socketClient.on('APPROVAL_STATUS_CHANGED', (payload) => {
+      if (!payload) return;
+      const idMatch = String(payload.id || payload.approvalId) === String(transferConfirmData.approvalId);
+      const roomMatch = fromNum && String(payload.room_number || '').trim() === String(fromNum).trim();
+      if (idMatch || roomMatch) {
+        if (payload.status === 'APPROVED') handleApproved();
+        else if (payload.status === 'REJECTED') handleRejected();
+      }
+    });
+
+    // 2. Continuous 1-second polling fallback
     const checkStatus = async () => {
       try {
-        const res = await api.get(`/owner/approvals/${transferConfirmData.approvalId}/status`);
+        const res = await api.get(`/owner/approvals/${transferConfirmData.approvalId}/status?room=${encodeURIComponent(fromNum)}`);
         if (!isMounted) return;
         if (res && res.status === 'APPROVED') {
-          clearInterval(interval);
-          const fromNum = transferConfirmData.sourceRoom?.room_number || '';
-          const toNum = transferConfirmData.targetRoom?.room_number || '';
-          const toType = transferConfirmData.targetRoom?.room_type || '';
-
-          // DIRECT CLOSE: Immediately close modal and reset shift mode
-          setTransferConfirmData(null);
-          setIsTransferMode(false);
-          setTransferSourceRoom(null);
-          setDropTargetRoomId(null);
-
-          // DIRECT REFRESH: Immediately show the shifted room on screen
-          await loadRooms(true);
-          if (loadStats) loadStats();
-
-          showToast(
-            `✓ Admin APPROVED! Room #${fromNum} shifted to Room #${toNum} (${toType}). Check-in rates preserved.`,
-            'green',
-            5000
-          );
+          handleApproved();
         } else if (res && res.status === 'REJECTED') {
-          clearInterval(interval);
-          setTransferConfirmData(null);
-          setIsTransferMode(false);
-          setTransferSourceRoom(null);
-          setDropTargetRoomId(null);
-          showToast('✕ Admin REJECTED the room shift request.', 'error', 4500);
+          handleRejected();
         }
       } catch (err) {
         // silent retry
@@ -532,8 +551,9 @@ export default function HospitalityPage({ onStartCheckin, onOpenFolio, onOpenVis
     return () => {
       isMounted = false;
       clearInterval(interval);
+      if (typeof unsubSocket === 'function') unsubSocket();
     };
-  }, [transferConfirmData?.approvalStatus, transferConfirmData?.approvalId]);
+  }, [transferConfirmData?.approvalStatus, transferConfirmData?.approvalId, transferConfirmData?.sourceRoom, transferConfirmData?.targetRoom]);
 
   return (
     <section className="panel-view active" id="view-hospitality">

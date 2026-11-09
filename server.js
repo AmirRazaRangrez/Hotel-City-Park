@@ -17227,26 +17227,42 @@ app.post('/api/owner/approvals/request', (req, res) => {
 // Check Status of an Approval Request (Polled by CRM Check-In Dialog & Hospitality Shift)
 app.get('/api/owner/approvals/:id/status', async (req, res) => {
   try {
-    let approval = db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(req.params.id);
+    const cleanId = String(req.params.id || '').replace(/^APP-/, '').trim();
+    let approval = db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(cleanId);
+    if (!approval && req.query.room) {
+      approval = db.prepare('SELECT * FROM owner_approvals WHERE room_number = ? ORDER BY id DESC LIMIT 1').get(String(req.query.room));
+    }
     if (!approval) return res.status(404).json({ success: false, error: 'Approval request not found' });
+
+    // If pending, check if another approval request for the same room & type was already approved!
+    if (approval.status === 'PENDING' && approval.room_number) {
+      const roomApproved = db.prepare(`
+        SELECT * FROM owner_approvals
+        WHERE room_number = ? AND type = ? AND status = 'APPROVED'
+        ORDER BY id DESC LIMIT 1
+      `).get(approval.room_number, approval.type);
+      if (roomApproved) {
+        approval = notificationService.updateApprovalStatus(approval.id, 'APPROVED', roomApproved.action_by || 'Admin', roomApproved.action_reason || '');
+      }
+    }
 
     // If still pending locally, check Firebase Firestore on-demand for instant approval adoption!
     if (approval.status === 'PENDING') {
       try {
-        const cloudDoc = await firebaseService.fetchApprovalStatusFromCloud(req.params.id);
+        const cloudDoc = await firebaseService.fetchApprovalStatusFromCloud(cleanId);
         const cloudStatus = (cloudDoc?.status || '').toLowerCase();
         if (cloudStatus === 'approved' || cloudStatus === 'rejected') {
           const newStatus = cloudStatus.toUpperCase();
           const settledBy = cloudDoc?.settled_by || 'Admin';
-          approval = notificationService.updateApprovalStatus(req.params.id, newStatus, settledBy, cloudDoc?.action_reason || '');
-          console.log(`⚡ [On-Demand Cloud Check] Approved Request #${req.params.id} via Firebase Firestore!`);
+          approval = notificationService.updateApprovalStatus(cleanId, newStatus, settledBy, cloudDoc?.action_reason || '');
+          console.log(`⚡ [On-Demand Cloud Check] Approved Request #${cleanId} via Firebase Firestore!`);
         }
       } catch (cloudErr) {
         // Fallback to Supabase if needed
         try {
           if (typeof supabaseService.pollCloudApprovals === 'function') {
             await supabaseService.pollCloudApprovals(db);
-            approval = db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(req.params.id);
+            approval = db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(cleanId);
           }
         } catch (_) {}
       }
@@ -17261,7 +17277,8 @@ app.get('/api/owner/approvals/:id/status', async (req, res) => {
 // Approve Request
 app.post('/api/owner/approvals/:id/approve', (req, res) => {
   try {
-    const updated = notificationService.updateApprovalStatus(req.params.id, 'APPROVED', req.body.action_by || 'Admin');
+    const cleanId = String(req.params.id || '').replace(/^APP-/, '').trim();
+    const updated = notificationService.updateApprovalStatus(cleanId, 'APPROVED', req.body.action_by || 'Admin');
     if (!updated) return res.status(404).json({ success: false, error: 'Approval request not found' });
     res.json({ success: true, message: 'Discount Approved', approval: updated });
   } catch (err) {
@@ -17272,7 +17289,8 @@ app.post('/api/owner/approvals/:id/approve', (req, res) => {
 // Reject Request
 app.post('/api/owner/approvals/:id/reject', (req, res) => {
   try {
-    const updated = notificationService.updateApprovalStatus(req.params.id, 'REJECTED', req.body.action_by || 'Admin', req.body.reason || '');
+    const cleanId = String(req.params.id || '').replace(/^APP-/, '').trim();
+    const updated = notificationService.updateApprovalStatus(cleanId, 'REJECTED', req.body.action_by || 'Admin', req.body.reason || '');
     if (!updated) return res.status(404).json({ success: false, error: 'Approval request not found' });
     res.json({ success: true, message: 'Discount Rejected', approval: updated });
   } catch (err) {

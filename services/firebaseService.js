@@ -515,6 +515,25 @@ async function syncApprovalRequestToCloud(req) {
   }
 }
 
+async function updateApprovalInCloud(id, status, settledBy = 'Admin') {
+  if (!id) return;
+  try {
+    const docId = String(id).startsWith('APP-') ? String(id) : `APP-${id}`;
+    const payload = {
+      status: String(status || '').toLowerCase(),
+      settled_by: settledBy,
+      updated_at: new Date().toISOString()
+    };
+    if (firestore) {
+      try {
+        await withTimeout(firestore.collection('room_charges_inbox').doc(docId).set(payload, { merge: true }), 3000);
+        return;
+      } catch (_) {}
+    }
+    await writeFirestoreRest('room_charges_inbox', docId, payload);
+  } catch (_) {}
+}
+
 async function syncLiveFBStateToCloud(state) {
   if (!firestore || !state) return;
   try {
@@ -2278,6 +2297,7 @@ module.exports = {
   syncCheckoutToCloud,
   syncRecentCheckoutsToCloud,
   syncApprovalRequestToCloud,
+  updateApprovalInCloud,
   fetchApprovalStatusFromCloud,
   pollCloudApprovals,
   syncLiveFBStateToCloud,

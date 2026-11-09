@@ -932,22 +932,46 @@ function createApprovalRequest({
       : { room_count: derivedRoomCount, rooms_list, members, expected_checkout, meal_plan, requested_by };
     const metaStr = JSON.stringify(metaObj);
 
-    const info = db.prepare(`
-      INSERT INTO owner_approvals (
-        type, dept, bill_id, bill_number, guest_name, room_number,
-        members, expected_checkout, meal_plan, discount, discount_pct, current_total, final_amount,
-        requested_by, reason, status, metadata
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
-    `).run(
-      type, dept, bill_id ? String(bill_id) : null, bill_number || '', guest_name || '',
-      room_number ? String(room_number) : '', String(members || ''), String(expected_checkout || ''),
-      String(meal_plan || ''),
-      Number(discount) || 0, Number(discount_pct) || 0,
-      Number(current_total) || 0, Number(final_amount) || 0, requested_by || 'Front Desk', reason || '',
-      metaStr
-    );
+    const cleanRoom = room_number ? String(room_number).trim() : '';
 
-    const id = info.lastInsertRowid;
+    // Smart Request Deduplication: Check if there is already an active PENDING request for this room & type
+    let id;
+    const existingPending = cleanRoom ? db.prepare(`
+      SELECT id FROM owner_approvals
+      WHERE room_number = ? AND type = ? AND status = 'PENDING'
+      ORDER BY id DESC LIMIT 1
+    `).get(cleanRoom, type) : null;
+
+    if (existingPending) {
+      id = existingPending.id;
+      db.prepare(`
+        UPDATE owner_approvals
+        SET discount = ?, discount_pct = ?, current_total = ?, final_amount = ?,
+            requested_by = ?, reason = ?, metadata = ?
+        WHERE id = ?
+      `).run(
+        Number(discount) || 0, Number(discount_pct) || 0,
+        Number(current_total) || 0, Number(final_amount) || 0,
+        requested_by || 'Front Desk', reason || '',
+        metaStr, id
+      );
+    } else {
+      const info = db.prepare(`
+        INSERT INTO owner_approvals (
+          type, dept, bill_id, bill_number, guest_name, room_number,
+          members, expected_checkout, meal_plan, discount, discount_pct, current_total, final_amount,
+          requested_by, reason, status, metadata
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+      `).run(
+        type, dept, bill_id ? String(bill_id) : null, bill_number || '', guest_name || '',
+        cleanRoom, String(members || ''), String(expected_checkout || ''),
+        String(meal_plan || ''),
+        Number(discount) || 0, Number(discount_pct) || 0,
+        Number(current_total) || 0, Number(final_amount) || 0, requested_by || 'Front Desk', reason || '',
+        metaStr
+      );
+      id = info.lastInsertRowid;
+    }
 
     // Sync to Firebase & Supabase cloud immediately so Admin phone on 5G / outside WiFi can see and approve it!
     try {
@@ -1232,21 +1256,57 @@ function executeRoomTransferFromApproval(approval, user = 'Admin') {
 
 function updateApprovalStatus(id, newStatus, user = 'Admin', reason = '') {
   try {
-    const existing = db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(id);
+    const cleanId = String(id || '').replace(/^APP-/, '').trim();
+    const existing = db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(cleanId);
     if (!existing) return null;
 
     db.prepare(`
       UPDATE owner_approvals
       SET status = ?, action_by = ?, action_at = CURRENT_TIMESTAMP, action_reason = ?
       WHERE id = ?
-    `).run(newStatus, user, reason, id);
+    `).run(newStatus, user, reason, cleanId);
+
+    // Smart Room Deduplication: Also update all other pending requests for the same room & type!
+    if (existing.room_number) {
+      try {
+        db.prepare(`
+          UPDATE owner_approvals
+          SET status = ?, action_by = ?, action_at = CURRENT_TIMESTAMP, action_reason = ?
+          WHERE room_number = ? AND type = ? AND status = 'PENDING'
+        `).run(newStatus, user, reason, existing.room_number, existing.type);
+      } catch (_) {}
+    }
 
     // If approved and this was a room_transfer, immediately execute the room shift!
     if (newStatus === 'APPROVED' && existing.type === 'room_transfer') {
       executeRoomTransferFromApproval(existing, user);
     }
 
-    return db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(id);
+    // Instant WebSocket broadcast to all active CRM screens (Checkin, Checkout, Transfer)
+    try {
+      const socketServer = require('./socketServer');
+      socketServer.broadcast('APPROVAL_STATUS_CHANGED', {
+        id: existing.id,
+        approvalId: existing.id,
+        status: newStatus,
+        type: existing.type,
+        room_number: existing.room_number,
+        discount: existing.discount,
+        discount_pct: existing.discount_pct,
+        action_by: user,
+        action_reason: reason
+      });
+    } catch (_) {}
+
+    // Cloud sync: update status in Firebase doc so cloud reflects it too
+    try {
+      const firebaseService = require('./firebaseService');
+      if (typeof firebaseService.updateApprovalInCloud === 'function') {
+        firebaseService.updateApprovalInCloud(cleanId, newStatus, user);
+      }
+    } catch (_) {}
+
+    return db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(cleanId);
   } catch (err) {
     console.error('[NotificationService] updateApprovalStatus error:', err);
     throw err;
