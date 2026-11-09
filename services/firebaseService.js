@@ -17,6 +17,63 @@ const fs = require('fs');
 let admin = null;
 let firestore = null;
 
+const FIREBASE_REST_URL = 'https://firestore.googleapis.com/v1/projects/hotelcitypark-crm/databases/(default)/documents';
+const FIREBASE_API_KEY = 'AIzaSyCtZnkdk1_q8rWrISnD8P2Rhi-jcPn1QTI';
+
+function parseFirestoreDoc(doc) {
+  if (!doc) return null;
+  const fields = doc.fields || {};
+  const res = { id: doc.name ? doc.name.split('/').pop() : '' };
+  for (const [k, v] of Object.entries(fields)) {
+    if (v.stringValue !== undefined) res[k] = v.stringValue;
+    else if (v.doubleValue !== undefined) res[k] = Number(v.doubleValue);
+    else if (v.integerValue !== undefined) res[k] = Number(v.integerValue);
+    else if (v.booleanValue !== undefined) res[k] = v.booleanValue;
+    else if (v.timestampValue !== undefined) res[k] = v.timestampValue;
+  }
+  return res;
+}
+
+async function writeFirestoreRest(collection, docId, fields) {
+  try {
+    const url = `${FIREBASE_REST_URL}/${collection}/${docId}?key=${FIREBASE_API_KEY}`;
+    const restFields = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (typeof v === 'number') restFields[k] = { doubleValue: v };
+      else if (typeof v === 'boolean') restFields[k] = { booleanValue: v };
+      else restFields[k] = { stringValue: String(v ?? '') };
+    }
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 4000) : null;
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: restFields }),
+      signal: controller?.signal
+    });
+    if (timeout) clearTimeout(timeout);
+    return res.ok;
+  } catch (err) {
+    console.warn(`[Firebase REST] Write ${collection}/${docId} error:`, err.message);
+    return false;
+  }
+}
+
+async function readFirestoreRest(collection, docId) {
+  try {
+    const url = `${FIREBASE_REST_URL}/${collection}/${docId}?key=${FIREBASE_API_KEY}`;
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 3000) : null;
+    const res = await fetch(url, { signal: controller?.signal });
+    if (timeout) clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return parseFirestoreDoc(data);
+  } catch (err) {
+    return null;
+  }
+}
+
 try {
   admin = require('firebase-admin');
   const { getFirestore } = require('firebase-admin/firestore');
@@ -419,7 +476,7 @@ async function syncCheckoutToCloud(checkoutData) {
 }
 
 async function syncApprovalRequestToCloud(req) {
-  if (!firestore || !req) return;
+  if (!req) return;
   try {
     const docId = `APP-${req.id || req.approval_id || Date.now()}`;
     const payload = {
@@ -437,7 +494,22 @@ async function syncApprovalRequestToCloud(req) {
       updated_at: new Date().toISOString()
     };
 
-    await withTimeout(firestore.collection('room_charges_inbox').doc(docId).set(payload, { merge: true }));
+    let synced = false;
+    if (firestore) {
+      try {
+        await withTimeout(firestore.collection('room_charges_inbox').doc(docId).set(payload, { merge: true }), 3000);
+        synced = true;
+      } catch (err) {
+        console.warn('[Firebase SDK] syncApprovalRequestToCloud error, falling back to REST:', err.message);
+      }
+    }
+
+    if (!synced) {
+      synced = await writeFirestoreRest('room_charges_inbox', docId, payload);
+      if (synced) {
+        console.log(`⚡ [Firebase REST] Synced approval request #${docId} to cloud.`);
+      }
+    }
   } catch (err) {
     console.warn('[Firebase] syncApprovalRequestToCloud error:', err.message);
   }
@@ -2088,47 +2160,75 @@ function setupRealtimeListeners(db, onNewPendingOrder = null) {
 }
 
 async function fetchApprovalStatusFromCloud(id) {
-  if (!firestore || !id) return null;
-  try {
-    const docId = String(id).startsWith('APP-') ? String(id) : 'APP-' + id;
-    const docSnap = await withTimeout(firestore.collection('room_charges_inbox').doc(docId).get(), 2000);
-    if (docSnap && docSnap.exists) {
-      return docSnap.data();
+  if (!id) return null;
+  const docId = String(id).startsWith('APP-') ? String(id) : 'APP-' + id;
+  if (firestore) {
+    try {
+      const docSnap = await withTimeout(firestore.collection('room_charges_inbox').doc(docId).get(), 2000);
+      if (docSnap && docSnap.exists) {
+        return docSnap.data();
+      }
+    } catch (err) {
+      // SDK failed, fall back to REST
     }
-  } catch (err) {
-    // silent fallback
   }
-  return null;
+  return await readFirestoreRest('room_charges_inbox', docId);
 }
 
 async function pollCloudApprovals(db) {
-  if (!firestore || !db) return;
-  try {
-    const snap = await withTimeout(
-      firestore.collection('room_charges_inbox')
-        .where('department', '==', 'discount_approval')
-        .get(),
-      3000
-    );
-    if (!snap || snap.empty) return;
-    const notificationService = require('./notificationService');
-    snap.forEach(doc => {
-      const data = doc.data() || {};
-      const st = String(data.status || '').toLowerCase();
-      if (st === 'approved' || st === 'rejected') {
-        const rawId = String(doc.id).replace(/^APP-/, '');
-        const approvalId = !isNaN(Number(rawId)) ? Number(rawId) : rawId;
-        if (approvalId) {
-          const existing = db.prepare('SELECT status FROM owner_approvals WHERE id = ?').get(approvalId);
-          if (existing && existing.status === 'PENDING') {
-            notificationService.updateApprovalStatus(approvalId, st.toUpperCase(), data.settled_by || 'Admin', data.action_reason || '');
-            console.log(`[Firebase Heartbeat] Adopted approval #${approvalId} -> ${st.toUpperCase()}`);
+  if (!db) return;
+  const notificationService = require('./notificationService');
+  let docs = [];
+
+  if (firestore) {
+    try {
+      const snap = await withTimeout(
+        firestore.collection('room_charges_inbox')
+          .where('department', '==', 'discount_approval')
+          .get(),
+        3000
+      );
+      if (snap && !snap.empty) {
+        snap.forEach(doc => {
+          docs.push({ id: doc.id, ...doc.data() });
+        });
+      }
+    } catch (_) {}
+  }
+
+  if (docs.length === 0) {
+    // REST API fallback for listing
+    try {
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), 3500) : null;
+      const res = await fetch(`${FIREBASE_REST_URL}/room_charges_inbox?pageSize=100&key=${FIREBASE_API_KEY}`, { signal: controller?.signal });
+      if (timer) clearTimeout(timer);
+      if (res.ok) {
+        const body = await res.json();
+        const rawDocs = body.documents || [];
+        for (const rd of rawDocs) {
+          const parsed = parseFirestoreDoc(rd);
+          if (parsed && parsed.department === 'discount_approval') {
+            docs.push(parsed);
           }
         }
       }
-    });
-  } catch (err) {
-    // silent
+    } catch (_) {}
+  }
+
+  for (const data of docs) {
+    const st = String(data.status || '').toLowerCase();
+    if (st === 'approved' || st === 'rejected') {
+      const rawId = String(data.id || '').replace(/^APP-/, '');
+      const approvalId = !isNaN(Number(rawId)) ? Number(rawId) : rawId;
+      if (approvalId) {
+        const existing = db.prepare('SELECT status FROM owner_approvals WHERE id = ?').get(approvalId);
+        if (existing && existing.status === 'PENDING') {
+          notificationService.updateApprovalStatus(approvalId, st.toUpperCase(), data.settled_by || 'Admin', data.action_reason || '');
+          console.log(`[Firebase Heartbeat] Adopted approval #${approvalId} -> ${st.toUpperCase()}`);
+        }
+      }
+    }
   }
 }
 
