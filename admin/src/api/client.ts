@@ -571,24 +571,18 @@ editBill:(dept:string,id:any,body:any)=>owner(()=>http.put(`/owner/bills/${dept.
           history: list.filter((x: any) => (x.status || 'PENDING').toUpperCase() !== 'PENDING')
         };
       }
-    } catch {}
-
-    // Fallback to Cloud (works everywhere: 5G, 4G, remote)
-    try {
-      const cloud: any = await fetchSupabaseApprovals();
-      if (cloud && (Array.isArray(cloud.pending) || Array.isArray(cloud.history))) {
-        if ((cloud.pending && cloud.pending.length > 0) || (cloud.history && cloud.history.length > 0)) {
+    } catch (httpErr) {
+      try {
+        const cloud: any = await fetchSupabaseApprovals();
+        if (cloud && (Array.isArray(cloud.pending) || Array.isArray(cloud.history))) {
           return cloud;
         }
-      } else if (Array.isArray(cloud) && cloud.length > 0) {
-        return {
-          pending: cloud.filter((x: any) => (x.status || 'PENDING').toUpperCase() === 'PENDING'),
-          history: cloud.filter((x: any) => (x.status || 'PENDING').toUpperCase() !== 'PENDING')
-        };
+      } catch (cloudErr: any) {
+        throw new Error(cloudErr?.message || (httpErr as any)?.message || 'Owner approvals could not be loaded.');
       }
-    } catch {}
-
-    return derived.approvals();
+      throw new Error((httpErr as any)?.message || 'Owner approvals could not be loaded.');
+    }
+    throw new Error('Owner approvals could not be loaded. Pending discounts stay hidden until the CRM responds.');
   },
   approve: async (id: any) => {
     const rawId = String(id || '').replace(/^APP-/, '').trim();
@@ -615,7 +609,23 @@ editBill:(dept:string,id:any,body:any)=>owner(()=>http.put(`/owner/bills/${dept.
     return { success: true };
   },
  activity:(type='all')=>ownerOr(()=>owner(()=>http.get('/owner/activity',{params:{type}}).then(r=>arr(r.data))),()=>derived.activity(type)),
- notifications:()=>ownerOr(()=>owner(()=>http.get('/owner/notifications').then(r=>arr(r.data))),derived.notifications),
+ notifications: async () => {
+    const res = await http.get('/owner/notifications');
+    const d = res.data;
+    const list = Array.isArray(d) ? d : (Array.isArray(d?.notifications) ? d.notifications : (Array.isArray(d?.data) ? d.data : null));
+    if (!Array.isArray(list)) {
+      throw new Error('Owner notifications could not be loaded from the CRM.');
+    }
+    return list.map((n: any) => ({
+      ...n,
+      id: n.id,
+      type: n.type,
+      title: n.title,
+      body: n.body,
+      created_at: n.created_at,
+      read: n.read === true || n.read === 1 || n.is_read === 1 || n.is_read === true
+    }));
+  },
  markRead:(id?:any)=>ownerRoutes===false?derived.markRead(id):owner(()=>http.post(id?`/owner/notifications/${id}/read`:'/owner/notifications/read-all').then(r=>r.data)).catch(()=>derived.markRead(id)),
  pushToken: async (token: string) => {
     if (!token || typeof token !== 'string') return null;
@@ -626,20 +636,25 @@ editBill:(dept:string,id:any,body:any)=>owner(()=>http.put(`/owner/bills/${dept.
       await AsyncStorage.setItem('owner_device_push_token', cleanToken);
     } catch {}
 
-    // 1. Try local CRM server if reachable
-    http.post('/owner/push-token', { token: cleanToken, platform: Platform.OS }).catch(() => null);
-
-    // 2. Direct Cloud Registration to Firebase 'owner_devices' (Works everywhere: 4G, 5G, or any Wi-Fi)
-    try {
-      await fb.registerDeviceToken(cleanToken);
-      return { success: true, cloud: true };
-    } catch (cloudErr: any) {
-      console.warn('[PushToken] Firebase cloud registration failed:', cloudErr?.message);
-      return null;
+    const res = await http.post('/owner/push-token', { token: cleanToken, platform: Platform.OS });
+    if (!res?.data?.success) {
+      throw new Error(res?.data?.error || 'Owner phone was not registered on the CRM.');
     }
+    let cloud = false;
+    try {
+      cloud = await fb.registerDeviceToken(cleanToken);
+    } catch (cloudErr: any) {
+      console.warn('[PushToken] Firebase registration failed. CRM token is saved:', cloudErr?.message);
+    }
+    return { success: true, crm: true, cloud };
   },
   sendTestPush: async () => {
-    return fb.sendTestPush();
+    const res = await http.post('/owner/test-push', {});
+    const delivered = Number(res?.data?.delivered || 0);
+    if (!res?.data?.success || delivered < 1) {
+      return { success: false, delivered, error: res?.data?.error || 'Owner phone was not notified.' };
+    }
+    return { success: true, delivered };
   },
  storeBills: async (status: 'live' | 'history' | 'all' = 'all') => {
   try {

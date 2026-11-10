@@ -1774,10 +1774,14 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                           },
                           settlement: {
                             settleAmt: detailBooking.final_settlement_payment || detailBooking.final_settle_amount || 0,
+                            targetNetPayable: detailBooking.final_settlement_payment !== undefined && detailBooking.final_settlement_payment !== null ? Number(detailBooking.final_settlement_payment) : undefined,
                             refundAmt: detailBooking.refund_amount || 0,
                             settled_at: detailBooking.actual_checkout_time || detailBooking.checkout_time || new Date(),
                             discount_amount: activeCalc?.discountAmount ?? detailBooking.discount_amount ?? 0,
                             discount_pct: activeCalc?.discountPct ?? detailBooking.discount_pct ?? 0,
+                            checkin_discount_amt: activeCalc?.discountAmount ?? detailBooking.discount_amount ?? 0,
+                            checkout_discount_amt: Number(detailBooking.checkout_discount_amount || 0),
+                            isCheckoutSettlement: Boolean(detailBooking.checkout_discount_amount > 0 || detailBooking.status === 'checked_out'),
                             invoiceNo: detailBooking.invoice_no || formatTaxInvoiceNumber(detailBooking.voucher_number || detailBooking.voucher_no || detailBooking.checkin_voucher_no || detailBooking.id),
                             checked_out_by: detailBooking.checked_out_by || (currentUser ? (currentUser.full_name || currentUser.username) : 'Cashier_1')
                           }
@@ -2533,6 +2537,66 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                                 const isRefundRow = p.payment_type === 'refund' || (p.notes && p.notes.toLowerCase().includes('refund')) || (p.amount < 0);
                                 const isPrepaidZeroRow = isDetailPrepaid && Number(p.amount) === 0 && !isRefundRow;
                                 const pMode = isPrepaidZeroRow ? 'PREPAID' : (p.payment_mode || 'CASH');
+                                const payType = String(p.payment_type || '').toLowerCase();
+                                const payNotes = String(p.notes || '').toLowerCase();
+                                const isAdvanceBookingPay = payType === 'advance_booking' || payType === 'prebooking' || payNotes.includes('pre-booking') || payNotes.includes('advance booking') || payNotes.includes('advance pre-booking');
+                                const isCheckinPay = !isAdvanceBookingPay && (payType === 'advance' || payType === 'checkin' || payNotes.includes('checkin') || payNotes.includes('check-in'));
+                                const isSettlementPay = payType === 'bill_settlement' || payType === 'settlement' || payType === 'final_settlement' || payType === 'checkout';
+                                const paymentStage = isSettlementPay ? 'checkout' : (isAdvanceBookingPay ? 'advance_booking' : (isCheckinPay ? 'checkin' : 'living'));
+                                const stageLabel = isSettlementPay
+                                  ? 'Paid While Checkout'
+                                  : (isAdvanceBookingPay ? 'Paid For Advance Booking' : (isCheckinPay ? 'Paid For CheckIn' : 'Paid While Living'));
+                                const stageDescription = `Room ${detailBooking.room_number} - ${stageLabel}`;
+                                const receiptSerial = (p.receipt_no && !String(p.receipt_no).includes('/') && /^(CR|UPI|POS|CHQ|BTC)\d+/i.test(p.receipt_no))
+                                  ? p.receipt_no
+                                  : ((p.payment_mode || '').toLowerCase().includes('upi') || (p.payment_mode || '').toLowerCase().includes('online')
+                                    ? 'UPI01'
+                                    : ((p.payment_mode || '').toLowerCase().includes('card') ? 'POS01' : ((p.payment_mode || '').toLowerCase().includes('cheque') ? 'CHQ01' : 'CR01')));
+                                const cardFee = Number(p.card_surcharge || p.cardSurcharge || 0);
+                                const upiFee = Number(p.upi_tax || p.upiTax || 0);
+                                const rawAmt = Number(p.amount) || 0;
+                                let baseAmt = Number(p.base_amount);
+                                const pModeLower = (p.payment_mode || '').toLowerCase();
+                                if (!baseAmt || isNaN(baseAmt)) {
+                                  if (Number(p.split_card) > 0 && (pModeLower.includes('card') || pModeLower.includes('pos'))) baseAmt = Number(p.split_card);
+                                  else if (Number(p.split_online) > 0 && (pModeLower.includes('upi') || pModeLower.includes('online'))) baseAmt = Number(p.split_online);
+                                  else if (Number(p.split_cash) > 0 && pModeLower.includes('cash')) baseAmt = Number(p.split_cash);
+                                  else if (cardFee > 0 && rawAmt > cardFee) baseAmt = rawAmt - cardFee;
+                                  else if (upiFee > 0 && rawAmt > upiFee) baseAmt = rawAmt - upiFee;
+                                  else baseAmt = rawAmt;
+                                } else if (baseAmt === rawAmt && cardFee > 0 && rawAmt > cardFee) {
+                                  baseAmt = rawAmt - cardFee;
+                                } else if (baseAmt === rawAmt && upiFee > 0 && rawAmt > upiFee) {
+                                  baseAmt = rawAmt - upiFee;
+                                }
+                                const entireAmt = rawAmt > 0 && rawAmt >= (baseAmt + cardFee + upiFee) ? rawAmt : (baseAmt + cardFee + upiFee);
+                                const historyReceipt = {
+                                  receipt_no: receiptSerial,
+                                  voucher_number: detailBooking.voucher_number || detailBooking.voucherNumber,
+                                  receipt_date: p.created_at,
+                                  guest_name: detailBooking.guest_name,
+                                  amount: entireAmt,
+                                  base_amount: baseAmt,
+                                  card_surcharge: cardFee,
+                                  upi_tax: upiFee,
+                                  payment_mode: p.payment_mode,
+                                  payment_type: isAdvanceBookingPay ? 'advance_booking' : (p.payment_type || ''),
+                                  notes: p.notes || '',
+                                  is_prebooked: isAdvanceBookingPay,
+                                  split_cash: p.split_cash,
+                                  split_online: p.split_online,
+                                  split_card: p.split_card,
+                                  split_cheque: p.split_cheque,
+                                  utr_number: p.utr_number,
+                                  cheque_no: p.cheque_no,
+                                  bank_name: p.bank_name,
+                                  room_numbers: detailBooking.room_number,
+                                  particulars: stageDescription,
+                                  purpose: stageLabel,
+                                  stageLabel,
+                                  payment_stage: paymentStage,
+                                  cashier_name: p.cashier_name || p.cashier || detailBooking.checked_in_by || (currentUser ? (currentUser.full_name || currentUser.username) : '')
+                                };
 
                                 return (
                                   <tr key={p.id} style={{ background: isRefundRow ? '#fff1f2' : (isPrepaidZeroRow ? '#faf5ff' : 'inherit') }}>
@@ -2664,73 +2728,7 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                                         <button
                                           type="button"
                                           className="filter-chip"
-                                          onClick={() => {
-                                            const pMode = (p.payment_mode || '').toLowerCase();
-                                            const serialNo = (p.receipt_no && !p.receipt_no.includes('/') && /^(CR|UPI|POS|CHQ|BTC)\d+/i.test(p.receipt_no))
-                                              ? p.receipt_no
-                                              : (pMode.includes('upi') ? 'UPI01' : pMode.includes('card') ? 'POS01' : pMode.includes('cheque') ? 'CHQ01' : 'CR01');
-
-                                            const cardFee = Number(p.card_surcharge || p.cardSurcharge || 0);
-                                            const upiFee = Number(p.upi_tax || p.upiTax || 0);
-                                            const rawAmt = Number(p.amount) || 0;
-
-                                            let baseAmt = Number(p.base_amount);
-                                            if (!baseAmt || isNaN(baseAmt)) {
-                                              if (Number(p.split_card) > 0 && (pMode.includes('card') || pMode.includes('pos'))) {
-                                                baseAmt = Number(p.split_card);
-                                              } else if (Number(p.split_online) > 0 && (pMode.includes('upi') || pMode.includes('online'))) {
-                                                baseAmt = Number(p.split_online);
-                                              } else if (Number(p.split_cash) > 0 && pMode.includes('cash')) {
-                                                baseAmt = Number(p.split_cash);
-                                              } else if (cardFee > 0 && rawAmt > cardFee) {
-                                                baseAmt = rawAmt - cardFee;
-                                              } else if (upiFee > 0 && rawAmt > upiFee) {
-                                                baseAmt = rawAmt - upiFee;
-                                              } else {
-                                                baseAmt = rawAmt;
-                                              }
-                                            } else if (baseAmt === rawAmt && cardFee > 0 && rawAmt > cardFee) {
-                                              baseAmt = rawAmt - cardFee;
-                                            } else if (baseAmt === rawAmt && upiFee > 0 && rawAmt > upiFee) {
-                                              baseAmt = rawAmt - upiFee;
-                                            }
-
-                                            const entireAmt = rawAmt > 0 && rawAmt >= (baseAmt + cardFee + upiFee)
-                                              ? rawAmt
-                                              : (baseAmt + cardFee + upiFee);
-
-                                            const paymentStage = p.payment_type === 'bill_settlement' 
-                                              ? 'checkout' 
-                                              : (p.payment_type === 'advance' ? 'checkin' : 'living');
-
-                                            const stageDescription = p.payment_type === 'bill_settlement'
-                                              ? `Room #${detailBooking.room_number} - Checkout Settlement`
-                                              : (p.payment_type === 'advance' ? `Room #${detailBooking.room_number} - Check-In Advance` : `Room #${detailBooking.room_number} - Stay Payment`);
-
-                                            const receiptObj = {
-                                              receipt_no: serialNo,
-                                              voucher_number: detailBooking.voucher_number || detailBooking.voucherNumber,
-                                              receipt_date: p.created_at,
-                                              guest_name: detailBooking.guest_name,
-                                              amount: entireAmt,
-                                              base_amount: baseAmt,
-                                              card_surcharge: cardFee,
-                                              upi_tax: upiFee,
-                                              payment_mode: p.payment_mode,
-                                              split_cash: p.split_cash,
-                                              split_online: p.split_online,
-                                              split_card: p.split_card,
-                                              split_cheque: p.split_cheque,
-                                              utr_number: p.utr_number,
-                                              cheque_no: p.cheque_no,
-                                              bank_name: p.bank_name,
-                                              room_numbers: detailBooking.room_number,
-                                              particulars: stageDescription,
-                                              payment_stage: paymentStage,
-                                              cashier_name: p.cashier_name || p.cashier || detailBooking.checked_in_by || (currentUser ? (currentUser.full_name || currentUser.username) : '')
-                                            };
-                                            printCashReceipt(receiptObj);
-                                          }}
+                                          onClick={() => printCashReceipt(historyReceipt)}
                                           style={{ fontSize: '0.74rem', padding: '4px 10px', fontWeight: 750, color: '#0369a1', borderColor: '#bae6fd', background: '#f0f9ff' }}
                                           title="Print Official Cash Receipt (2-on-A4)"
                                         >
@@ -2739,31 +2737,7 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                                         <button
                                           type="button"
                                           className="filter-chip"
-                                          onClick={() => {
-                                            const receiptObj = {
-                                              receipt_no: serialNo,
-                                              voucher_number: detailBooking.voucher_number || detailBooking.voucherNumber,
-                                              receipt_date: p.created_at,
-                                              guest_name: detailBooking.guest_name,
-                                              amount: entireAmt,
-                                              base_amount: baseAmt,
-                                              card_surcharge: cardFee,
-                                              upi_tax: upiFee,
-                                              payment_mode: p.payment_mode,
-                                              split_cash: p.split_cash,
-                                              split_online: p.split_online,
-                                              split_card: p.split_card,
-                                              split_cheque: p.split_cheque,
-                                              utr_number: p.utr_number,
-                                              cheque_no: p.cheque_no,
-                                              bank_name: p.bank_name,
-                                              room_numbers: detailBooking.room_number,
-                                              particulars: stageDescription,
-                                              payment_stage: paymentStage,
-                                              cashier_name: p.cashier_name || p.cashier || detailBooking.checked_in_by || (currentUser ? (currentUser.full_name || currentUser.username) : '')
-                                            };
-                                            downloadReceiptPDF(receiptObj);
-                                          }}
+                                          onClick={() => downloadReceiptPDF(historyReceipt)}
                                           style={{ fontSize: '0.74rem', padding: '4px 10px', fontWeight: 750, color: '#047857', borderColor: '#a7f3d0', background: '#ecfdf5', marginLeft: '6px' }}
                                           title="Download Official Receipt PDF"
                                         >
@@ -3395,10 +3369,14 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                                 },
                                 settlement: {
                                   settleAmt: detailBooking.final_settlement_payment || detailBooking.final_settle_amount || 0,
+                                  targetNetPayable: detailBooking.final_settlement_payment !== undefined && detailBooking.final_settlement_payment !== null ? Number(detailBooking.final_settlement_payment) : undefined,
                                   refundAmt: detailBooking.refund_amount || 0,
                                   settled_at: detailBooking.actual_checkout_time || detailBooking.checkout_time || new Date(),
                                   discount_amount: activeCalc?.discountAmount ?? detailBooking.discount_amount ?? 0,
                                   discount_pct: activeCalc?.discountPct ?? detailBooking.discount_pct ?? 0,
+                                  checkin_discount_amt: activeCalc?.discountAmount ?? detailBooking.discount_amount ?? 0,
+                                  checkout_discount_amt: Number(detailBooking.checkout_discount_amount || 0),
+                                  isCheckoutSettlement: Boolean(detailBooking.checkout_discount_amount > 0 || detailBooking.status === 'checked_out'),
                                   invoiceNo: detailBooking.invoice_no || formatTaxInvoiceNumber(detailBooking.voucher_number || detailBooking.voucher_no || detailBooking.checkin_voucher_no || detailBooking.id),
                                   checked_out_by: detailBooking.checked_out_by || (currentUser ? (currentUser.full_name || currentUser.username) : 'Cashier_1')
                                 }

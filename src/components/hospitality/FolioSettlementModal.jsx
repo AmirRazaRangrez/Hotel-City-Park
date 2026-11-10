@@ -27,6 +27,7 @@ export default function FolioSettlementModal({
   const chequeInputRef = useRef(null);
   const prevOpenRef = useRef(false);
   const activeBookingIdRef = useRef(null);
+  const corporateSectionRef = useRef(null);
 
   const [selectedMethod, setSelectedMethod] = useState('cash');
   const [splitCash, setSplitCash] = useState(0);
@@ -67,8 +68,7 @@ export default function FolioSettlementModal({
   const [returnUtr, setReturnUtr] = useState('');
   const [refundReason, setRefundReason] = useState('');
 
-  // Checkout Discount & Admin Approval States
-  const [discountType, setDiscountType] = useState('pct'); // 'pct' | 'amount'
+  // Checkout discount is a rupee amount. A percent is only the calculated share of the bill.
   const [discountValue, setDiscountValue] = useState('');
   const [discountApproval, setDiscountApproval] = useState({
     status: 'idle', // 'idle' | 'waiting' | 'approved' | 'rejected'
@@ -112,8 +112,26 @@ export default function FolioSettlementModal({
   const bookingSource = String(folioData?.bookingSource || room?.booking_source || folioData?.source || room?.source || '').toUpperCase();
   const isBtc = bookingSource === 'BTC' || Boolean(folioData?.btcCompanyName) || Boolean(room?.btc_company_id) || Boolean(folioData?.isBtcBooking) || Boolean(room?.is_btc);
   const isOta = bookingSource === 'OTA';
-  const isOtaPrepaid = isOta && Boolean(
+  const isOtaPayAtHotel = isOta && (
+    folioData?.isOtaPayAtHotel === true ||
+    folioData?.summary?.isOtaPayAtHotel === true ||
+    room?.rate_type === 'pay_at_hotel' ||
+    folioData?.rate_type === 'pay_at_hotel' ||
+    folioData?.rateType === 'pay_at_hotel' ||
+    String(room?.rate_type || '').toLowerCase().includes('hotel') ||
+    String(folioData?.rate_type || '').toLowerCase().includes('hotel') ||
+    String(folioData?.rateType || '').toLowerCase().includes('hotel') ||
+    parseInt(room?.is_prepaid) === 0 ||
+    room?.is_prepaid === false ||
+    room?.is_prepaid === '0' ||
+    parseInt(folioData?.is_prepaid) === 0 ||
+    folioData?.is_prepaid === false ||
+    folioData?.is_prepaid === '0' ||
+    folioData?.isOtaPrepaid === false
+  );
+  const isOtaPrepaid = isOta && !isOtaPayAtHotel && Boolean(
     folioData?.isOtaPrepaid === true ||
+    folioData?.summary?.isOtaPrepaid === true ||
     folioData?.isPrepaid === true ||
     folioData?.is_prepaid === 1 ||
     folioData?.is_prepaid === '1' ||
@@ -123,9 +141,7 @@ export default function FolioSettlementModal({
     room?.is_prepaid === true ||
     folioData?.rateType === 'prepaid' ||
     folioData?.rate_type === 'prepaid' ||
-    room?.rate_type === 'prepaid' ||
-    Boolean(folioData?.otaPlatform || room?.ota_platform) ||
-    Number(folioData?.advancePaid || room?.total_paid || 0) === 0
+    room?.rate_type === 'prepaid'
   );
 
   const pendingRestaurantOrders = (folioData?.restaurantOrders || [])
@@ -148,7 +164,22 @@ export default function FolioSettlementModal({
                                otaEarlyFeeVal;
   const extensionChargeVal = Number(folioData?.stayCalcNow?.extensionCharge || folioData?.earlyExtensionCharge || 0);
 
-  const effectiveAdvancePaid = Number(folioData?.advancePaid || 0);
+  const ledgerAdvancePaid = (Array.isArray(folioData?.payments) ? folioData.payments : [])
+    .filter(p => {
+      const kind = String(p.payment_type || '').toLowerCase();
+      const notes = String(p.notes || '').toLowerCase();
+      const isSettlement = kind === 'bill_settlement' || kind === 'settlement' || kind === 'final_settlement' || kind === 'checkout'
+        || notes.includes('checkout bill settlement') || notes.includes('paid while checkout');
+      return kind !== 'refund' && !isSettlement;
+    })
+    .reduce((sum, p) => {
+      const surcharge = (Number(p.card_surcharge) || 0) + (Number(p.upi_tax) || 0);
+      const base = p.base_amount !== undefined && p.base_amount !== null && p.base_amount !== ''
+        ? Number(p.base_amount)
+        : Math.max(0, (Number(p.amount) || 0) - surcharge);
+      return sum + (Number.isFinite(base) ? base : 0);
+    }, 0);
+  const effectiveAdvancePaid = Math.max(Number(folioData?.advancePaid || 0), ledgerAdvancePaid);
 
   const hasOverstayed = Boolean(
     folioData?.isDeclaredCheckoutPassed ??
@@ -161,6 +192,8 @@ export default function FolioSettlementModal({
   );
 
   const activeStayCalc = folioData?.stayCalcNow || folioData?.summary?.stayCalcNow || (hasOverstayed ? folioData?.summary : (folioData?.stayCalcDeclared || folioData?.summary));
+  const recognizedPaid = Math.max(Number(activeStayCalc?.paid || 0), Number(folioData?.advancePaid || 0));
+  const extraCollected = Math.max(0, ledgerAdvancePaid - recognizedPaid);
 
   const effectiveRoomTariff = isOtaPrepaid
     ? 0
@@ -193,7 +226,8 @@ export default function FolioSettlementModal({
   const otaPrepaidBalanceDue = Math.max(0, (hotelExtrasChargeVal + extensionChargeVal + fnbPendingTotal + extraExpensesVal) - effectiveAdvancePaid);
 
   const computedRoomNet = effectiveRoomTariff + effectiveStayTax;
-  const computedStayBal = (computedRoomNet + effectiveFnbTotal + extraExpensesVal) - effectiveAdvancePaid;
+  const stayExtrasTotal = !isOtaPrepaid ? (hotelExtrasChargeVal + extensionChargeVal) : 0;
+  const computedStayBal = (computedRoomNet + stayExtrasTotal + effectiveFnbTotal + extraExpensesVal) - effectiveAdvancePaid;
 
   const summaryRefund = Number(folioData?.summary?.refundAmount || folioData?.refundAmount || 0);
   const stayCalcRefundDue = Number(activeStayCalc?.refundDue || folioData?.stayCalcNow?.refundDue || 0);
@@ -213,7 +247,7 @@ export default function FolioSettlementModal({
   const isRefund = !isOtaPrepaid && (dynamicRefundDue > 0.5);
   const refundAmount = isRefund ? dynamicRefundDue : 0;
 
-  const dynamicBalanceDue = isOtaPrepaid
+  const statedBalanceDue = isOtaPrepaid
     ? Math.round(otaPrepaidBalanceDue)
     : (isRefund
         ? 0
@@ -222,6 +256,7 @@ export default function FolioSettlementModal({
             : (folioData?.balanceDue !== undefined && folioData.balanceDue > 0
                 ? Math.round(folioData.balanceDue)
                 : Math.max(0, Math.round(computedStayBal)))));
+  const dynamicBalanceDue = Math.max(0, statedBalanceDue - (isOtaPrepaid ? 0 : extraCollected));
 
   // Gross stay tariff and Base Tariff to calculate discount on
   const grossStayTariff = Number(effectiveRoomTariff || 0) + (isOtaPrepaid ? (Number(hotelExtrasChargeVal || 0) + Number(extensionChargeVal || 0)) : Number(effectiveStayTax || 0));
@@ -247,24 +282,36 @@ export default function FolioSettlementModal({
   const rawDiscountVal = parseFloat(discountValue) || 0;
   if (rawDiscountVal > 0) {
     const tariffForDiscount = totalBaseTariff > 0 ? totalBaseTariff : (baseTariff > 0 ? baseTariff : maxAllowableDiscount);
-    if (discountType === 'pct') {
-      const targetPct = Math.min(100, Math.max(0, rawDiscountVal));
-      const calcAmt = tariffForDiscount > 0 ? Math.round((tariffForDiscount * targetPct) / 100) : Math.round((maxAllowableDiscount * targetPct) / 100);
-      enteredDiscountAmt = Math.min(maxAllowableDiscount, calcAmt);
-      enteredDiscountPct = targetPct;
-    } else {
-      const calcAmt = Math.max(0, Math.round(rawDiscountVal));
-      enteredDiscountAmt = Math.min(maxAllowableDiscount, calcAmt);
-      enteredDiscountPct = tariffForDiscount > 0 ? Number(((enteredDiscountAmt / tariffForDiscount) * 100).toFixed(1)) : (maxAllowableDiscount > 0 ? Math.round((enteredDiscountAmt / maxAllowableDiscount) * 100) : 0);
-    }
+    const calcAmt = Math.max(0, Math.round(rawDiscountVal));
+    enteredDiscountAmt = Math.min(maxAllowableDiscount, calcAmt);
+    enteredDiscountPct = tariffForDiscount > 0 ? Number(((enteredDiscountAmt / tariffForDiscount) * 100).toFixed(1)) : (maxAllowableDiscount > 0 ? Math.round((enteredDiscountAmt / maxAllowableDiscount) * 100) : 0);
   }
+
+  // Forward tax calculation for discount to ensure exact synchronization with Tax Invoice & Receipt
+  const calculateDiscountedPayable = (discAmt) => {
+    if (!discAmt || discAmt <= 0) return dynamicBalanceDue;
+    if (isOtaPrepaid) {
+      return Math.max(0, dynamicBalanceDue - discAmt);
+    }
+    const discountedTaxable = Math.max(0, Number((effectiveRoomTariff - discAmt).toFixed(2)));
+    const discountedGst = Number((discountedTaxable * 0.05).toFixed(2));
+    const discountedRoomStay = Number((discountedTaxable + discountedGst).toFixed(2));
+    const nonRoomCharges = (Number(effectiveFnbTotal) || 0) + (Number(extraExpensesVal) || 0);
+    const unroundedTotal = discountedRoomStay + nonRoomCharges;
+    const discountedGrandTotal = Math.round(unroundedTotal);
+    return Math.max(0, discountedGrandTotal - effectiveAdvancePaid);
+  };
 
   // Active approved discount (only effective when approved by admin!)
   const activeDiscountAmt = discountApproval.status === 'approved' ? discountApproval.approvedAmt : 0;
   const activeDiscountPct = discountApproval.status === 'approved' ? discountApproval.approvedPct : 0;
 
-  const balanceDue = Math.max(0, dynamicBalanceDue - activeDiscountAmt);
+  const balanceDue = activeDiscountAmt > 0 ? calculateDiscountedPayable(activeDiscountAmt) : dynamicBalanceDue;
   const isDiscountPendingApproval = enteredDiscountAmt > 0 && discountApproval.status !== 'approved';
+
+  const displayStayTax = (activeDiscountAmt > 0 && !isOtaPrepaid)
+    ? Number((Math.max(0, effectiveRoomTariff - activeDiscountAmt) * 0.05).toFixed(2))
+    : effectiveStayTax;
 
   useEffect(() => {
     // Only reset/initialize form fields when modal transitions from closed to open,
@@ -380,7 +427,7 @@ export default function FolioSettlementModal({
 
   const handleRequestDiscountApproval = async () => {
     if (enteredDiscountAmt <= 0) {
-      showToast('Please enter a valid discount percentage or amount.', 'warning');
+      showToast('Please enter the discount in rupees.', 'warning');
       return;
     }
     try {
@@ -409,7 +456,7 @@ export default function FolioSettlementModal({
         current_total: grossAmt,
         final_amount: finalAmt,
         requested_by: staffName,
-        reason: `Checkout Discount: Room #${roomNumStr} • Guest: ${guestName} • Gross: ₹${grossAmt} • Requested: ${enteredDiscountPct}% (₹${enteredDiscountAmt}) • Cashier: ${staffName}`,
+        reason: `Checkout Discount: Room #${roomNumStr} • Guest: ${guestName} • Gross: ₹${grossAmt} • Requested: ₹${enteredDiscountAmt} (${enteredDiscountPct}% of bill) • Cashier: ${staffName}`,
         metadata: {
           checkout: true,
           booking_id: folioData?.bookingId || room?.current_booking_id,
@@ -423,12 +470,18 @@ export default function FolioSettlementModal({
         }
       });
 
+      const deliveredPrefixes = Array.isArray(res?.delivered_prefixes) ? res.delivered_prefixes : [];
+      if (res?.notified !== true || deliveredPrefixes.length === 0) {
+        setDiscountApproval({ status: 'idle', approvalId: null, approvedAmt: 0, approvedPct: 0, requestedAmt: 0, requestedPct: 0 });
+        showToast(res?.error || 'Owner phone was not notified. The discount request was not delivered.', 'red');
+        return;
+      }
       if (res && res.id) {
         setDiscountApproval(prev => ({
           ...prev,
           approvalId: res.id
         }));
-        showToast('Discount approval request sent to Admin phone!', 'blue');
+        showToast('Discount alert delivered to the owner phone.', 'green');
       } else {
         throw new Error(res?.error || 'Failed to submit request');
       }
@@ -844,7 +897,7 @@ export default function FolioSettlementModal({
               checkin_discount_amt: folioData.stayCalcNow?.discountAmount ?? folioData.discountAmount ?? folioData.discountAmt ?? 0,
               checkout_discount_amt: activeDiscountAmt,
               discount_amount: activeDiscountAmt,
-              discount_pct: discountType === 'pct' ? (Number(discountValue) || 0) : (activeDiscountAmt > 0 && baseTariff > 0 ? Number(((activeDiscountAmt / baseTariff) * 100).toFixed(1)) : 0),
+              discount_pct: activeDiscountAmt > 0 && baseTariff > 0 ? Number(((activeDiscountAmt / baseTariff) * 100).toFixed(1)) : 0,
               discount: activeDiscountAmt,
               cardSurcharge: isRefund ? 0 : cardSurcharge,
               upiTax: isRefund ? 0 : upiTax,
@@ -947,10 +1000,10 @@ export default function FolioSettlementModal({
   };
 
   return (
-    <div className="modal-overlay active" id="folio-settlement-modal-overlay">
-      <div className="modal-container" style={{ width: '100%', maxWidth: '100%', height: '100%', maxHeight: '100%', borderRadius: 0, margin: 0, border: 'none' }}>
+    <div className="modal-overlay active" id="folio-settlement-modal-overlay" style={{ padding: 0, overflow: 'hidden', alignItems: 'stretch' }}>
+      <div className="modal-container" style={{ width: '100%', maxWidth: '100%', height: '100%', maxHeight: '100%', borderRadius: 0, margin: 0, border: 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
         {/* Header with Universal Top-Left Back & Top-Right Close Buttons */}
-        <div className="modal-header" style={{ padding: '16px 36px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="modal-header" style={{ padding: '16px 36px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <button
               type="button"
@@ -987,9 +1040,9 @@ export default function FolioSettlementModal({
         </div>
 
         {/* Body */}
-        <div className="modal-body" style={{ padding: '24px 36px', flex: 1, overflowY: 'auto' }}>
+        <div className="modal-body" style={{ padding: '8px 24px 8px', flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overflowX: 'hidden', display: 'block' }}>
           {/* Status & Due Tag Bar */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
             <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               Financial Settlement Breakdown
             </span>
@@ -1018,8 +1071,14 @@ export default function FolioSettlementModal({
             </div>
             <div>
               <span className="sub-label">{isOtaPrepaid ? 'Extras / Ext:' : 'Tax (5%):'}</span>
-              <strong>{isOtaPrepaid ? formatCurrency(hotelExtrasChargeVal + extensionChargeVal) : formatCurrency(effectiveStayTax)}</strong>
+              <strong>{isOtaPrepaid ? formatCurrency(hotelExtrasChargeVal + extensionChargeVal) : formatCurrency(displayStayTax)}</strong>
             </div>
+            {!isOtaPrepaid && (hotelExtrasChargeVal + extensionChargeVal) > 0 && (
+              <div>
+                <span className="sub-label">Extras / Ext:</span>
+                <strong>{formatCurrency(hotelExtrasChargeVal + extensionChargeVal)}</strong>
+              </div>
+            )}
             <div>
               <span className="sub-label">Food:</span>
               <strong>{formatCurrency(effectiveFoodTotal)}</strong>
@@ -1057,10 +1116,10 @@ export default function FolioSettlementModal({
             fontSize: '0.80rem',
             color: '#334155',
             background: 'var(--bg-surface-secondary, #f8fafc)',
-            padding: '7px 14px',
+            padding: '4px 10px',
             borderRadius: '8px',
             border: '1px solid var(--border-color, #e2e8f0)',
-            marginTop: '8px',
+            marginTop: '6px',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -1071,9 +1130,13 @@ export default function FolioSettlementModal({
               <span>
                 💡 <strong>Prepaid Reconciliation:</strong> Room Stay Covered by {folioData.otaPlatform || 'OTA'} Voucher + {formatCurrency(hotelExtrasChargeVal + extensionChargeVal)} (Extras/Ext) + {formatCurrency(effectiveFnbTotal)} (F&amp;B){extraExpensesVal > 0 ? ` + ${formatCurrency(extraExpensesVal)} (Damages/Extras)` : ''}{activeDiscountAmt > 0 ? ` - ${formatCurrency(activeDiscountAmt)} (Discount)` : ''} - {formatCurrency(effectiveAdvancePaid)} (Desk Advance) = <strong style={{ color: balanceDue > 0 ? '#b91c1c' : '#15803d' }}>{balanceDue === 0 ? '₹0.00 Fully Settled' : `${formatCurrency(balanceDue)} Remaining Due`}</strong>
               </span>
+            ) : isOtaPayAtHotel ? (
+              <span>
+                💡 <strong>OTA Pay-at-Hotel Reconciliation:</strong> {formatCurrency(effectiveRoomTariff)} (Room) + {formatCurrency(displayStayTax)} (Tax){(hotelExtrasChargeVal + extensionChargeVal) > 0 ? ` + ${formatCurrency(hotelExtrasChargeVal + extensionChargeVal)} (Extras/Ext)` : ''} + {formatCurrency(effectiveFnbTotal)} (F&amp;B){extraExpensesVal > 0 ? ` + ${formatCurrency(extraExpensesVal)} (Damages/Extras)` : ''}{activeDiscountAmt > 0 ? ` - ${formatCurrency(activeDiscountAmt)} (Discount)` : ''} - {formatCurrency(effectiveAdvancePaid)} (Advance) = <strong style={{ color: isRefund ? '#15803d' : (balanceDue > 0 ? '#b91c1c' : '#15803d') }}>{isRefund ? `Refund: ${formatCurrency(refundAmount)}` : `${formatCurrency(balanceDue)} Remaining Due`}</strong>
+              </span>
             ) : (
               <span>
-                💡 <strong>Reconciliation:</strong> {formatCurrency(effectiveRoomTariff)} (Room) + {formatCurrency(effectiveStayTax)} (Tax) + {formatCurrency(effectiveFnbTotal)} (F&amp;B){extraExpensesVal > 0 ? ` + ${formatCurrency(extraExpensesVal)} (Damages/Extras)` : ''}{activeDiscountAmt > 0 ? ` - ${formatCurrency(activeDiscountAmt)} (Discount)` : ''} - {formatCurrency(effectiveAdvancePaid)} (Advance) = <strong style={{ color: isRefund ? '#15803d' : (balanceDue > 0 ? '#b91c1c' : '#15803d') }}>{isRefund ? `Refund: ${formatCurrency(refundAmount)}` : `${formatCurrency(balanceDue)} Remaining Due`}</strong>
+                💡 <strong>Reconciliation:</strong> {formatCurrency(effectiveRoomTariff)} (Room) + {formatCurrency(displayStayTax)} (Tax){(hotelExtrasChargeVal + extensionChargeVal) > 0 ? ` + ${formatCurrency(hotelExtrasChargeVal + extensionChargeVal)} (Extras/Ext)` : ''} + {formatCurrency(effectiveFnbTotal)} (F&amp;B){extraExpensesVal > 0 ? ` + ${formatCurrency(extraExpensesVal)} (Damages/Extras)` : ''}{activeDiscountAmt > 0 ? ` - ${formatCurrency(activeDiscountAmt)} (Discount)` : ''} - {formatCurrency(effectiveAdvancePaid)} (Advance) = <strong style={{ color: isRefund ? '#15803d' : (balanceDue > 0 ? '#b91c1c' : '#15803d') }}>{isRefund ? `Refund: ${formatCurrency(refundAmount)}` : `${formatCurrency(balanceDue)} Remaining Due`}</strong>
               </span>
             )}
             {effectiveFnbTotal > 0 && (
@@ -1269,11 +1332,11 @@ export default function FolioSettlementModal({
                   background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
                   border: discountApproval.status === 'approved' ? '1.5px solid #86efac' : '1.5px solid #cbd5e1',
                   borderRadius: '12px',
-                  padding: '14px 18px',
-                  marginBottom: '16px',
+                  padding: '8px 12px',
+                  marginBottom: '8px',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
                 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span style={{ fontSize: '1.25rem' }}>🏷️</span>
                       <div>
@@ -1284,52 +1347,21 @@ export default function FolioSettlementModal({
                       </div>
                     </div>
                     
-                    <div style={{ display: 'flex', background: '#e2e8f0', borderRadius: '8px', padding: '3px' }}>
-                      <button
-                        type="button"
-                        onClick={() => { setDiscountType('pct'); setDiscountApproval({ status: 'idle', approvalId: null, approvedAmt: 0, approvedPct: 0, requestedAmt: 0, requestedPct: 0 }); }}
-                        style={{
-                          border: 'none',
-                          padding: '4px 10px',
-                          borderRadius: '6px',
-                          background: discountType === 'pct' ? '#2563eb' : 'transparent',
-                          color: discountType === 'pct' ? '#fff' : '#475569',
-                          fontWeight: 800,
-                          fontSize: '0.76rem',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        % Percentage
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setDiscountType('amount'); setDiscountApproval({ status: 'idle', approvalId: null, approvedAmt: 0, approvedPct: 0, requestedAmt: 0, requestedPct: 0 }); }}
-                        style={{
-                          border: 'none',
-                          padding: '4px 10px',
-                          borderRadius: '6px',
-                          background: discountType === 'amount' ? '#2563eb' : 'transparent',
-                          color: discountType === 'amount' ? '#fff' : '#475569',
-                          fontWeight: 800,
-                          fontSize: '0.76rem',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        ₹ Flat Amount
-                      </button>
-                    </div>
+                    <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '4px 10px' }}>
+                      ₹ Flat Amount
+                    </span>
                   </div>
 
                   <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ fontWeight: 800, fontSize: '0.82rem', color: '#334155' }}>
-                        {discountType === 'pct' ? 'Enter % on Base:' : 'Enter Amount (₹):'}
+                        Enter Amount (₹):
                       </span>
                       <input
                         type="number"
                         min="0"
-                        max={discountType === 'pct' ? '100' : String(maxAllowableDiscount)}
-                        placeholder={discountType === 'pct' ? 'e.g. 10' : 'e.g. 500'}
+                        max={String(maxAllowableDiscount)}
+                        placeholder="e.g. 500"
                         value={discountValue}
                         onChange={(e) => {
                           setDiscountValue(e.target.value);
@@ -1370,14 +1402,14 @@ export default function FolioSettlementModal({
                         </div>
                         <div style={{ borderLeft: '1.5px solid #cbd5e1', paddingLeft: '10px' }}>
                           <span style={{ color: '#dc2626', fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 700 }}>
-                            {discountType === 'pct' ? `${enteredDiscountPct}% Discount:` : `Flat Discount (${enteredDiscountPct}%):`}
+                            {`Discount (${enteredDiscountPct}% of bill):`}
                           </span>{' '}
                           <strong style={{ color: '#dc2626' }}>- {formatCurrency(enteredDiscountAmt)}</strong>
                         </div>
                         <div style={{ borderLeft: '1.5px solid #cbd5e1', paddingLeft: '10px' }}>
                           <span style={{ color: '#16a34a', fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 700 }}>New Payable: </span>
                           <strong style={{ color: '#16a34a', fontSize: '0.92rem' }}>
-                            {formatCurrency(Math.max(0, dynamicBalanceDue - enteredDiscountAmt))}
+                            {formatCurrency(calculateDiscountedPayable(enteredDiscountAmt))}
                           </strong>
                         </div>
                       </div>
@@ -1519,7 +1551,7 @@ export default function FolioSettlementModal({
               {/* Only show payment method inputs if NOT company_later */}
               {!isCompanyPayingLater && (
                 <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <label style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
                       {isOtaPrepaid ? `Collect Pending Balance (${effectiveFnbTotal > 0 ? 'F&B Bill' : 'Extras'}):` : 'Payment Method:'}
                     </label>
@@ -1717,43 +1749,39 @@ export default function FolioSettlementModal({
                     <div
                       id="checkout-online-utr-panel"
                       style={{
-                        marginTop: '14px',
-                        padding: '14px 18px',
+                        marginTop: '8px',
+                        padding: '8px 12px',
                         background: 'var(--bg-surface-secondary)',
                         border: '1.5px solid var(--apple-blue)',
                         borderRadius: '12px',
                         boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)'
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <label style={{ fontSize: '0.85rem', fontWeight: 850, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span>📱</span> Online / UPI Transaction UTR Reference ID <span style={{ color: '#ef4444' }}>* (Mandatory)</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <label style={{ fontSize: '0.78rem', fontWeight: 850, color: 'var(--text-primary)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>📱</span> UTR / Ref ID <span style={{ color: '#ef4444' }}>*</span>
                         </label>
-                        <span style={{ fontSize: '0.72rem', fontWeight: 800, background: 'rgba(56, 189, 248, 0.16)', color: 'var(--apple-blue)', padding: '2px 8px', borderRadius: '8px' }}>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="12-digit UTR / transaction ref (mandatory)"
+                          value={onlineUtr}
+                          onChange={(e) => setOnlineUtr(e.target.value)}
+                          style={{
+                            height: '32px',
+                            flex: 1,
+                            background: 'var(--bg-app)',
+                            fontSize: '0.86rem',
+                            fontWeight: 700,
+                            border: !onlineUtr.trim() ? '2px solid #ef4444' : '1.5px solid var(--apple-blue)',
+                            color: 'var(--text-primary)'
+                          }}
+                          required
+                        />
+                        <span style={{ fontSize: '0.72rem', fontWeight: 800, background: 'rgba(56, 189, 248, 0.16)', color: 'var(--apple-blue)', padding: '2px 8px', borderRadius: '8px', whiteSpace: 'nowrap' }}>
                           Required for ₹{splitOnline.toLocaleString('en-IN')}
                         </span>
                       </div>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="Enter 12-digit UTR No. / Transaction Ref ID (e.g. 423589123456)"
-                        value={onlineUtr}
-                        onChange={(e) => setOnlineUtr(e.target.value)}
-                        style={{
-                          height: '42px',
-                          background: 'var(--bg-app)',
-                          fontSize: '0.95rem',
-                          fontWeight: 700,
-                          border: !onlineUtr.trim() ? '2px solid #ef4444' : '1.5px solid var(--apple-blue)',
-                          color: 'var(--text-primary)'
-                        }}
-                        required
-                      />
-                      {!onlineUtr.trim() && (
-                        <div style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 700, marginTop: '5px' }}>
-                          ⚠️ UTR ID is mandatory to confirm online payment settlement before checkout.
-                        </div>
-                      )}
                     </div>
                   )}
 
@@ -1924,7 +1952,7 @@ export default function FolioSettlementModal({
                   <div
                     className="balance-alert"
                     style={{
-                      marginTop: '12px',
+                      marginTop: '8px',
                       background: remainingSettle === 0 ? '#dcfce7' : '#fef2f2',
                       color: remainingSettle === 0 ? '#166534' : '#dc2626',
                       border: remainingSettle === 0 ? '1px solid #bbf7d0' : '1.5px solid #fca5a5',
@@ -2078,19 +2106,20 @@ export default function FolioSettlementModal({
 
           {/* Corporate / Company GST Details Section */}
           <div
+            ref={corporateSectionRef}
             style={{
-              marginTop: '20px',
+              marginTop: '8px',
               border: (checkoutCompanyName && checkoutCompanyName.trim()) || (checkoutGstNumber && checkoutGstNumber.trim()) ? '1.5px solid var(--apple-blue)' : '1px solid var(--border-color)',
-              borderRadius: '14px',
+              borderRadius: '12px',
               background: 'var(--bg-surface-secondary)',
-              overflow: 'hidden',
+              overflow: 'visible',
               boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
             }}
           >
             <div
               onClick={() => setIsCorporateSectionOpen(prev => !prev)}
               style={{
-                padding: '12px 18px',
+                padding: '8px 14px',
                 background: (checkoutCompanyName && checkoutCompanyName.trim()) || (checkoutGstNumber && checkoutGstNumber.trim()) ? 'rgba(56, 189, 248, 0.08)' : 'var(--bg-card)',
                 display: 'flex',
                 alignItems: 'center',
@@ -2134,10 +2163,10 @@ export default function FolioSettlementModal({
             </div>
 
             {isCorporateSectionOpen && (
-              <div style={{ padding: '16px 18px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-surface)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
+              <div style={{ padding: '8px 14px 10px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-surface)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 1.1fr) minmax(140px, 0.8fr) minmax(180px, 1.2fr) auto', gap: '8px', alignItems: 'end' }}>
                   <div>
-                    <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '5px' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
                       Company / Organization Name
                     </label>
                     <input
@@ -2146,12 +2175,12 @@ export default function FolioSettlementModal({
                       placeholder="e.g. Reliance Industries Ltd."
                       value={checkoutCompanyName}
                       onChange={(e) => setCheckoutCompanyName(e.target.value)}
-                      style={{ height: '38px', background: 'var(--bg-app)', color: 'var(--text-primary)', fontSize: '0.88rem' }}
+                      style={{ height: '32px', background: 'var(--bg-app)', color: 'var(--text-primary)', fontSize: '0.84rem' }}
                     />
                   </div>
 
                   <div>
-                    <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '5px' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
                       Company GSTIN (15 Digits)
                     </label>
                     <input
@@ -2161,61 +2190,65 @@ export default function FolioSettlementModal({
                       maxLength={15}
                       value={checkoutGstNumber}
                       onChange={(e) => setCheckoutGstNumber(e.target.value.toUpperCase())}
-                      style={{ height: '38px', background: 'var(--bg-app)', color: 'var(--text-primary)', fontSize: '0.88rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}
+                      style={{ height: '32px', background: 'var(--bg-app)', color: 'var(--text-primary)', fontSize: '0.84rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}
                     />
                   </div>
-                </div>
 
-                <div style={{ marginTop: '12px' }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '5px' }}>
-                    Company Registered Address
-                  </label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. Plot No 12, Cyber City, Gurugram, Haryana - 122002"
-                    value={checkoutCompanyAddress}
-                    onChange={(e) => setCheckoutCompanyAddress(e.target.value)}
-                    style={{ height: '38px', background: 'var(--bg-app)', color: 'var(--text-primary)', fontSize: '0.88rem' }}
-                  />
-                </div>
-
-                <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                    GST Tax Mode on Invoice:
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
+                      Company Registered Address
+                    </label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Plot No 12, Cyber City, Gurugram"
+                      value={checkoutCompanyAddress}
+                      onChange={(e) => setCheckoutCompanyAddress(e.target.value)}
+                      style={{ height: '32px', background: 'var(--bg-app)', color: 'var(--text-primary)', fontSize: '0.84rem' }}
+                    />
                   </div>
-                  <div style={{ display: 'inline-flex', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
-                    <button
-                      type="button"
-                      onClick={() => setCheckoutTaxMode('CGST_SGST')}
-                      style={{
-                        padding: '6px 14px',
-                        fontSize: '0.8rem',
-                        fontWeight: 700,
-                        border: 'none',
-                        cursor: 'pointer',
-                        background: checkoutTaxMode === 'CGST_SGST' ? 'var(--apple-blue)' : 'var(--bg-card)',
-                        color: checkoutTaxMode === 'CGST_SGST' ? '#fff' : 'var(--text-secondary)'
-                      }}
-                    >
-                      CGST (2.5%) + SGST (2.5%) [Intra-State]
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCheckoutTaxMode('IGST')}
-                      style={{
-                        padding: '6px 14px',
-                        fontSize: '0.8rem',
-                        fontWeight: 700,
-                        border: 'none',
-                        borderLeft: '1px solid var(--border-color)',
-                        cursor: 'pointer',
-                        background: checkoutTaxMode === 'IGST' ? '#8b5cf6' : 'var(--bg-card)',
-                        color: checkoutTaxMode === 'IGST' ? '#fff' : 'var(--text-secondary)'
-                      }}
-                    >
-                      IGST (5.0%) [Inter-State]
-                    </button>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
+                      GST Tax Mode
+                    </label>
+                    <div style={{ display: 'inline-flex', height: '32px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                      <button
+                        type="button"
+                        onClick={() => setCheckoutTaxMode('CGST_SGST')}
+                        title="CGST 2.5% + SGST 2.5% for intra-state invoices"
+                        style={{
+                          padding: '0 10px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          border: 'none',
+                          cursor: 'pointer',
+                          background: checkoutTaxMode === 'CGST_SGST' ? 'var(--apple-blue)' : 'var(--bg-card)',
+                          color: checkoutTaxMode === 'CGST_SGST' ? '#fff' : 'var(--text-secondary)',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        CGST + SGST
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCheckoutTaxMode('IGST')}
+                        title="IGST 5% for inter-state invoices"
+                        style={{
+                          padding: '0 10px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          border: 'none',
+                          borderLeft: '1px solid var(--border-color)',
+                          cursor: 'pointer',
+                          background: checkoutTaxMode === 'IGST' ? '#8b5cf6' : 'var(--bg-card)',
+                          color: checkoutTaxMode === 'IGST' ? '#fff' : 'var(--text-secondary)',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        IGST
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2224,7 +2257,7 @@ export default function FolioSettlementModal({
         </div>
 
         {/* Footer */}
-        <div className="modal-footer" style={{ padding: '16px 26px', borderTop: '1px solid var(--border-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="modal-footer" style={{ padding: '16px 26px', borderTop: '1px solid var(--border-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
           {isCompanyPayingLater ? (
             <button
               type="button"
@@ -2294,7 +2327,7 @@ export default function FolioSettlementModal({
                   checkin_discount_amt: folioData.stayCalcNow?.discountAmount ?? folioData.discountAmount ?? folioData.discountAmt ?? 0,
                   checkout_discount_amt: activeDiscountAmt,
                   discount_amount: activeDiscountAmt,
-                  discount_pct: discountType === 'pct' ? (Number(discountValue) || 0) : (activeDiscountAmt > 0 && baseTariff > 0 ? Number(((activeDiscountAmt / baseTariff) * 100).toFixed(1)) : 0),
+                  discount_pct: activeDiscountAmt > 0 && baseTariff > 0 ? Number(((activeDiscountAmt / baseTariff) * 100).toFixed(1)) : 0,
                   discount: activeDiscountAmt,
                   cardSurcharge,
                   upiTax,
@@ -2362,7 +2395,7 @@ export default function FolioSettlementModal({
         onClose={() => setIsAdminPasswordModalOpen(false)}
         onSuccess={handleCheckoutPasswordSuccess}
         title="Admin Checkout Discount Permission"
-        description={`Enter Manager / Admin password to authorize ${discountType === 'pct' ? `${enteredDiscountPct}%` : formatCurrency(enteredDiscountAmt)} discount at checkout.`}
+        description={`Enter Manager / Admin password to authorize ${formatCurrency(enteredDiscountAmt)} discount at checkout.`}
         approvalId={discountApproval.approvalId}
         actionType="discount_checkout"
         details={{

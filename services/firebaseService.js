@@ -285,7 +285,11 @@ async function removeActiveOccupancy(roomNumber) {
   if (!roomNum) return;
 
   try {
-    await withTimeout(firestore.collection('active_occupancies').doc(String(roomNum)).delete());
+    const batch = firestore.batch();
+    batch.delete(firestore.collection('active_occupancies').doc(String(roomNum)));
+    batch.delete(firestore.collection('room_charges_inbox').doc(`folio_${roomNum}`));
+    await withTimeout(batch.commit());
+    console.log(`🧹 [Firebase] Cleared active occupancy & folio for checked-out Room ${roomNum}`);
   } catch (err) {
     console.warn(`[Firebase] removeActiveOccupancy error for Room ${roomNum}:`, err.message);
   }
@@ -476,7 +480,7 @@ async function syncCheckoutToCloud(checkoutData) {
 }
 
 async function syncApprovalRequestToCloud(req) {
-  if (!req) return;
+  if (!req) return { synced: false };
   try {
     const docId = `APP-${req.id || req.approval_id || Date.now()}`;
     const payload = {
@@ -487,8 +491,9 @@ async function syncApprovalRequestToCloud(req) {
       subtotal: Number(req.current_total || 0),
       gst: 0,
       grand_total: Number(req.final_amount || req.current_total || 0),
-      settled_by: req.requested_by || 'Receptionist',
-      status: (req.status || 'pending').toLowerCase(),
+      settled_by: '',
+      request_nonce: String(req.request_nonce || ''),
+      status: 'pending',
       items_summary: JSON.stringify(req),
       created_at: req.requested_at || new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -510,8 +515,10 @@ async function syncApprovalRequestToCloud(req) {
         console.log(`⚡ [Firebase REST] Synced approval request #${docId} to cloud.`);
       }
     }
+    return { synced: !!synced };
   } catch (err) {
     console.warn('[Firebase] syncApprovalRequestToCloud error:', err.message);
+    return { synced: false };
   }
 }
 
@@ -827,10 +834,38 @@ async function syncAllActiveRoomsFromLocal(db) {
       WHERE r.status = 'occupied' AND b.status = 'active'
     `).all();
 
+    const activeRoomNums = new Set(activeRooms.map(r => cleanRoomNumber(r.room_number)).filter(Boolean));
+
     // Firestore batches limited to 500 ops; split into chunks
     const MAX_BATCH_OPS = 450; // Leave margin below 500
     let batchOps = 0;
     let batch = firestore.batch();
+
+    // 🧹 RECONCILE: Purge any stale / checked-out rooms currently lingering in Firestore
+    try {
+      const snap = await withTimeout(firestore.collection('active_occupancies').get(), 4000);
+      snap.forEach(doc => {
+        const docRoom = cleanRoomNumber(doc.id || doc.data()?.room_number);
+        if (docRoom && !activeRoomNums.has(docRoom)) {
+          batch.delete(doc.ref);
+          batch.delete(firestore.collection('room_charges_inbox').doc(`folio_${docRoom}`));
+          batchOps += 2;
+        }
+      });
+    } catch (_) {}
+
+    // Record aggregate live state manifest so Owner APK checks only 1 document instead of 300!
+    try {
+      const stateRef = firestore.collection('room_charges_inbox').doc('fb_live_state');
+      batch.set(stateRef, {
+        department: 'fb_live_state',
+        total_rooms: 40,
+        occupied_count: activeRooms.length,
+        occupied_rooms: Array.from(activeRoomNums),
+        updated_at: new Date().toISOString()
+      }, { merge: true });
+      batchOps++;
+    } catch (_) {}
 
     for (const room of activeRooms) {
       const roomNum = cleanRoomNumber(room.room_number);
@@ -1946,19 +1981,14 @@ function setupRealtimeListeners(db, onNewPendingOrder = null) {
           const isAppDoc = docId.startsWith('APP-') || data.department === 'discount_approval';
           const st = String(data.status || '').toLowerCase();
           if (isAppDoc && (st === 'approved' || st === 'rejected')) {
-            const rawId = docId.replace(/^APP-/, '');
-            const approvalId = !isNaN(Number(rawId)) ? Number(rawId) : rawId;
-            if (approvalId) {
-              try {
-                const existing = db.prepare('SELECT status FROM owner_approvals WHERE id = ?').get(approvalId);
-                if (existing && existing.status === 'PENDING') {
-                  const notificationService = require('./notificationService');
-                  notificationService.updateApprovalStatus(approvalId, st.toUpperCase(), data.settled_by || 'Admin', data.action_reason || '');
-                  console.log(`⚡ [Firebase Realtime] Admin ${st.toUpperCase()} approval #${approvalId} adopted instantly!`);
-                }
-              } catch (appErr) {
-                console.warn('[Firebase Realtime] Error adopting approval:', appErr.message);
+            try {
+              const notificationService = require('./notificationService');
+              const adopted = notificationService.adoptCloudDecision({ ...data, id: docId });
+              if (adopted) {
+                console.log(`⚡ [Firebase Realtime] Admin ${st.toUpperCase()} approval #${adopted.id} adopted instantly!`);
               }
+            } catch (appErr) {
+              console.warn('[Firebase Realtime] Error adopting approval:', appErr.message);
             }
           }
         });
@@ -2238,14 +2268,9 @@ async function pollCloudApprovals(db) {
   for (const data of docs) {
     const st = String(data.status || '').toLowerCase();
     if (st === 'approved' || st === 'rejected') {
-      const rawId = String(data.id || '').replace(/^APP-/, '');
-      const approvalId = !isNaN(Number(rawId)) ? Number(rawId) : rawId;
-      if (approvalId) {
-        const existing = db.prepare('SELECT status FROM owner_approvals WHERE id = ?').get(approvalId);
-        if (existing && existing.status === 'PENDING') {
-          notificationService.updateApprovalStatus(approvalId, st.toUpperCase(), data.settled_by || 'Admin', data.action_reason || '');
-          console.log(`[Firebase Heartbeat] Adopted approval #${approvalId} -> ${st.toUpperCase()}`);
-        }
+      const adopted = notificationService.adoptCloudDecision(data);
+      if (adopted) {
+        console.log(`[Firebase Heartbeat] Adopted approval #${adopted.id} -> ${st.toUpperCase()}`);
       }
     }
   }

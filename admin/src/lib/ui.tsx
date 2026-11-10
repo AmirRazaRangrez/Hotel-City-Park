@@ -26,21 +26,21 @@ export async function hydrateMemCache() {
             if (parsed && parsed.d !== undefined) {
               memCache.set(k.substring(2), parsed);
             }
-          } catch {}
+          } catch { }
         }
       }
     }
-  } catch {}
+  } catch { }
 }
 
 // Trigger hydration right away at module load time
-hydrateMemCache().catch(() => {});
+hydrateMemCache().catch(() => { });
 
 export function clearCache(key: string) {
   try {
     memCache.delete(key);
-    AsyncStorage.removeItem('c:' + key).catch(() => {});
-  } catch (_) {}
+    AsyncStorage.removeItem('c:' + key).catch(() => { });
+  } catch (_) { }
 }
 
 export function useLoad<T>(fn: () => Promise<T>, deps: any[] = [], key?: string, pollMs: number = 0) {
@@ -73,9 +73,9 @@ export function useLoad<T>(fn: () => Promise<T>, deps: any[] = [], key?: string,
             if (x.t) setAt(p => p || x.t);
             setBusy(false);
           }
-        } catch {}
+        } catch { }
       }
-    }).catch(() => {});
+    }).catch(() => { });
     return () => { active = false; };
   }, [key]);
 
@@ -92,13 +92,22 @@ export function useLoad<T>(fn: () => Promise<T>, deps: any[] = [], key?: string,
 
     try {
       const d = await fn();
-      set(d);
-      setErr(null);
+      // Delta Check: only update APK UI and storage if values have actually changed!
+      const currentVal = key ? memCache.get(key)?.d : data;
+      const hasChanged = !currentVal || JSON.stringify(d) !== JSON.stringify(currentVal);
       const t = new Date().toISOString();
       setAt(t);
-      if (key) {
-        memCache.set(key, { d, t });
-        AsyncStorage.setItem('c:' + key, JSON.stringify({ d, t })).catch(() => {});
+      setErr(null);
+
+      if (hasChanged) {
+        set(d);
+        if (key) {
+          memCache.set(key, { d, t });
+          AsyncStorage.setItem('c:' + key, JSON.stringify({ d, t })).catch(() => { });
+        }
+      } else if (key) {
+        const mem = memCache.get(key);
+        if (mem) mem.t = t;
       }
     } catch (e: any) {
       setErr(e);
@@ -116,7 +125,7 @@ export function useLoad<T>(fn: () => Promise<T>, deps: any[] = [], key?: string,
               set(x.d);
               setAt(x.t);
             }
-          } catch {}
+          } catch { }
         }
       }
     } finally {
@@ -261,13 +270,13 @@ export function Screen({ title, subtitle, logo, busy, isRefreshing, reload, err,
           window.history.back();
           return;
         }
-      } catch (_) {}
+      } catch (_) { }
       try {
         if (router.canGoBack()) {
           router.back();
           return;
         }
-      } catch (_) {}
+      } catch (_) { }
       try {
         router.replace('/(tabs)');
       } catch (_) {

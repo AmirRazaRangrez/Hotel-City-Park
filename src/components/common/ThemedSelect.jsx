@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 /**
  * ThemedSelect - Premium In-Theme Custom Dropdown Component
@@ -18,11 +19,13 @@ export default function ThemedSelect({
   isSearchable = false,
   searchPlaceholder = 'Search...',
   isDark: isDarkProp,
+  height = 44,
   style = {}
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [searchQuery, setSearchQuery] = useState('');
+  const [menuBox, setMenuBox] = useState(null);
   const containerRef = useRef(null);
   const listRef = useRef(null);
   const searchInputRef = useRef(null);
@@ -159,10 +162,40 @@ export default function ThemedSelect({
     searchBorder: isDark ? '#24464D' : '#CBD5E1'
   };
 
+  useEffect(() => {
+    if (!isOpen || !containerRef.current) {
+      setMenuBox(null);
+      return undefined;
+    }
+    const place = () => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const openUp = spaceBelow < 220 && rect.top > spaceBelow;
+      const width = Math.max(rect.width, 188);
+      let left = rect.left;
+      if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
+      setMenuBox({
+        top: openUp ? 'auto' : rect.bottom + 6,
+        bottom: openUp ? window.innerHeight - rect.top + 6 : 'auto',
+        left,
+        width
+      });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [isOpen]);
+
   // Close when clicking outside
   useEffect(() => {
     function handleClickOutside(e) {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
+      const insideMenu = listRef.current && listRef.current.contains(e.target);
+      if (containerRef.current && !containerRef.current.contains(e.target) && !insideMenu) {
         setIsOpen(false);
         setSearchQuery('');
       }
@@ -286,13 +319,13 @@ export default function ThemedSelect({
         className="themed-select-trigger"
         style={{
           width: '100%',
-          minHeight: '44px',
-          height: '44px',
+          minHeight: `${height}px`,
+          height: `${height}px`,
           boxSizing: 'border-box',
-          padding: '0 14px',
+          padding: height <= 42 ? '0 10px' : '0 14px',
           background: disabled ? (isDark ? '#0C2024' : '#F1F5F9') : s.triggerBg,
           border: isOpen ? `2px solid ${theme.borderFocus}` : `1.5px solid ${s.triggerBorder}`,
-          borderRadius: '10px',
+          borderRadius: height <= 42 ? '8px' : '10px',
           boxShadow: isOpen ? `0 0 0 3px ${theme.ringFocus}` : '0 1px 3px rgba(0,0,0,0.04)',
           display: 'flex',
           alignItems: 'center',
@@ -380,16 +413,18 @@ export default function ThemedSelect({
       </div>
 
       {/* Popover Dropdown Menu */}
-      {isOpen && (
+      {isOpen && menuBox && createPortal(
         <div
           ref={listRef}
           role="listbox"
           className="themed-select-menu"
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            left: 0,
-            right: 0,
+            position: 'fixed',
+            top: menuBox ? menuBox.top : 'calc(100% + 6px)',
+            bottom: menuBox ? menuBox.bottom : 'auto',
+            left: menuBox ? menuBox.left : 0,
+            width: menuBox ? menuBox.width : '100%',
+            right: 'auto',
             background: s.menuBg,
             borderRadius: '12px',
             border: `1.5px solid ${theme.menuBorder}`,
@@ -531,7 +566,8 @@ export default function ThemedSelect({
                         style={{
                           fontSize: '0.90rem',
                           fontWeight: isSelected ? 850 : isHighlighted ? 750 : 650,
-                          color: 'inherit'
+                          color: 'inherit',
+                          whiteSpace: 'nowrap'
                         }}
                       >
                         {opt.label}
@@ -584,7 +620,8 @@ export default function ThemedSelect({
               );
             })
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

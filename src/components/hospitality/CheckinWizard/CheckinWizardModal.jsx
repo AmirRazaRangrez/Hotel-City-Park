@@ -349,6 +349,22 @@ export default function CheckinWizardModal({
   const otaBaseTariff = Math.round((otaPackageAmt / (1 + otaGstRate / 100)) * 100) / 100;
   const otaGstTariff = Number((otaPackageAmt - otaBaseTariff).toFixed(2));
 
+  // Extra Bookings GST calculations for both OTA and Standard bookings
+  const effectiveGstPct = Number(roomGstPct || room?.gst_pct || 5);
+  const extraBedGstRate = Number(room?.extra_bed_gst_pct || effectiveGstPct || 5);
+  const extraBedGst = Math.round(extraBedCharge * (extraBedGstRate / 100));
+  const breakfastGstRate = Number(room?.breakfast_gst_pct || 5);
+  const breakfastGst = Math.round((isOta ? extraBreakfastCharge : mealTotalCharge) * (breakfastGstRate / 100));
+  const extGstRate = Number(effectiveGstPct || 5);
+  const extGst = Math.round(extensionCharge * (extGstRate / 100));
+  const extraRoomsGstRate = Number(effectiveGstPct || 5);
+  const extraRoomsGst = Math.round(extraRoomsCharge * (extraRoomsGstRate / 100));
+  const earlyCheckinGstRate = Number(room?.ota_early_checkin_gst_pct || effectiveGstPct || 5);
+  const otaEarlyCheckinGst = (isOta && draft.isEarlyCheckin) ? Math.round(otaEarlyCheckinCharge * (earlyCheckinGstRate / 100)) : 0;
+
+  const totalExtrasGst = extraBedGst + breakfastGst + extGst + extraRoomsGst + otaEarlyCheckinGst;
+  const totalHotelExtras = (extraBedCharge + extraBedGst) + (extraRoomsCharge + extraRoomsGst) + (extraBreakfastCharge + breakfastGst) + (extensionCharge + extGst) + (otaEarlyCheckinCharge + otaEarlyCheckinGst);
+
   let totalBaseRate = (basePrice * nights) + extensionCharge + mealTotalCharge + extraBedCharge;
   if (isOta && draft.otaManualAmount) {
     totalBaseRate = otaBaseTariff + extraBedCharge + extraRoomsCharge + extraBreakfastCharge + extensionCharge + otaEarlyCheckinCharge;
@@ -356,13 +372,14 @@ export default function CheckinWizardModal({
 
   const discountAmount = isOta ? 0 : Math.round((totalBaseRate * effectiveDiscountPct) / 100);
   const netChargeBeforeTax = Math.round(totalBaseRate - discountAmount);
-  const effectiveGstPct = Number(roomGstPct) || 5;
-  const gstAmount = isOta ? otaGstTariff : Math.round(netChargeBeforeTax * (effectiveGstPct / 100));
+  const gstAmount = isOta
+    ? Number((otaGstTariff + totalExtrasGst).toFixed(2))
+    : Math.round(netChargeBeforeTax * (effectiveGstPct / 100));
   let totalDue = isOta
-    ? (otaPackageAmt + extraBedCharge + extraRoomsCharge + extraBreakfastCharge + extensionCharge + otaEarlyCheckinCharge)
+    ? (otaPackageAmt + totalHotelExtras)
     : (netChargeBeforeTax + gstAmount);
   if (isOta && isOtaPrepaid) {
-    totalDue = Math.max(0, extraBedCharge + extraRoomsCharge + extraBreakfastCharge + extensionCharge + otaEarlyCheckinCharge);
+    totalDue = Math.max(0, totalHotelExtras);
   }
 
   // Step Nav validation
@@ -740,12 +757,14 @@ export default function CheckinWizardModal({
         extra_bed_rate: draft.extraBedRate,
         extraBedCharge: extraBedCharge,
         extra_bed_charge: extraBedCharge,
+        extraBedGst: extraBedGst,
+        extra_bed_gst: extraBedGst,
         checkinTime: draft.checkinTime,
         checkin_time: draft.checkinTime,
         approxCheckout: draft.approxCheckout,
         approx_checkout_time: draft.approxCheckout,
-        baseRate: basePrice,
-        room_rate: basePrice,
+        baseRate: (isOta && draft.otaManualAmount) ? (Number(draft.otaManualAmount) || basePrice) : basePrice,
+        room_rate: (isOta && draft.otaManualAmount) ? (Number(draft.otaManualAmount) || basePrice) : basePrice,
         discountPct: effectiveDiscountPct,
         discount_pct: effectiveDiscountPct,
         gstPct: effectiveGstPct,
@@ -763,6 +782,17 @@ export default function CheckinWizardModal({
         extra_meal_plan: isOta ? (draft.extraMealPlan || 'without_breakfast') : null,
         extraBreakfastCharge: isOta ? extraBreakfastCharge : 0,
         extra_breakfast_charge: isOta ? extraBreakfastCharge : 0,
+        extraBreakfastGst: isOta ? breakfastGst : 0,
+        extra_breakfast_gst: isOta ? breakfastGst : 0,
+        extraRoomsCharge: isOta ? extraRoomsCharge : 0,
+        extra_rooms_charge: isOta ? extraRoomsCharge : 0,
+        extraRoomsGst: isOta ? extraRoomsGst : 0,
+        extra_rooms_gst: isOta ? extraRoomsGst : 0,
+        totalExtrasGst: isOta ? totalExtrasGst : 0,
+        total_extras_gst: isOta ? totalExtrasGst : 0,
+        totalHotelExtras: isOta ? totalHotelExtras : 0,
+        total_hotel_extras: isOta ? totalHotelExtras : 0,
+        calculate_extras_gst: true,
         bookingSource: draft.bookingSource,
         booking_source: draft.bookingSource,
         otaPlatform: isOta ? draft.otaPlatform : null,
@@ -981,6 +1011,14 @@ export default function CheckinWizardModal({
           extra_rooms_charge: extraRoomsCharge,
           extraBreakfastCharge: extraBreakfastCharge,
           extra_breakfast_charge: extraBreakfastCharge,
+          extraBedGst: extraBedGst,
+          extra_bed_gst: extraBedGst,
+          extraBreakfastGst: isOta ? breakfastGst : 0,
+          extra_breakfast_gst: isOta ? breakfastGst : 0,
+          extraRoomsGst: extraRoomsGst,
+          extra_rooms_gst: extraRoomsGst,
+          totalHotelExtras: isOta ? totalHotelExtras : 0,
+          hotelExtrasTotal: isOta ? totalHotelExtras : 0,
           otaBillAmount: isOta ? (Number(draft.otaManualAmount) || (basePrice * nights)) : null,
           ota_bill_amount: isOta ? (Number(draft.otaManualAmount) || (basePrice * nights)) : null,
           memberDocuments: draft.memberDocuments || [],

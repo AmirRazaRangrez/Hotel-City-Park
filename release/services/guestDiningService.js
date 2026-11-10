@@ -311,12 +311,32 @@ async function submitGuestOrder({ token, items, notes = '', selectedRoom = '' })
     const existingTable = db.prepare('SELECT id, active_cart_json FROM restaurant_tables WHERE table_number IN (?, ?)').get(rsTableNumber, `RS-${targetRoom}`);
     if (!existingTable) {
       db.prepare(`
-        INSERT INTO restaurant_tables (table_number, table_type, status, active_cart_json, waiter_name, special_notes)
-        VALUES (?, 'room_service', 'occupied', ?, 'Customer Web Link [RSCW]', ?)
+        INSERT INTO restaurant_tables (table_number, table_type, status, active_cart_json, waiter_name, special_notes, order_started_at)
+        VALUES (?, 'room_service', 'occupied', ?, 'Customer Web Link [RSCW]', ?, datetime('now', 'localtime'))
       `).run(rsTableNumber, JSON.stringify(cleanItems), notes || `Guest Order Batch #${batchNumber}`);
+    } else {
+      let currentCart = [];
+      try { currentCart = JSON.parse(existingTable.active_cart_json || '[]'); } catch (_) {}
+      const mergedCart = [...currentCart, ...cleanItems];
+      db.prepare(`
+        UPDATE restaurant_tables
+        SET active_cart_json = ?, status = 'occupied', waiter_name = 'Customer Web Link [RSCW]', special_notes = ?
+        WHERE id = ?
+      `).run(JSON.stringify(mergedCart), notes || `Guest Order Batch #${batchNumber}`, existingTable.id);
     }
   } catch (e) {
     console.warn('[GuestDining] Error syncing RS table:', e.message);
+  }
+
+  // ⚡ INSTANT LOCAL REALTIME BROADCAST:
+  // Reflects immediately on all Waiter Panels & Restaurant POS over Local Wi-Fi (Zero Tunnel Dependency!)
+  try {
+    const socketServer = require('./socketServer');
+    socketServer.broadcast('TABLES_UPDATED', { tableNumber: rsTableNumber, roomNumber: targetRoom, action: 'guest_order_submitted' });
+    socketServer.broadcast('GUEST_ORDERS_UPDATED', { roomNumber: targetRoom, orderId, orderNumber, batchNumber });
+    socketServer.broadcast('ORDERS_UPDATED', { roomNumber: targetRoom, orderId, orderNumber, batchNumber });
+  } catch (wsErr) {
+    console.warn('[GuestDining] Notice broadcasting local socket event:', wsErr.message);
   }
 
   // Dispatch Push Notification to Admin APK
@@ -486,10 +506,20 @@ function acceptKitchenOrder(orderId, acceptedBy = 'Restaurant Counter') {
       `).run(rsTableNumber, JSON.stringify(items), JSON.stringify(items), order.notes || `Room ${targetRoom} (${order.guest_name || 'Guest'})`);
     }
 
-    // Immediately push updated tables snapshot to Supabase so Waiter APK sees this room service order!
+    // Immediately push updated tables snapshot to Cloud so Waiter APK sees this room service order!
     try {
       const firebaseService = require('./firebaseService');
       firebaseService.syncWaiterDataToCloud(db).catch(() => {});
+    } catch (_) {}
+
+    // ⚡ INSTANT LOCAL REALTIME BROADCAST:
+    // Reflects on Waiter Panel, Kitchen Screen, and Restaurant POS instantly
+    try {
+      const socketServer = require('./socketServer');
+      socketServer.broadcast('TABLES_UPDATED', { tableNumber: rsTableNumber, roomNumber: targetRoom, action: 'order_accepted' });
+      socketServer.broadcast('ORDERS_UPDATED', { roomNumber: targetRoom, orderId, status: 'accepted' });
+      socketServer.broadcast('GUEST_ORDERS_UPDATED', { roomNumber: targetRoom, orderId, status: 'accepted' });
+      socketServer.broadcast('FOLIO_UPDATED', { room_number: targetRoom });
     } catch (_) {}
   } catch (e) {
     console.warn('[GuestDining] Notice updating restaurant table:', e.message);
@@ -550,6 +580,17 @@ function cancelKitchenOrder(orderId, reason = 'restaurant_closed', cancelledBy =
     if (typeof firebaseService.deleteCloudRoomCharge === 'function') {
       firebaseService.deleteCloudRoomCharge(order.order_number).catch(() => {});
     }
+    if (typeof firebaseService.syncWaiterDataToCloud === 'function') {
+      firebaseService.syncWaiterDataToCloud(db).catch(() => {});
+    }
+  } catch (_) {}
+
+  // ⚡ INSTANT LOCAL REALTIME BROADCAST:
+  try {
+    const socketServer = require('./socketServer');
+    socketServer.broadcast('TABLES_UPDATED', { roomNumber: targetRoom, action: 'order_cancelled' });
+    socketServer.broadcast('GUEST_ORDERS_UPDATED', { roomNumber: targetRoom, orderId, status: 'cancelled' });
+    socketServer.broadcast('ORDERS_UPDATED', { roomNumber: targetRoom, orderId, status: 'cancelled' });
   } catch (_) {}
 
   return {

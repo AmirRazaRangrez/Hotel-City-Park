@@ -641,8 +641,7 @@ body.dark-theme .app-container:has(#view-hospitality.active),
   height: auto !important;
   max-height: none !important;
   min-height: 100dvh !important;
-  overflow-y: visible !important;
-  overflow-x: clip !important;
+  overflow: visible !important;
   display: block !important;
   padding: 0 18px 80px !important;
   background: var(--bg-app, #f5f5f7) !important;
@@ -2267,6 +2266,87 @@ body.dark-theme .stay-payment-summary-card .summary-grand-total-banner {
   align-items: center;
   justify-content: space-between;
   background: var(--bg-surface-secondary);
+}
+
+/* Checkout settlement is a full-screen column. The body must shrink and scroll
+   so GST / refund details are not clipped under the footer. */
+#folio-settlement-modal-overlay {
+  padding: 0 !important;
+  overflow: hidden !important;
+  align-items: stretch !important;
+}
+
+#folio-settlement-modal-overlay .modal-container {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+#folio-settlement-modal-overlay .modal-header,
+#folio-settlement-modal-overlay .modal-footer {
+  flex-shrink: 0 !important;
+}
+
+#folio-settlement-modal-overlay .modal-header {
+  padding: 8px 24px !important;
+}
+
+#folio-settlement-modal-overlay .modal-header h3 {
+  font-size: 1.2rem !important;
+}
+
+#folio-settlement-modal-overlay .modal-footer {
+  padding: 8px 20px !important;
+}
+
+#folio-settlement-modal-overlay .modal-body {
+  display: block !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  padding: 8px 24px 10px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+}
+
+#folio-settlement-modal-overlay .folio-settlement-summary-bar {
+  gap: 8px !important;
+  padding: 8px 12px !important;
+}
+
+#folio-settlement-modal-overlay .folio-settlement-summary-bar .final-due-col strong {
+  font-size: 1.15rem !important;
+}
+
+#folio-settlement-modal-overlay .unified-pay-grid {
+  gap: 8px !important;
+  margin-bottom: 6px !important;
+}
+
+#folio-settlement-modal-overlay .pay-method-box {
+  padding: 6px 8px !important;
+  gap: 4px !important;
+}
+
+#folio-settlement-modal-overlay .paybox-icon {
+  font-size: 1.05rem !important;
+  line-height: 1 !important;
+}
+
+#folio-settlement-modal-overlay .paybox-name {
+  font-size: 0.82rem !important;
+}
+
+#folio-settlement-modal-overlay .paybox-desc {
+  display: none !important;
+}
+
+#folio-settlement-modal-overlay .paybox-input {
+  height: 30px !important;
+  padding: 2px 0 !important;
 }
 
 /* ==========================================================================
@@ -4441,19 +4521,28 @@ body.dark-theme .doc-action-card {
 /* ==========================================================================
    FULL-PAGE DEDICATED ROOM FOLIO & CHECKOUT SCREEN STYLES
    ========================================================================== */
+@media print {
+  .folio-page-header { display: none !important; }
+  #view-room-folio { padding-top: 0 !important; }
+}
+
 #view-room-folio {
-  animation: fadeIn 0.3s ease;
+  animation: none !important;
   min-height: 100%;
   width: 100%;
   box-sizing: border-box;
-  overflow-y: visible !important;
+  overflow: visible !important;
+  padding-top: 92px !important;
   padding-bottom: 80px;
 }
 
 .folio-page-header {
-  position: sticky !important;
+  position: fixed !important;
   top: 0 !important;
-  z-index: 100 !important;
+  left: 0 !important;
+  right: 0 !important;
+  margin: 0 !important;
+  z-index: 400 !important;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -14073,9 +14162,12 @@ body.dark-theme .stay-metric-pill {
    ROOM FOLIO PAGE HEADER & CONTROLS (HIGH CONTRAST DARK & LIGHT MODES)
    ========================================================================== */
 .folio-page-header {
-  position: sticky !important;
+  position: fixed !important;
   top: 0 !important;
-  z-index: 100 !important;
+  left: 0 !important;
+  right: 0 !important;
+  margin: 0 !important;
+  z-index: 400 !important;
   display: flex;
   align-items: center;
   justify-content: space-between;

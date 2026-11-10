@@ -119,7 +119,7 @@ function handleNotificationNavigation(router: any, response: any) {
 
 export default function Root(){
   const router = useRouter();
-  const {ready,token,load}=useAuth();
+  const {ready,token,baseUrl,load}=useAuth();
   useEffect(()=>{
     load();
     if(Platform.OS==='web' && typeof document !== 'undefined'){
@@ -298,6 +298,6 @@ export default function Root(){
       tokenSub?.remove();
       notifSub?.remove();
     };
-  }, [ready, token]);
+  }, [ready, token, baseUrl]);
  return <Stack screenOptions={{headerShown:false}}/>;
 }

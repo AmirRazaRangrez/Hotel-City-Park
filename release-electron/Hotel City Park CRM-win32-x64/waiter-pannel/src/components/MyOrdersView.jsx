@@ -11,21 +11,21 @@ export const extractOrderItems = (target) => {
     try {
       const p = JSON.parse(target.active_cart_json);
       if (Array.isArray(p) && p.length > 0) return p;
-    } catch (_) {}
+    } catch (_) { }
   }
   // Parse printed_cart_json
   if (typeof target.printed_cart_json === 'string' && target.printed_cart_json.trim()) {
     try {
       const p = JSON.parse(target.printed_cart_json);
       if (Array.isArray(p) && p.length > 0) return p;
-    } catch (_) {}
+    } catch (_) { }
   }
   // Parse items_json
   if (typeof target.items_json === 'string' && target.items_json.trim()) {
     try {
       const p = JSON.parse(target.items_json);
       if (Array.isArray(p) && p.length > 0) return p;
-    } catch (_) {}
+    } catch (_) { }
   }
   // If target itself is an array
   if (Array.isArray(target)) return target;
@@ -93,7 +93,7 @@ export default function MyOrdersView({
         if (isMounted && Array.isArray(rooms) && rooms.length > 0) {
           setLocalOccupiedRooms(rooms);
         }
-      }).catch(() => {});
+      }).catch(() => { });
     }
     return () => { isMounted = false; };
   }, []);
@@ -106,9 +106,9 @@ export default function MyOrdersView({
   const myName = currentUser?.full_name || currentUser?.username || 'Waiter';
   const myId = currentUser?.id;
 
-  const isManagerOrCaptain = 
-    currentUser?.role === 'manager' || 
-    currentUser?.role === 'admin' || 
+  const isManagerOrCaptain =
+    currentUser?.role === 'manager' ||
+    currentUser?.role === 'admin' ||
     currentUser?.role === 'restaurant' ||
     String(currentUser?.username || '').toLowerCase().includes('cap') ||
     String(currentUser?.username || '').toLowerCase().includes('admin');
@@ -137,8 +137,8 @@ export default function MyOrdersView({
     const dedupedMap = new Map();
     for (const t of rawActive) {
       const rawNum = String(t.table_number || t.name || t.id || '');
-      const cleanNum = rawNum.replace(/^RS-/i, '').replace(/^Room\s*/i, '').replace(/•.*$/, '').trim();
-      const isRS = t.table_type === 'room_service' || rawNum.startsWith('RS-') || rawNum.startsWith('Room ');
+      const cleanNum = rawNum.replace(/^(RSCW-|RS-|Room\s*)/i, '').replace(/•.*$/, '').trim();
+      const isRS = t.table_type === 'room_service' || rawNum.startsWith('RS-') || rawNum.startsWith('RSCW-') || rawNum.startsWith('Room ');
       const key = isRS ? `room_${cleanNum}` : (rawNum.startsWith('P-') ? `parcel_${rawNum}` : `table_${cleanNum || rawNum}`);
 
       if (!dedupedMap.has(key)) {
@@ -288,10 +288,10 @@ export default function MyOrdersView({
     if (!settleModalTable) return;
     try {
       setActionInProgress(`settle-${settleModalTable.id}`);
-      
-      const isRS = settleModalTable.table_type === 'room_service' || String(settleModalTable.table_number || '').startsWith('RS-');
+
+      const isRS = settleModalTable.table_type === 'room_service' || String(settleModalTable.table_number || '').startsWith('RS-') || String(settleModalTable.table_number || '').startsWith('RSCW-');
       const rawRoomNum = isRS
-        ? String(settleModalTable.table_number || '').replace(/^RS-/i, '').replace(/^Room\s*/i, '').replace(/•.*$/, '').trim()
+        ? String(settleModalTable.table_number || '').replace(/^(RSCW-|RS-|Room\s*)/i, '').replace(/•.*$/, '').trim()
         : '';
 
       // Extract items and calculate exact financial totals
@@ -365,8 +365,8 @@ export default function MyOrdersView({
             setActionInProgress(null);
             return;
           }
-          const roomObj = activeOccupiedRooms.find(r => 
-            String(r.room_number) === String(selectedRoomId) || 
+          const roomObj = activeOccupiedRooms.find(r =>
+            String(r.room_number) === String(selectedRoomId) ||
             String(r.id) === String(selectedRoomId)
           );
           const targetRoomNumber = String(roomObj?.room_number || selectedRoomId).replace(/^RS-/i, '').replace(/^Room\s*/i, '').trim();
@@ -381,7 +381,7 @@ export default function MyOrdersView({
             settlePayload.payment_method = tableRsPayMethod || 'cash';
             settlePayload.payment_mode = tableRsPayMethod || 'cash';
           }
-          settlePayload.customer_name = roomObj?.guest_name 
+          settlePayload.customer_name = roomObj?.guest_name
             ? `Room ${targetRoomNumber} - ${roomObj.guest_name}`
             : `Room ${targetRoomNumber}`;
           if (roomObj?.guest_phone && roomObj.guest_phone !== '—') {
@@ -434,9 +434,9 @@ export default function MyOrdersView({
   // Request Confirmation before executing settlement
   const requestSettleConfirmation = () => {
     if (!settleModalTable) return;
-    const isRS = settleModalTable.table_type === 'room_service' || String(settleModalTable.table_number || '').startsWith('RS-');
+    const isRS = settleModalTable.table_type === 'room_service' || String(settleModalTable.table_number || '').startsWith('RS-') || String(settleModalTable.table_number || '').startsWith('RSCW-');
     const rawRoomNum = isRS
-      ? String(settleModalTable.table_number || '').replace(/^RS-/i, '').replace(/^Room\s*/i, '').replace(/•.*$/, '').trim()
+      ? String(settleModalTable.table_number || '').replace(/^(RSCW-|RS-|Room\s*)/i, '').replace(/•.*$/, '').trim()
       : '';
 
     const items = extractOrderItems(settleModalTable);
@@ -678,7 +678,7 @@ export default function MyOrdersView({
                       onClick={(e) => {
                         e.stopPropagation();
                         const numStr = String(t.table_number || '');
-                        const isRS = t.table_type === 'room_service' || numStr.startsWith('RS-');
+                        const isRS = t.table_type === 'room_service' || numStr.startsWith('RS-') || numStr.startsWith('RSCW-');
                         const isP = t.table_type === 'parcel' || numStr.startsWith('P-');
                         onSelectDestinationForMore({
                           type: isRS ? 'room' : (isP ? 'parcel' : 'table'),
@@ -739,8 +739,8 @@ export default function MyOrdersView({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        const isRoom = t.table_type === 'room_service' || String(t.table_number || '').startsWith('RS-');
-                        const rawNum = String(t.table_number || '').replace(/^RS-/i, '').replace(/^Room\s*/i, '').replace(/•.*$/, '').trim();
+                        const isRoom = t.table_type === 'room_service' || String(t.table_number || '').startsWith('RS-') || String(t.table_number || '').startsWith('RSCW-');
+                        const rawNum = String(t.table_number || '').replace(/^(RSCW-|RS-|Room\s*)/i, '').replace(/•.*$/, '').trim();
                         if (isRoom && rawNum) setSelectedRoomId(rawNum);
                         else setSelectedRoomId('');
                         setRoomCardSearch('');
@@ -897,7 +897,7 @@ export default function MyOrdersView({
                         onClick={(e) => {
                           e.stopPropagation();
                           const tableStr = String(o.table_number || '');
-                          const isRS = tableStr.startsWith('RS-') || o.destination_type === 'room';
+                          const isRS = tableStr.startsWith('RS-') || tableStr.startsWith('RSCW-') || o.destination_type === 'room';
                           const isP = tableStr.startsWith('P-') || o.destination_type === 'parcel';
                           onSelectDestinationForMore({
                             type: isRS ? 'room' : (isP ? 'parcel' : 'table'),
@@ -1207,7 +1207,7 @@ export default function MyOrdersView({
                 onClick={() => {
                   const data = selectedOrder.data;
                   const numStr = String(data.table_number || data.name || '');
-                  const isRS = data.table_type === 'room_service' || numStr.startsWith('RS-');
+                  const isRS = data.table_type === 'room_service' || numStr.startsWith('RS-') || numStr.startsWith('RSCW-');
                   const isP = data.table_type === 'parcel' || numStr.startsWith('P-');
                   setSelectedOrder(null);
                   onSelectDestinationForMore({
@@ -1399,16 +1399,16 @@ export default function MyOrdersView({
             onClick={(e) => e.stopPropagation()}
           >
             {(() => {
-              const isRS = settleModalTable.table_type === 'room_service' || String(settleModalTable.table_number || '').startsWith('RS-');
-              const rawRoomNum = String(settleModalTable.table_number || '').replace(/^RS-/i, '').trim();
+              const isRS = settleModalTable.table_type === 'room_service' || String(settleModalTable.table_number || '').startsWith('RS-') || String(settleModalTable.table_number || '').startsWith('RSCW-');
+              const rawRoomNum = String(settleModalTable.table_number || '').replace(/^(RSCW-|RS-)/i, '').trim();
               const settleItems = extractOrderItems(settleModalTable);
               const settleSubtotal = settleModalTable.cart_total || settleItems.reduce((s, it) => s + ((Number(it.price) || 0) * (it.qty || it.quantity || 1)), 0);
               const settleGst = Math.round((settleSubtotal * 5) / 100);
               const settleGrand = Math.round(Number(settleModalTable.total_amount || (settleSubtotal + settleGst)) || (settleSubtotal + settleGst));
 
               if (isRS) {
-                const matchedRoom = activeOccupiedRooms.find(r => 
-                  String(r.room_number) === String(rawRoomNum) || 
+                const matchedRoom = activeOccupiedRooms.find(r =>
+                  String(r.room_number) === String(rawRoomNum) ||
                   String(r.id) === String(settleModalTable.room_id)
                 );
 
@@ -1619,8 +1619,8 @@ export default function MyOrdersView({
 
                   {/* Room Folio Sub-options for Dine-in Table: Visual Square Room Grid */}
                   {paymentMode === 'room_folio' && (() => {
-                    const selectedRoomObj = activeOccupiedRooms.find(r => 
-                      String(r.room_number) === String(selectedRoomId) || 
+                    const selectedRoomObj = activeOccupiedRooms.find(r =>
+                      String(r.room_number) === String(selectedRoomId) ||
                       String(r.id) === String(selectedRoomId)
                     );
 

@@ -2,13 +2,18 @@ import { Capacitor } from '@capacitor/core';
 import bcrypt from 'bcryptjs';
 
 export const CLOUD_TUNNEL_URL = 'https://lender-lean-tables-patent.trycloudflare.com';
-export const LOCAL_WIFI_IP = '10.120.45.195';
+export const LOCAL_WIFI_IP = (typeof window !== 'undefined' && window.location?.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
+  ? window.location.hostname
+  : '10.160.83.195';
 
 let lastLocalSuccess = 0;
 let lastLocalFailure = 0;
 
 export const isLocalHealthy = () => {
-  // If local failed recently (within last 30s) and hasn't succeeded since, bypass local wait and use cloud immediately
+  // If running in browser or on local Wi-Fi (HTTP), local connection is 100% resilient and has zero tunnel dependency!
+  if (typeof window !== 'undefined' && window.location.protocol === 'http:') {
+    return true;
+  }
   if (lastLocalFailure > lastLocalSuccess && Date.now() - lastLocalFailure < 30000) {
     return false;
   }
@@ -112,6 +117,12 @@ export const getBaseUrl = () => {
 
   // 2. If running inside the Android APK (Native Mobile)
   if (isNativePlatform()) {
+    const customHost = typeof localStorage !== 'undefined' ? localStorage.getItem('hcp_waiter_server_host') : null;
+    if (customHost && customHost.trim()) {
+      let clean = customHost.trim().replace(/\/+$/, '');
+      if (!clean.endsWith('/api')) clean += '/api';
+      return clean;
+    }
     return `http://${LOCAL_WIFI_IP}:3000/api`;
   }
 

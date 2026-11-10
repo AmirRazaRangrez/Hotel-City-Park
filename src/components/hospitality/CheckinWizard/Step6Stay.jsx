@@ -216,6 +216,10 @@ export default function Step6Stay({
         }
       });
 
+      if (res?.notified === false) {
+        showToast(res.error || 'Owner phone was not notified. The discount request was not delivered.', 'red');
+        return;
+      }
       if (res && res.id) {
         setDiscountPermissionModal(prev => ({
           ...prev,
@@ -223,6 +227,8 @@ export default function Step6Stay({
           approvalId: res.id
         }));
         showToast('Discount approval request sent to Admin phone!', 'blue');
+      } else {
+        showToast(res?.error || 'Could not send permission request.', 'red');
       }
     } catch (err) {
       showToast('Could not send permission request: ' + (err?.message || 'Server error'), 'red');
@@ -559,20 +565,42 @@ export default function Step6Stay({
   const otaBaseTariff = Math.round((otaPackageAmount / (1 + otaGstRate / 100)) * 100) / 100;
   const otaGstTariff = Number((otaPackageAmount - otaBaseTariff).toFixed(2));
 
+  const earlyCheckinGstRate = Number(room.ota_early_checkin_gst_pct || effectiveGstPct || 5);
+  const otaEarlyCheckinCharge = (isOta && draft.isEarlyCheckin) ? otaEarlyPrice : 0;
+  const otaEarlyCheckinGst = (isOta && draft.isEarlyCheckin) ? Math.round(otaEarlyPrice * (earlyCheckinGstRate / 100)) : 0;
+
   const tariffSubtotal = isOta
     ? (otaBaseTariff + extraBedCharge + extraRoomsCharge)
     : ((basePrice * nights) + extraBedCharge);
-  let totalBaseRate = tariffSubtotal + extensionCharge + mealTotalCharge;
+  let totalBaseRate = tariffSubtotal + extensionCharge + mealTotalCharge + (isOta ? otaEarlyCheckinCharge : 0);
+
+  // Extra Bookings GST calculations for both OTA and Standard bookings
+  const extraBedGstRate = Number(room.extra_bed_gst_pct || effectiveGstPct || 5);
+  const extraBedGst = Math.round(extraBedCharge * (extraBedGstRate / 100));
+
+  const breakfastGstRate = Number(room.breakfast_gst_pct || 5);
+  const breakfastGst = Math.round(mealTotalCharge * (breakfastGstRate / 100));
+
+  const extGstRate = Number(effectiveGstPct || 5);
+  const extGst = Math.round(extensionCharge * (extGstRate / 100));
+
+  const extraRoomsGstRate = Number(effectiveGstPct || 5);
+  const extraRoomsGst = Math.round(extraRoomsCharge * (extraRoomsGstRate / 100));
+
+  const totalExtrasGst = extraBedGst + breakfastGst + extGst + extraRoomsGst + otaEarlyCheckinGst;
+  const totalHotelExtras = isOta
+    ? ((extraBedCharge + extraBedGst) + (extraRoomsCharge + extraRoomsGst) + (extraBreakfastCharge + breakfastGst) + (extensionCharge + extGst) + (otaEarlyCheckinCharge + otaEarlyCheckinGst))
+    : 0;
 
   const discountAmount = isOta ? 0 : Math.round((totalBaseRate * effectiveDiscountPct) / 100);
   const netChargeBeforeTax = Math.round(totalBaseRate - discountAmount);
-  const gstAmount = isOta ? otaGstTariff : Math.round(netChargeBeforeTax * (effectiveGstPct / 100));
+  const gstAmount = isOta
+    ? Number((otaGstTariff + totalExtrasGst).toFixed(2))
+    : Math.round(netChargeBeforeTax * (effectiveGstPct / 100));
   const isOtaPrepaid = isOta && draft.isPrepaid === true;
-  const otaEarlyCheckinCharge = (isOta && draft.isEarlyCheckin) ? otaEarlyPrice : 0;
   const totalNetDue = isOta
-    ? (otaPackageAmount + extraBedCharge + extraRoomsCharge + extraBreakfastCharge + extensionCharge + otaEarlyCheckinCharge)
+    ? (isOtaPrepaid ? totalHotelExtras : (otaPackageAmount + totalHotelExtras))
     : (netChargeBeforeTax + gstAmount);
-  const totalHotelExtras = isOta ? (extraBedCharge + extraRoomsCharge + extraBreakfastCharge + extensionCharge + otaEarlyCheckinCharge) : 0;
 
   // Helper to reduce adults down to target capacity by decreasing the most recently added member first
   // "if deleting extra bed automatically in decreasing recent added member but if increase extra bed should not add automatic extra member"
@@ -2472,12 +2500,12 @@ export default function Step6Stay({
                       <span style={{ fontWeight: 750, color: '#334155' }}>Hotel Extra Mattress:</span>
                       <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
                         {extraBedCharge > 0
-                          ? `${currentExtraBeds > otaBookedExtraBeds ? (currentExtraBeds - otaBookedExtraBeds) : currentExtraBeds} Mattress(es)${nights > 1 ? ` (${nights} Nights)` : ''}`
+                          ? `${currentExtraBeds > otaBookedExtraBeds ? (currentExtraBeds - otaBookedExtraBeds) : currentExtraBeds} Mattress(es)${nights > 1 ? ` (${nights} Nights)` : ''} • Base: ₹${extraBedCharge.toLocaleString('en-IN')} + GST: ₹${extraBedGst.toLocaleString('en-IN')}`
                           : (otaExtraAdults > 0 ? `${otaExtraAdults} Extra Guest(s) (Within base bed capacity • ₹0)` : '0 Extra Mattress (₹0)')}
                       </div>
                     </div>
                     <strong style={{ color: extraBedCharge > 0 ? '#b45309' : '#64748b' }}>
-                      {extraBedCharge > 0 ? `+ ${formatCurrency(extraBedCharge)}` : '₹0'}
+                      {extraBedCharge > 0 ? `+ ${formatCurrency(extraBedCharge + extraBedGst)}` : '₹0'}
                     </strong>
                   </div>
 
@@ -2487,12 +2515,12 @@ export default function Step6Stay({
                       <span style={{ fontWeight: 750, color: '#334155' }}>Additional Rooms:</span>
                       <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
                         {otaExtraRooms.length > 0
-                          ? `${otaExtraRooms.length} Room(s)${nights > 1 ? ` (${nights} Nights)` : ''}`
+                          ? `${otaExtraRooms.length} Room(s)${nights > 1 ? ` (${nights} Nights)` : ''} • Base: ₹${extraRoomsCharge.toLocaleString('en-IN')} + GST: ₹${extraRoomsGst.toLocaleString('en-IN')}`
                           : '0 Additional Rooms (₹0)'}
                       </div>
                     </div>
                     <strong style={{ color: otaExtraRooms.length > 0 ? '#0284c7' : '#64748b' }}>
-                      {otaExtraRooms.length > 0 ? `+ ${formatCurrency(extraRoomsCharge)}` : '₹0'}
+                      {otaExtraRooms.length > 0 ? `+ ${formatCurrency(extraRoomsCharge + extraRoomsGst)}` : '₹0'}
                     </strong>
                   </div>
 
@@ -2502,12 +2530,12 @@ export default function Step6Stay({
                       <span style={{ fontWeight: 750, color: '#334155' }}>Breakfast for Extra Guests:</span>
                       <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
                         {extraBreakfastCharge > 0
-                          ? `${otaExtraAdults} Adult(s) × ₹${breakfastRate}${nights > 1 ? ` (${nights} Nights)` : ''}`
+                          ? `${otaExtraAdults} Adult(s) × ₹${breakfastRate}${nights > 1 ? ` (${nights} Nights)` : ''} • Base: ₹${extraBreakfastCharge.toLocaleString('en-IN')} + GST: ₹${breakfastGst.toLocaleString('en-IN')}`
                           : 'Without Breakfast (₹0)'}
                       </div>
                     </div>
                     <strong style={{ color: extraBreakfastCharge > 0 ? '#d97706' : '#64748b' }}>
-                      {extraBreakfastCharge > 0 ? `+ ${formatCurrency(extraBreakfastCharge)}` : '₹0'}
+                      {extraBreakfastCharge > 0 ? `+ ${formatCurrency(extraBreakfastCharge + breakfastGst)}` : '₹0'}
                     </strong>
                   </div>
 
@@ -2516,9 +2544,9 @@ export default function Step6Stay({
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f1f5f9' }}>
                       <div>
                         <span style={{ fontWeight: 750, color: '#334155' }}>Extended Checkout Surcharge:</span>
-                        <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Late checkout fee</div>
+                        <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Late checkout fee • Base: ₹${extensionCharge.toLocaleString('en-IN')} + GST: ₹${extGst.toLocaleString('en-IN')}</div>
                       </div>
-                      <strong style={{ color: '#b45309' }}>+ {formatCurrency(extensionCharge)}</strong>
+                      <strong style={{ color: '#b45309' }}>+ {formatCurrency(extensionCharge + extGst)}</strong>
                     </div>
                   )}
 
@@ -2528,10 +2556,10 @@ export default function Step6Stay({
                       <div>
                         <span style={{ fontWeight: 750, color: '#334155' }}>🌅 Early Check-In Surcharge:</span>
                         <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                          Actual: {draft.earlyCheckinTime || 'Early'} (Scheduled: {draft.originalCheckinTime || '12:00 PM'})
+                          Actual: {draft.earlyCheckinTime || 'Early'} (Scheduled: {draft.originalCheckinTime || '12:00 PM'}) • Base: ₹${otaEarlyCheckinCharge.toLocaleString('en-IN')} + GST: ₹${otaEarlyCheckinGst.toLocaleString('en-IN')}
                         </div>
                       </div>
-                      <strong style={{ color: '#0284c7' }}>+ {formatCurrency(otaEarlyCheckinCharge)}</strong>
+                      <strong style={{ color: '#0284c7' }}>+ {formatCurrency(otaEarlyCheckinCharge + otaEarlyCheckinGst)}</strong>
                     </div>
                   )}
                 </div>
@@ -4067,15 +4095,18 @@ export default function Step6Stay({
         const roomTariffSubtotal = isOta ? otaPackageAmount : (roomNetBaseTariff + roomGstAmt);
 
         const extraBedGstRate = Number(room.extra_bed_gst_pct || effectiveGstPct || 5);
-        const extraBedGstAmt = isOta ? 0 : Math.round(extraBedCharge * (extraBedGstRate / 100));
+        const extraBedGstAmt = Math.round(extraBedCharge * (extraBedGstRate / 100));
         const extraBedTotalAmt = extraBedCharge + extraBedGstAmt;
 
         const breakfastGstRate = Number(room.breakfast_gst_pct || 5);
-        const breakfastGstAmt = isOta ? 0 : Math.round(mealTotalCharge * (breakfastGstRate / 100));
+        const breakfastGstAmt = Math.round(mealTotalCharge * (breakfastGstRate / 100));
         const breakfastTotalAmt = mealTotalCharge + breakfastGstAmt;
 
-        const extGstAmt = isOta ? 0 : Math.round(extensionCharge * (effectiveGstPct / 100));
+        const extGstAmt = Math.round(extensionCharge * (effectiveGstPct / 100));
         const extTotalAmt = extensionCharge + extGstAmt;
+
+        const extraRoomsGstAmt = Math.round(extraRoomsCharge * (effectiveGstPct / 100));
+        const extraRoomsTotalAmt = extraRoomsCharge + extraRoomsGstAmt;
 
         const finalGrandTotal = (isOta && isOtaPrepaid) ? totalHotelExtras : totalNetDue;
 
@@ -4157,6 +4188,28 @@ export default function Step6Stay({
                 </div>
               )}
 
+              {/* Row: Extra Room Charges if active */}
+              {extraRoomsCharge > 0 && (
+                <div className="summary-row summary-row-extension">
+                  <div>
+                    <div className="summary-row-label">
+                      <span>🏨</span> Extra Room Charges ({otaExtraRooms.length} {otaExtraRooms.length > 1 ? 'Rooms' : 'Room'} × {nights === 1 ? '24 Hours' : `${nights * 24} Hours (${nights} × 24 hrs)`})
+                    </div>
+                    <div className="summary-row-desc">
+                      Base: ₹{extraRoomsCharge.toLocaleString('en-IN')} • GST ({effectiveGstPct}%): +₹{extraRoomsGstAmt.toLocaleString('en-IN')}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div className="summary-row-price">
+                      ₹{extraRoomsTotalAmt.toLocaleString('en-IN')}
+                    </div>
+                    <div className="summary-row-breakdown">
+                      Base: ₹{extraRoomsCharge.toLocaleString('en-IN')} + GST: ₹{extraRoomsGstAmt.toLocaleString('en-IN')}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Row 3: Breakfast (Base & GST) if active */}
               {mealTotalCharge > 0 && (
                 <div className="summary-row summary-row-breakfast">
@@ -4209,15 +4262,15 @@ export default function Step6Stay({
                       <span>🌅</span> Early Check-in Surcharge (OTA)
                     </div>
                     <div className="summary-row-desc">
-                      Scheduled: {draft.originalCheckinTime || '12:00 PM'} • Actual: {draft.earlyCheckinTime || 'Early'}
+                      Scheduled: {draft.originalCheckinTime || '12:00 PM'} • Actual: {draft.earlyCheckinTime || 'Early'} • GST ({earlyCheckinGstRate}%): +₹{otaEarlyCheckinGst.toLocaleString('en-IN')}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div className="summary-row-price">
-                      ₹{otaEarlyCheckinCharge.toLocaleString('en-IN')}
+                      ₹{(otaEarlyCheckinCharge + otaEarlyCheckinGst).toLocaleString('en-IN')}
                     </div>
                     <div className="summary-row-breakdown">
-                      Fixed Early Check-In Fee
+                      Base: ₹{otaEarlyCheckinCharge.toLocaleString('en-IN')} + GST: ₹{otaEarlyCheckinGst.toLocaleString('en-IN')}
                     </div>
                   </div>
                 </div>

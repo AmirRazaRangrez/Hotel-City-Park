@@ -219,6 +219,12 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
   const [isLoading, setIsLoading] = useState(() => {
     return !(folioMemoryCache.has(roomId) || isMatchingRoom);
   });
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [roomId]);
+
   const [isExtendOpen, setIsExtendOpen] = useState(false);
   const isExtendOpenRef = useRef(false);
   useEffect(() => {
@@ -272,6 +278,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
   // Extra Expenses / Loss / Damage State
   const [isAddExpenseModalOpen, setIsAddExpenseModalOpen] = useState(false);
   const [expenseReason, setExpenseReason] = useState('');
+  const [expenseReasonOpen, setExpenseReasonOpen] = useState(false);
   const [expenseCategory, setExpenseCategory] = useState('damage');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseGstPct, setExpenseGstPct] = useState(5);
@@ -354,17 +361,17 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
       const isBookingOta = String(r.booking_source || raw.booking_source || r.source || '').toUpperCase() === 'OTA';
       const isOtaPayAtHotel = isBookingOta && (
         summary.isOtaPayAtHotel === true ||
-        String(r.rate_type || '').toLowerCase().includes('hotel')
+        String(r.rate_type || '').toLowerCase().includes('hotel') ||
+        parseInt(r.is_prepaid) === 0 ||
+        r.is_prepaid === false ||
+        r.is_prepaid === '0'
       );
       const isOtaPrepaid = isBookingOta && !isOtaPayAtHotel && (
         summary.isOtaPrepaid === true ||
         r.is_prepaid === 1 ||
         r.is_prepaid === '1' ||
         r.is_prepaid === true ||
-        r.rate_type === 'prepaid' ||
-        Boolean(r.ota_platform) ||
-        Boolean(raw.ota_platform) ||
-        Number(r.total_paid || 0) === 0
+        r.rate_type === 'prepaid'
       );
 
       const foodTotal = Number(summary.foodTotal ?? 0);
@@ -1345,7 +1352,10 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
   const isOtaPayAtHotel = isOtaBooking && (
     folioData.isOtaPayAtHotel === true ||
     folioData.summary?.isOtaPayAtHotel === true ||
-    String(folioData.rateType || folioData.rate_type || '').toLowerCase().includes('hotel')
+    String(folioData.rateType || folioData.rate_type || '').toLowerCase().includes('hotel') ||
+    parseInt(folioData.is_prepaid ?? folioData.room?.is_prepaid) === 0 ||
+    (folioData.is_prepaid ?? folioData.room?.is_prepaid) === false ||
+    (folioData.is_prepaid ?? folioData.room?.is_prepaid) === '0'
   );
   const isOtaPrepaid = isOtaBooking && !isOtaPayAtHotel && (
     folioData.isOtaPrepaid === true ||
@@ -1358,9 +1368,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
     folioData.rateType === 'prepaid' ||
     folioData.rate_type === 'prepaid' ||
     folioData.room?.is_prepaid === 1 ||
-    folioData.room?.rate_type === 'prepaid' ||
-    Boolean(folioData.otaPlatform || folioData.ota_platform || folioData.room?.ota_platform) ||
-    Number(folioData.advancePaid || folioData.room?.total_paid || 0) === 0
+    folioData.room?.rate_type === 'prepaid'
   );
   const otaBookedAdults = isOtaBooking ? (folioData.ota_booked_adults ?? folioData.otaBookedAdults ?? 1) : null;
   const otaBookedChildren = isOtaBooking ? (folioData.ota_booked_children ?? folioData.otaBookedChildren ?? 0) : null;
@@ -1373,6 +1381,64 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
   const voucherIncludedBeds = isOtaBooking 
     ? (otaBookedExtraBeds > 0 ? otaBookedExtraBeds : Math.max(0, (Number(folioData.extraBeds) || 0) - hotelChargedBeds)) 
     : 0;
+
+  const pendingRestaurantOrders = (folioData.restaurantOrders || [])
+    .filter(o => (Number(o.is_paid) === 0 || o.payment_status === 'pending') && Number(o.is_paid) !== 1);
+  const pendingBarOrders = (folioData.barOrders || [])
+    .filter(o => (Number(o.is_paid) === 0 || o.payment_status === 'pending') && Number(o.is_paid) !== 1);
+  const globalPendingFoodTotal = pendingRestaurantOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
+  const globalPendingBarTotal = pendingBarOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
+  const globalFnbPending = globalPendingFoodTotal + globalPendingBarTotal;
+  const globalAdvancePaid = Number(folioData.advancePaid || folioData.initialPaid || folioData.room?.initial_paid || folioData.room?.total_paid || 0);
+  const otaEarlyFeeVal = (folioData.bookingSource === 'OTA' && folioData.isEarlyCheckin)
+    ? Number(folioData.earlyCheckinCharge !== undefined && folioData.earlyCheckinCharge !== null ? folioData.earlyCheckinCharge : (folioData.ota_early_checkin_price || 900))
+    : 0;
+  const hotelExtrasChargeVal = Number(folioData.extraBedCharge || 0) + Number(folioData.extra_rooms_charge || 0) + Number(folioData.extra_breakfast_charge || 0) + otaEarlyFeeVal;
+  const globalStayNet = isOtaPrepaid
+    ? (globalAdvancePaid > 0 ? Math.max(hotelExtrasChargeVal, globalAdvancePaid) : hotelExtrasChargeVal)
+    : Number(
+        folioData.stayCalcNow?.roomCharge ??
+        folioData.stayCalcNow?.grandTotal ??
+        folioData.stayCalcDeclared?.roomCharge ??
+        folioData.roomCharge ??
+        folioData.originalRoomCharge ??
+        0
+      );
+  const globalRawStayBalance = isOtaPrepaid
+    ? (hotelExtrasChargeVal - globalAdvancePaid)
+    : (globalStayNet - globalAdvancePaid);
+  const allExtraExpenses = folioData?.extraExpenses || [];
+  const globalExpensesTotal = Number(folioData?.expensesTotal || allExtraExpenses.reduce((sum, e) => sum + Number(e.total || e.amount || 0), 0));
+  const globalNetFolioBalance = globalRawStayBalance + globalFnbPending + globalExpensesTotal;
+  const folioDueAmount = globalNetFolioBalance > 0.5 ? Math.round(globalNetFolioBalance) : 0;
+  const folioRefundAmount = globalNetFolioBalance < -0.5 ? Math.round(Math.abs(globalNetFolioBalance)) : 0;
+
+  const otaVoucherVal = Number(
+    folioData.otaBillAmount ||
+    folioData.ota_bill_amount ||
+    folioData.room?.ota_bill_amount ||
+    folioData.summary?.otaBillAmount ||
+    0
+  );
+
+  // Accurate Stay Details summary row calculations (full parity with bottom KPI tiles & APK)
+  const summaryRoomTariff = isOtaBooking && otaVoucherVal > 0
+    ? Number(folioData.room?.room_rate || folioData.baseRoomTariff || Math.round((otaVoucherVal / 1.05) * 100) / 100)
+    : Number(folioData.roomCharge || folioData.room?.total_room_charge || folioData.room?.price || 0);
+
+  const summaryTotalBill = isOtaPrepaid
+    ? (otaVoucherVal + hotelExtrasChargeVal + globalPendingFoodTotal + globalPendingBarTotal + globalExpensesTotal)
+    : (isOtaPayAtHotel && otaVoucherVal > 0
+        ? (otaVoucherVal + hotelExtrasChargeVal + globalPendingFoodTotal + globalPendingBarTotal + globalExpensesTotal)
+        : Number(folioData.grandTotal ?? folioData.netTotalCharge ?? folioData.summary?.grandTotal ?? ((folioData.roomCharge || 0) + globalPendingFoodTotal + globalPendingBarTotal + globalExpensesTotal)));
+
+  const summaryTotalPaid = isOtaPrepaid
+    ? (otaVoucherVal + globalAdvancePaid)
+    : globalAdvancePaid;
+
+  const summaryBalanceDue = isOtaPrepaid
+    ? folioDueAmount
+    : Number(folioData.balanceDue ?? folioData.summary?.balanceDue ?? Math.max(0, summaryTotalBill - summaryTotalPaid));
 
   const buildFolioPrintPayload = () => {
     if (!folioData) return null;
@@ -1394,13 +1460,9 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
       stayNights = Math.max(1, Math.round((checkoutDateObj - checkinDateObj) / (1000 * 60 * 60 * 24)));
     }
 
-    const pendingRestaurant = (folioData.restaurantOrders || [])
-      .filter(o => (Number(o.is_paid) === 0 || o.payment_status === 'pending') && Number(o.is_paid) !== 1)
-      .reduce((sum, o) => sum + Number(o.total || 0), 0);
-    const pendingBar = (folioData.barOrders || [])
-      .filter(o => (Number(o.is_paid) === 0 || o.payment_status === 'pending') && Number(o.is_paid) !== 1)
-      .reduce((sum, o) => sum + Number(o.total || 0), 0);
-    const fnbPendingTotal = pendingRestaurant + pendingBar;
+    const pendingRestaurant = globalPendingFoodTotal;
+    const pendingBar = globalPendingBarTotal;
+    const fnbPendingTotal = globalFnbPending;
 
     return {
       ...r,
@@ -1463,16 +1525,17 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
       expensesTotal: Number(folioData.expensesTotal || 0),
       foodPending: fnbPendingTotal,
       fnbPendingTotal,
-      roomTariffNet: Number(summary.roomGrossTariff ?? summary.grossTariff ?? folioData.roomGrossTariff ?? folioData.grossTariff ?? r.room_rate ?? r.price ?? 0),
-      netCharge: Number(summary.roomCharge ?? folioData.roomCharge ?? r.total_room_charge ?? 0),
+      roomTariffNet: summaryRoomTariff,
+      netCharge: isOtaPrepaid ? otaVoucherVal : Number(summary.roomCharge ?? folioData.roomCharge ?? r.total_room_charge ?? 0),
       discountPct: Number(summary.discountPct ?? folioData.discountPct ?? r.discount_pct ?? 0),
       discountAmount: Number(summary.discountAmount ?? folioData.discountAmount ?? r.discount_amount ?? 0),
       taxAmount: Number(summary.taxAmount ?? folioData.taxAmount ?? r.tax_amount ?? Math.round((summary.roomCharge ?? folioData.roomCharge ?? 0) * 0.05)),
-      grandTotal: Number(summary.netTotalCharge ?? summary.grandTotal ?? folioData.netTotalCharge ?? folioData.grandTotal ?? 0),
-      totalDue: Number(summary.netTotalCharge ?? summary.grandTotal ?? folioData.netTotalCharge ?? folioData.grandTotal ?? 0),
-      advancePaid: Number(summary.advancePaid ?? folioData.advancePaid ?? r.initial_paid ?? 0),
-      totalPaid: Number(summary.advancePaid ?? folioData.advancePaid ?? r.initial_paid ?? 0),
-      balanceDue: Number(summary.balanceDue ?? folioData.balanceDue ?? 0),
+      grandTotal: summaryTotalBill,
+      totalDue: summaryTotalBill,
+      advancePaid: summaryTotalPaid,
+      totalPaid: summaryTotalPaid,
+      total_paid: summaryTotalPaid,
+      balanceDue: summaryBalanceDue,
       splitCash: Number(folioData.split_cash ?? folioData.splitCash ?? r.split_cash ?? 0),
       splitCard: Number(folioData.split_card ?? folioData.splitCard ?? r.split_card ?? 0),
       splitOnline: Number(folioData.split_online ?? folioData.splitOnline ?? r.split_online ?? 0),
@@ -1506,37 +1569,6 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
       checkoutDate: folioData.checkoutDate || r.checkout_date
     };
   };
-
-  const pendingRestaurantOrders = (folioData.restaurantOrders || [])
-    .filter(o => (Number(o.is_paid) === 0 || o.payment_status === 'pending') && Number(o.is_paid) !== 1);
-  const pendingBarOrders = (folioData.barOrders || [])
-    .filter(o => (Number(o.is_paid) === 0 || o.payment_status === 'pending') && Number(o.is_paid) !== 1);
-  const globalPendingFoodTotal = pendingRestaurantOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
-  const globalPendingBarTotal = pendingBarOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
-  const globalFnbPending = globalPendingFoodTotal + globalPendingBarTotal;
-  const globalAdvancePaid = Number(folioData.advancePaid || 0);
-  const otaEarlyFeeVal = (folioData.bookingSource === 'OTA' && folioData.isEarlyCheckin)
-    ? Number(folioData.earlyCheckinCharge !== undefined && folioData.earlyCheckinCharge !== null ? folioData.earlyCheckinCharge : (folioData.ota_early_checkin_price || 900))
-    : 0;
-  const hotelExtrasChargeVal = Number(folioData.extraBedCharge || 0) + Number(folioData.extra_rooms_charge || 0) + Number(folioData.extra_breakfast_charge || 0) + otaEarlyFeeVal;
-  const globalStayNet = isOtaPrepaid
-    ? (globalAdvancePaid > 0 ? Math.max(hotelExtrasChargeVal, globalAdvancePaid) : hotelExtrasChargeVal)
-    : Number(
-        folioData.stayCalcNow?.roomCharge ??
-        folioData.stayCalcNow?.grandTotal ??
-        folioData.stayCalcDeclared?.roomCharge ??
-        folioData.roomCharge ??
-        folioData.originalRoomCharge ??
-        0
-      );
-  const globalRawStayBalance = isOtaPrepaid
-    ? (hotelExtrasChargeVal - globalAdvancePaid)
-    : (globalStayNet - globalAdvancePaid);
-  const allExtraExpenses = folioData?.extraExpenses || [];
-  const globalExpensesTotal = Number(folioData?.expensesTotal || allExtraExpenses.reduce((sum, e) => sum + Number(e.total || e.amount || 0), 0));
-  const globalNetFolioBalance = globalRawStayBalance + globalFnbPending + globalExpensesTotal;
-  const folioDueAmount = globalNetFolioBalance > 0.5 ? Math.round(globalNetFolioBalance) : 0;
-  const folioRefundAmount = globalNetFolioBalance < -0.5 ? Math.round(Math.abs(globalNetFolioBalance)) : 0;
 
   const openAddPaymentModal = (presetMode = null) => {
     const due = folioDueAmount > 0 ? folioDueAmount : 0;
@@ -1914,7 +1946,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
         style={{
           position: 'sticky',
           top: 0,
-          zIndex: 100,
+          zIndex: 400,
           marginTop: 0,
           marginBottom: '16px',
           marginLeft: '-18px',
@@ -2113,8 +2145,12 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                 ota_bill_amount: Number(folioData?.ota_bill_amount || folioData?.otaBillAmount || folioData?.summary?.otaBillAmount || r?.ota_bill_amount || 0),
                 otaBillAmount: Number(folioData?.otaBillAmount || folioData?.ota_bill_amount || folioData?.summary?.otaBillAmount || r?.ota_bill_amount || 0),
                 booking_source: folioData?.bookingSource || r?.booking_source || 'Walk-in',
-                rate_type: folioData?.rateType || r?.rate_type || (folioData?.isOtaPrepaid ? 'prepaid' : 'standard'),
-                is_prepaid: folioData?.isOtaPrepaid ? 1 : (folioData?.isOtaPayAtHotel ? 0 : (r?.is_prepaid ?? 0))
+                rate_type: isOtaPayAtHotel ? 'pay_at_hotel' : (isOtaPrepaid ? 'prepaid' : (folioData?.rateType || r?.rate_type || 'standard')),
+                rateType: isOtaPayAtHotel ? 'pay_at_hotel' : (isOtaPrepaid ? 'prepaid' : (folioData?.rateType || r?.rate_type || 'standard')),
+                is_prepaid: isOtaPrepaid ? 1 : (isOtaPayAtHotel ? 0 : (r?.is_prepaid ?? 0)),
+                isPrepaid: isOtaPrepaid,
+                isOtaPrepaid,
+                isOtaPayAtHotel
               };
               setDocActionModal({
                 isOpen: true,
@@ -2815,7 +2851,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                 <div>
                   <div style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Room Tariff</div>
                   <div style={{ fontSize: '0.94rem', fontWeight: 900, color: '#0f172a' }}>
-                    {formatCurrency(folioData.roomCharge || folioData.room?.total_room_charge || folioData.room?.price || 0)}
+                    {formatCurrency(summaryRoomTariff)}
                   </div>
                 </div>
                 <div>
@@ -2833,26 +2869,26 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                 <div>
                   <div style={{ fontSize: '0.66rem', color: '#334155', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Total Bill</div>
                   <div style={{ fontSize: '0.94rem', fontWeight: 900, color: '#0f172a' }}>
-                    {formatCurrency(folioData.grandTotal ?? folioData.netTotalCharge ?? folioData.summary?.grandTotal ?? ((folioData.roomCharge || 0) + Number(folioData.summary?.foodTotal || 0) + Number(folioData.summary?.barTotal || 0) + Number(folioData.summary?.expensesTotal || 0)))}
+                    {formatCurrency(summaryTotalBill)}
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize: '0.66rem', color: '#059669', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Total Paid</div>
                   <div style={{ fontSize: '0.94rem', fontWeight: 900, color: '#16a34a' }}>
-                    {formatCurrency(folioData.advancePaid || folioData.initialPaid || 0)}
+                    {formatCurrency(summaryTotalPaid)}
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize: '0.66rem', color: '#dc2626', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Balance Due</div>
-                  <div style={{ fontSize: '0.94rem', fontWeight: 900, color: Number(folioData.balanceDue ?? folioData.summary?.balanceDue ?? 0) <= 0 ? '#16a34a' : '#dc2626' }}>
-                    {Number(folioData.balanceDue ?? folioData.summary?.balanceDue ?? 0) <= 0 ? '₹0 (PAID)' : formatCurrency(folioData.balanceDue ?? folioData.summary?.balanceDue ?? 0)}
+                  <div style={{ fontSize: '0.94rem', fontWeight: 900, color: summaryBalanceDue <= 0 ? '#16a34a' : '#dc2626' }}>
+                    {summaryBalanceDue <= 0 ? '₹0 (PAID)' : formatCurrency(summaryBalanceDue)}
                   </div>
                 </div>
               </div>
-              {displayAdvancePayments.length > 0 && (
+              {(displayAdvancePayments.length > 0 || (isOtaPrepaid && otaVoucherVal > 0)) && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span style={{ fontSize: '0.74rem', fontWeight: 800, background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '3px 8px', borderRadius: '6px' }}>
-                    🧾 {displayAdvancePayments[0]?.receipt_no || (folioData.voucherNumber ? `RCP-${folioData.voucherNumber}` : 'RCP-01')}
+                    🧾 {displayAdvancePayments[0]?.receipt_no || (folioData.otaBookingId ? `OTA-${folioData.otaBookingId}` : (folioData.voucherNumber ? `RCP-${folioData.voucherNumber}` : 'OTA-PREPAID'))}
                   </span>
                   <span style={{ fontSize: '0.70rem', fontWeight: 900, background: '#16a34a', color: '#ffffff', padding: '3px 7px', borderRadius: '6px' }}>
                     REALIZED
@@ -3020,7 +3056,39 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                   const pMode = (p.payment_mode || 'Cash').toUpperCase();
                   const pReceiptNo = p.receipt_no || (p.mode === 'upi' || pMode.includes('UPI') ? 'UPI01' : (p.mode === 'card' || pMode.includes('CARD') ? 'POS01' : (p.mode === 'cheque' || pMode.includes('CHEQUE') ? 'CHQ01' : 'CR01')));
                   const baseVoucher = folioData.voucherNumber || folioData.voucher_number || folioData.room?.voucher_number || (p.voucher_number ? p.voucher_number : (p.receipt_no && /^\d{6}-\d+/.test(p.receipt_no) ? p.receipt_no : `260926-${String(folioData.bookingId || p.id || 1).slice(-2)}`));
-                  const isCheckinPayment = pIdx === 0 || String(p.purpose || p.notes || '').toLowerCase().includes('checkin') || String(p.payment_type || '').toLowerCase() === 'advance';
+                  const isPrebookPayment = String(p.payment_type || '').toLowerCase() === 'advance_booking' || String(p.notes || '').toLowerCase().includes('pre-booking');
+                  const isCheckinPayment = !isPrebookPayment && (pIdx === 0 || String(p.purpose || p.notes || '').toLowerCase().includes('checkin') || String(p.payment_type || '').toLowerCase() === 'advance');
+                  const receiptStage = isPrebookPayment ? 'Paid For Advance Booking' : (isCheckinPayment ? 'Paid For CheckIn' : 'Paid While Living');
+                  const rawCashier = String(p.cashier_name || p.cashier || p.staff_name || '').trim();
+                  const genericCashier = !rawCashier || rawCashier === 'Front Desk' || rawCashier === 'Front Desk Cashier' || rawCashier === 'Cashier';
+                  const staffName = genericCashier
+                    ? (folioData.room?.checked_in_by || (currentUser ? (currentUser.full_name || currentUser.username) : '') || 'Cashier')
+                    : rawCashier;
+                  const receiptPrintData = {
+                    receipt_no: pReceiptNo,
+                    voucher_number: baseVoucher,
+                    receipt_date: p.created_at || folioData.checkinTime,
+                    guest_name: folioData.guestName,
+                    amount: p.amount,
+                    base_amount: p.base_amount || p.amount,
+                    card_surcharge: p.card_surcharge || 0,
+                    upi_tax: p.upi_tax || 0,
+                    payment_mode: p.payment_mode || 'Cash',
+                    mode: p.mode || (pMode.includes('UPI') ? 'upi' : (pMode.includes('CARD') ? 'card' : (pMode.includes('CHEQUE') ? 'cheque' : 'cash'))),
+                    payment_type: p.payment_type,
+                    notes: p.notes,
+                    purpose: isPrebookPayment ? 'advance_booking' : (p.purpose || ''),
+                    stageLabel: receiptStage,
+                    is_prebooked: isPrebookPayment,
+                    utr_number: p.utr_number,
+                    card_digits: p.card_digits,
+                    cheque_no: p.cheque_no,
+                    bank_name: p.bank_name,
+                    room_numbers: folioData.roomNumber,
+                    particulars: `Room ${folioData.roomNumber} - ${receiptStage}`,
+                    cashier_name: staffName,
+                    is_split: false
+                  };
 
                   return (
                     <div
@@ -3044,7 +3112,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                             Receipt: {pReceiptNo}
                           </span>
                           <span style={{ fontSize: '0.72rem', fontWeight: 800, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '2px 8px', borderRadius: '6px' }}>
-                            {p.purpose || (isCheckinPayment ? 'for check in' : 'advance deposit')}
+                            {p.purpose || (isPrebookPayment ? 'pre-booking advance' : (isCheckinPayment ? 'for check in' : 'advance deposit'))}
                           </span>
                           <span style={{ fontSize: '0.72rem', fontWeight: 900, background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '6px' }}>
                             REALIZED
@@ -3058,7 +3126,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                           {p.card_digits ? <span>• Card: <strong>**** {p.card_digits}</strong></span> : ''}
                           {p.cheque_no ? <span>• Chq: <strong>{p.cheque_no} {p.bank_name ? `(${p.bank_name})` : ''}</strong></span> : ''}
                           <span>•</span>
-                          <span>👤 By: <strong>{p.cashier_name || p.cashier || folioData.room?.checked_in_by || 'Front Desk'}</strong></span>
+                          <span>👤 By: <strong>{staffName}</strong></span>
                         </div>
                       </div>
 
@@ -3075,26 +3143,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                             className="filter-chip"
                             id={`btn-print-receipt-${pReceiptNo}`}
                             onClick={() => {
-                              printCashReceipt({
-                                receipt_no: pReceiptNo,
-                                voucher_number: baseVoucher,
-                                receipt_date: p.created_at || folioData.checkinTime,
-                                guest_name: folioData.guestName,
-                                amount: p.amount,
-                                base_amount: p.base_amount || p.amount,
-                                card_surcharge: p.card_surcharge || 0,
-                                upi_tax: p.upi_tax || 0,
-                                payment_mode: p.payment_mode || 'Cash',
-                                mode: p.mode || (pMode.includes('UPI') ? 'upi' : (pMode.includes('CARD') ? 'card' : (pMode.includes('CHEQUE') ? 'cheque' : 'cash'))),
-                                utr_number: p.utr_number,
-                                card_digits: p.card_digits,
-                                cheque_no: p.cheque_no,
-                                bank_name: p.bank_name,
-                                room_numbers: folioData.roomNumber,
-                                particulars: `Room ${folioData.roomNumber} - Advance Payment (${p.payment_mode || 'Cash'})`,
-                                cashier_name: p.cashier_name || p.cashier || p.staff_name || folioData.room?.checked_in_by || (currentUser ? (currentUser.full_name || currentUser.username) : ''),
-                                is_split: false
-                              });
+                              printCashReceipt(receiptPrintData);
                             }}
                             style={{ fontSize: '0.78rem', padding: '5px 12px', fontWeight: 800, color: '#0369a1', borderColor: '#bae6fd', background: '#f0f9ff' }}
                             title="Print Official Cash Receipt (2-on-A4)"
@@ -3106,26 +3155,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                             className="filter-chip btn-download-receipt-pdf"
                             id={`btn-download-receipt-${pReceiptNo}`}
                             onClick={() => {
-                              downloadReceiptPDF({
-                                receipt_no: pReceiptNo,
-                                voucher_number: baseVoucher,
-                                receipt_date: p.created_at || folioData.checkinTime,
-                                guest_name: folioData.guestName,
-                                amount: p.amount,
-                                base_amount: p.base_amount || p.amount,
-                                card_surcharge: p.card_surcharge || 0,
-                                upi_tax: p.upi_tax || 0,
-                                payment_mode: p.payment_mode || 'Cash',
-                                mode: p.mode || (pMode.includes('UPI') ? 'upi' : (pMode.includes('CARD') ? 'card' : (pMode.includes('CHEQUE') ? 'cheque' : 'cash'))),
-                                utr_number: p.utr_number,
-                                card_digits: p.card_digits,
-                                cheque_no: p.cheque_no,
-                                bank_name: p.bank_name,
-                                room_numbers: folioData.roomNumber,
-                                particulars: `Room ${folioData.roomNumber} - Advance Payment (${p.payment_mode || 'Cash'})`,
-                                cashier_name: p.cashier_name || p.cashier || p.staff_name || folioData.room?.checked_in_by || (currentUser ? (currentUser.full_name || currentUser.username) : ''),
-                                is_split: false
-                              });
+                              downloadReceiptPDF(receiptPrintData);
                             }}
                             style={{ fontSize: '0.78rem', padding: '5px 12px', fontWeight: 800, color: '#047857', borderColor: '#a7f3d0', background: '#ecfdf5' }}
                             title="Download Official Receipt PDF"
@@ -3996,8 +4026,8 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                 )}
               </div>
 
-              {/* 2. Two Main Breakdown Cards: Hospitality Bill & Restaurant / Bar Orders */}
-              <div
+              {/* Hospitality and restaurant bill cards removed from the folio */}
+              {false && <div
                 style={{
                   gridColumn: '1/-1',
                   display: 'grid',
@@ -4185,7 +4215,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                             </strong>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-secondary, #64748b)', marginTop: '4px' }}>
-                            <span>Advance Paid at Check-in: {formatCurrency(advancePaidVal)}</span>
+                            <span>Advance Received: {formatCurrency(advancePaidVal)}</span>
                             <span style={{ fontWeight: 750, color: stayDueAmount > 0 ? '#b91c1c' : '#15803d' }}>
                               Stay Due: {formatCurrency(stayDueAmount)}
                               {stayDueAmount === 0 && (stayExcessAdvance > 0 ? ` (Excess Adv: ${formatCurrency(stayExcessAdvance)})` : ' (Settled)')}
@@ -4353,7 +4383,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                     </div>
                   </div>
                 </div>
-              </div>
+              </div>}
 
               {/* Checkout Financial Comparison Card: If Checkout Now vs If Checkout @ Declared Departure (Point 1) */}
               {(() => {
@@ -5434,6 +5464,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
           stayCalcNow: folioData.stayCalcNow || folioData.summary?.stayCalcNow,
           stayCalcDeclared: folioData.stayCalcDeclared || folioData.summary?.stayCalcDeclared,
           isOtaPrepaid,
+          isOtaPayAtHotel,
           foodTotal: globalPendingFoodTotal,
           barTotal: globalPendingBarTotal,
           fnbTotal: globalFnbPending,
@@ -7361,7 +7392,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                 }}
               >
                 {/* Reason / Item Description */}
-                <div>
+                <div style={{ position: 'relative' }}>
                   <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                     Reason / Item Description <span style={{ color: '#dc2626' }}>*</span>
                   </label>
@@ -7369,9 +7400,14 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                     type="text"
                     required
                     autoFocus
-                    placeholder="e.g., Broken Bathroom Glass, Extra Laundry, Minibar Snacks..."
+                    placeholder="Select or type a reason"
                     value={expenseReason}
-                    onChange={(e) => setExpenseReason(e.target.value)}
+                    onChange={(e) => {
+                      setExpenseReason(e.target.value);
+                      setExpenseReasonOpen(true);
+                    }}
+                    onFocus={() => setExpenseReasonOpen(true)}
+                    onBlur={() => setTimeout(() => setExpenseReasonOpen(false), 160)}
                     style={{
                       width: '100%',
                       boxSizing: 'border-box',
@@ -7381,9 +7417,55 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                       border: '1.5px solid #cbd5e1',
                       fontSize: '0.90rem',
                       fontWeight: 650,
-                      outline: 'none'
+                      outline: 'none',
+                      background: '#ffffff'
                     }}
                   />
+                  {expenseReasonOpen && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: 0,
+                        right: 0,
+                        top: '68px',
+                        zIndex: 30,
+                        background: '#ffffff',
+                        border: '1.5px solid #cbd5e1',
+                        borderRadius: '8px',
+                        boxShadow: '0 10px 24px rgba(15, 23, 42, 0.12)',
+                        overflow: 'hidden'
+                      }}
+                    >
+                      {['Rental Car Service', 'Laundry', 'Mini Bar', 'Decoration Charges', 'Damage To Property']
+                        .filter((opt) => !expenseReason.trim() || opt.toLowerCase().includes(expenseReason.trim().toLowerCase()))
+                        .map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setExpenseReason(opt);
+                              setExpenseReasonOpen(false);
+                            }}
+                            style={{
+                              display: 'block',
+                              width: '100%',
+                              textAlign: 'left',
+                              padding: '9px 12px',
+                              border: 'none',
+                              borderBottom: '1px solid #f1f5f9',
+                              background: expenseReason === opt ? '#eff6ff' : '#ffffff',
+                              color: '#0f172a',
+                              fontWeight: 700,
+                              fontSize: '0.88rem',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Total Expense Amount (₹) */}

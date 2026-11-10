@@ -17,6 +17,63 @@ const fs = require('fs');
 let admin = null;
 let firestore = null;
 
+const FIREBASE_REST_URL = 'https://firestore.googleapis.com/v1/projects/hotelcitypark-crm/databases/(default)/documents';
+const FIREBASE_API_KEY = 'AIzaSyCtZnkdk1_q8rWrISnD8P2Rhi-jcPn1QTI';
+
+function parseFirestoreDoc(doc) {
+  if (!doc) return null;
+  const fields = doc.fields || {};
+  const res = { id: doc.name ? doc.name.split('/').pop() : '' };
+  for (const [k, v] of Object.entries(fields)) {
+    if (v.stringValue !== undefined) res[k] = v.stringValue;
+    else if (v.doubleValue !== undefined) res[k] = Number(v.doubleValue);
+    else if (v.integerValue !== undefined) res[k] = Number(v.integerValue);
+    else if (v.booleanValue !== undefined) res[k] = v.booleanValue;
+    else if (v.timestampValue !== undefined) res[k] = v.timestampValue;
+  }
+  return res;
+}
+
+async function writeFirestoreRest(collection, docId, fields) {
+  try {
+    const url = `${FIREBASE_REST_URL}/${collection}/${docId}?key=${FIREBASE_API_KEY}`;
+    const restFields = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (typeof v === 'number') restFields[k] = { doubleValue: v };
+      else if (typeof v === 'boolean') restFields[k] = { booleanValue: v };
+      else restFields[k] = { stringValue: String(v ?? '') };
+    }
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 8000) : null;
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: restFields }),
+      signal: controller?.signal
+    });
+    if (timeout) clearTimeout(timeout);
+    return res.ok;
+  } catch (err) {
+    console.warn(`[Firebase REST] Write ${collection}/${docId} error:`, err.message);
+    return false;
+  }
+}
+
+async function readFirestoreRest(collection, docId) {
+  try {
+    const url = `${FIREBASE_REST_URL}/${collection}/${docId}?key=${FIREBASE_API_KEY}`;
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 8000) : null;
+    const res = await fetch(url, { signal: controller?.signal });
+    if (timeout) clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return parseFirestoreDoc(data);
+  } catch (err) {
+    return null;
+  }
+}
+
 try {
   admin = require('firebase-admin');
   const { getFirestore } = require('firebase-admin/firestore');
@@ -228,7 +285,11 @@ async function removeActiveOccupancy(roomNumber) {
   if (!roomNum) return;
 
   try {
-    await withTimeout(firestore.collection('active_occupancies').doc(String(roomNum)).delete());
+    const batch = firestore.batch();
+    batch.delete(firestore.collection('active_occupancies').doc(String(roomNum)));
+    batch.delete(firestore.collection('room_charges_inbox').doc(`folio_${roomNum}`));
+    await withTimeout(batch.commit());
+    console.log(`🧹 [Firebase] Cleared active occupancy & folio for checked-out Room ${roomNum}`);
   } catch (err) {
     console.warn(`[Firebase] removeActiveOccupancy error for Room ${roomNum}:`, err.message);
   }
@@ -419,7 +480,7 @@ async function syncCheckoutToCloud(checkoutData) {
 }
 
 async function syncApprovalRequestToCloud(req) {
-  if (!firestore || !req) return;
+  if (!req) return { synced: false };
   try {
     const docId = `APP-${req.id || req.approval_id || Date.now()}`;
     const payload = {
@@ -430,17 +491,54 @@ async function syncApprovalRequestToCloud(req) {
       subtotal: Number(req.current_total || 0),
       gst: 0,
       grand_total: Number(req.final_amount || req.current_total || 0),
-      settled_by: req.requested_by || 'Receptionist',
-      status: (req.status || 'pending').toLowerCase(),
+      settled_by: '',
+      request_nonce: String(req.request_nonce || ''),
+      status: 'pending',
       items_summary: JSON.stringify(req),
       created_at: req.requested_at || new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
 
-    await withTimeout(firestore.collection('room_charges_inbox').doc(docId).set(payload, { merge: true }));
+    let synced = false;
+    if (firestore) {
+      try {
+        await withTimeout(firestore.collection('room_charges_inbox').doc(docId).set(payload, { merge: true }), 3000);
+        synced = true;
+      } catch (err) {
+        console.warn('[Firebase SDK] syncApprovalRequestToCloud error, falling back to REST:', err.message);
+      }
+    }
+
+    if (!synced) {
+      synced = await writeFirestoreRest('room_charges_inbox', docId, payload);
+      if (synced) {
+        console.log(`⚡ [Firebase REST] Synced approval request #${docId} to cloud.`);
+      }
+    }
+    return { synced: !!synced };
   } catch (err) {
     console.warn('[Firebase] syncApprovalRequestToCloud error:', err.message);
+    return { synced: false };
   }
+}
+
+async function updateApprovalInCloud(id, status, settledBy = 'Admin') {
+  if (!id) return;
+  try {
+    const docId = String(id).startsWith('APP-') ? String(id) : `APP-${id}`;
+    const payload = {
+      status: String(status || '').toLowerCase(),
+      settled_by: settledBy,
+      updated_at: new Date().toISOString()
+    };
+    if (firestore) {
+      try {
+        await withTimeout(firestore.collection('room_charges_inbox').doc(docId).set(payload, { merge: true }), 3000);
+        return;
+      } catch (_) {}
+    }
+    await writeFirestoreRest('room_charges_inbox', docId, payload);
+  } catch (_) {}
 }
 
 async function syncLiveFBStateToCloud(state) {
@@ -736,10 +834,38 @@ async function syncAllActiveRoomsFromLocal(db) {
       WHERE r.status = 'occupied' AND b.status = 'active'
     `).all();
 
+    const activeRoomNums = new Set(activeRooms.map(r => cleanRoomNumber(r.room_number)).filter(Boolean));
+
     // Firestore batches limited to 500 ops; split into chunks
     const MAX_BATCH_OPS = 450; // Leave margin below 500
     let batchOps = 0;
     let batch = firestore.batch();
+
+    // 🧹 RECONCILE: Purge any stale / checked-out rooms currently lingering in Firestore
+    try {
+      const snap = await withTimeout(firestore.collection('active_occupancies').get(), 4000);
+      snap.forEach(doc => {
+        const docRoom = cleanRoomNumber(doc.id || doc.data()?.room_number);
+        if (docRoom && !activeRoomNums.has(docRoom)) {
+          batch.delete(doc.ref);
+          batch.delete(firestore.collection('room_charges_inbox').doc(`folio_${docRoom}`));
+          batchOps += 2;
+        }
+      });
+    } catch (_) {}
+
+    // Record aggregate live state manifest so Owner APK checks only 1 document instead of 300!
+    try {
+      const stateRef = firestore.collection('room_charges_inbox').doc('fb_live_state');
+      batch.set(stateRef, {
+        department: 'fb_live_state',
+        total_rooms: 40,
+        occupied_count: activeRooms.length,
+        occupied_rooms: Array.from(activeRoomNums),
+        updated_at: new Date().toISOString()
+      }, { merge: true });
+      batchOps++;
+    } catch (_) {}
 
     for (const room of activeRooms) {
       const roomNum = cleanRoomNumber(room.room_number);
@@ -1855,19 +1981,14 @@ function setupRealtimeListeners(db, onNewPendingOrder = null) {
           const isAppDoc = docId.startsWith('APP-') || data.department === 'discount_approval';
           const st = String(data.status || '').toLowerCase();
           if (isAppDoc && (st === 'approved' || st === 'rejected')) {
-            const rawId = docId.replace(/^APP-/, '');
-            const approvalId = !isNaN(Number(rawId)) ? Number(rawId) : rawId;
-            if (approvalId) {
-              try {
-                const existing = db.prepare('SELECT status FROM owner_approvals WHERE id = ?').get(approvalId);
-                if (existing && existing.status === 'PENDING') {
-                  const notificationService = require('./notificationService');
-                  notificationService.updateApprovalStatus(approvalId, st.toUpperCase(), data.settled_by || 'Admin', data.action_reason || '');
-                  console.log(`⚡ [Firebase Realtime] Admin ${st.toUpperCase()} approval #${approvalId} adopted instantly!`);
-                }
-              } catch (appErr) {
-                console.warn('[Firebase Realtime] Error adopting approval:', appErr.message);
+            try {
+              const notificationService = require('./notificationService');
+              const adopted = notificationService.adoptCloudDecision({ ...data, id: docId });
+              if (adopted) {
+                console.log(`⚡ [Firebase Realtime] Admin ${st.toUpperCase()} approval #${adopted.id} adopted instantly!`);
               }
+            } catch (appErr) {
+              console.warn('[Firebase Realtime] Error adopting approval:', appErr.message);
             }
           }
         });
@@ -2088,47 +2209,70 @@ function setupRealtimeListeners(db, onNewPendingOrder = null) {
 }
 
 async function fetchApprovalStatusFromCloud(id) {
-  if (!firestore || !id) return null;
-  try {
-    const docId = String(id).startsWith('APP-') ? String(id) : 'APP-' + id;
-    const docSnap = await withTimeout(firestore.collection('room_charges_inbox').doc(docId).get(), 2000);
-    if (docSnap && docSnap.exists) {
-      return docSnap.data();
+  if (!id) return null;
+  const docId = String(id).startsWith('APP-') ? String(id) : 'APP-' + id;
+  if (firestore) {
+    try {
+      const docSnap = await withTimeout(firestore.collection('room_charges_inbox').doc(docId).get(), 2000);
+      if (docSnap && docSnap.exists) {
+        return docSnap.data();
+      }
+    } catch (err) {
+      // SDK failed, fall back to REST
     }
-  } catch (err) {
-    // silent fallback
   }
-  return null;
+  return await readFirestoreRest('room_charges_inbox', docId);
 }
 
 async function pollCloudApprovals(db) {
-  if (!firestore || !db) return;
-  try {
-    const snap = await withTimeout(
-      firestore.collection('room_charges_inbox')
-        .where('department', '==', 'discount_approval')
-        .get(),
-      3000
-    );
-    if (!snap || snap.empty) return;
-    const notificationService = require('./notificationService');
-    snap.forEach(doc => {
-      const data = doc.data() || {};
-      const st = String(data.status || '').toLowerCase();
-      if (st === 'approved' || st === 'rejected') {
-        const rawId = String(doc.id).replace(/^APP-/, '');
-        const approvalId = !isNaN(Number(rawId)) ? Number(rawId) : rawId;
-        if (approvalId) {
-          const existing = db.prepare('SELECT status FROM owner_approvals WHERE id = ?').get(approvalId);
-          if (existing && existing.status === 'PENDING') {
-            notificationService.updateApprovalStatus(approvalId, st.toUpperCase(), data.settled_by || 'Admin', data.action_reason || '');
-            console.log(`[Firebase Heartbeat] Adopted approval #${approvalId} -> ${st.toUpperCase()}`);
+  if (!db) return;
+  const notificationService = require('./notificationService');
+  let docs = [];
+
+  if (firestore) {
+    try {
+      const snap = await withTimeout(
+        firestore.collection('room_charges_inbox')
+          .where('department', '==', 'discount_approval')
+          .get(),
+        3000
+      );
+      if (snap && !snap.empty) {
+        snap.forEach(doc => {
+          docs.push({ id: doc.id, ...doc.data() });
+        });
+      }
+    } catch (_) {}
+  }
+
+  if (docs.length === 0) {
+    // REST API fallback for listing
+    try {
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), 3500) : null;
+      const res = await fetch(`${FIREBASE_REST_URL}/room_charges_inbox?pageSize=100&key=${FIREBASE_API_KEY}`, { signal: controller?.signal });
+      if (timer) clearTimeout(timer);
+      if (res.ok) {
+        const body = await res.json();
+        const rawDocs = body.documents || [];
+        for (const rd of rawDocs) {
+          const parsed = parseFirestoreDoc(rd);
+          if (parsed && parsed.department === 'discount_approval') {
+            docs.push(parsed);
           }
         }
       }
-    });
-  } catch (err) {
-    // silent
+    } catch (_) {}
+  }
+
+  for (const data of docs) {
+    const st = String(data.status || '').toLowerCase();
+    if (st === 'approved' || st === 'rejected') {
+      const adopted = notificationService.adoptCloudDecision(data);
+      if (adopted) {
+        console.log(`[Firebase Heartbeat] Adopted approval #${adopted.id} -> ${st.toUpperCase()}`);
+      }
+    }
   }
 }
 
@@ -2178,6 +2322,7 @@ module.exports = {
   syncCheckoutToCloud,
   syncRecentCheckoutsToCloud,
   syncApprovalRequestToCloud,
+  updateApprovalInCloud,
   fetchApprovalStatusFromCloud,
   pollCloudApprovals,
   syncLiveFBStateToCloud,

@@ -149,10 +149,10 @@ describe('Cross-Stay F&B Order Isolation & OTA Pay-at-Hotel Entire Amount', () =
     expect(checkinOta.status).toBe(200);
     const booking = checkinOta.body.booking;
 
-    // In DB, total_room_charge must be 1700 (1200 voucher + 500 extra bed)
+    // In DB, total_room_charge must be 1700 (or 1725 with 5% GST on hotel extra bed)
     const savedBooking = db.prepare('SELECT total_room_charge, is_prepaid, ota_bill_amount, extra_bed_charge FROM bookings WHERE id = ?').get(booking.id);
     expect(savedBooking.is_prepaid).toBe(0);
-    expect(savedBooking.total_room_charge).toBe(1700);
+    expect(savedBooking.total_room_charge).toBe(1725);
 
     // Fetch Folio
     const folioRes = await request(app)
@@ -163,18 +163,18 @@ describe('Cross-Stay F&B Order Isolation & OTA Pay-at-Hotel Entire Amount', () =
     const summary = folioRes.body.folio?.summary;
     expect(summary.isOtaPayAtHotel).toBe(true);
     expect(summary.isOtaPrepaid).toBe(false);
-    expect(summary.roomCharge).toBe(1700); // ENTIRE amount, not just 500!
-    expect(summary.netTotalCharge).toBe(1700);
-    expect(summary.balanceDue).toBe(1700);
+    expect(summary.roomCharge).toBe(1725); // ENTIRE amount: 1200 voucher + 525 extra bed (500 + 5% GST)
+    expect(summary.netTotalCharge).toBe(1725);
+    expect(summary.balanceDue).toBe(1725);
 
-    // Settle checkout with 1700
+    // Settle checkout with 1725
     const checkoutRes = await request(app)
       .post(`/api/checkout/${testRoomId2}`)
       .set('Authorization', `Bearer ${token}`)
       .send({
         final_payment_mode: 'cash',
-        settle_amount: 1700,
-        split_cash: 1700
+        settle_amount: 1725,
+        split_cash: 1725
       });
     expect(checkoutRes.status).toBe(200);
     expect(checkoutRes.body.success).toBe(true);
@@ -227,24 +227,24 @@ describe('Cross-Stay F&B Order Isolation & OTA Pay-at-Hotel Entire Amount', () =
     expect(summary.isOtaPayAtHotel).toBe(true);
     expect(summary.isOtaPrepaid).toBe(false);
     expect(summary.otaBillAmount).toBe(1200);
-    expect(summary.hotelExtrasCharge).toBe(2000);
-    expect(summary.roomCharge).toBe(3200); // 1200 voucher + 2000 extras
-    expect(summary.grandTotal).toBe(3200);
+    expect(summary.hotelExtrasCharge).toBe(2100); // 2000 base + 5% GST (100)
+    expect(summary.roomCharge).toBe(3300); // 1200 voucher + 2100 extras
+    expect(summary.grandTotal).toBe(3300);
     expect(summary.advancePaid).toBe(2000);
-    expect(summary.balanceDue).toBe(1200); // 3200 - 2000 = 1200 remaining due!
+    expect(summary.balanceDue).toBe(1300); // 3300 - 2000 = 1300 remaining due!
 
     // Verify linked rooms in folio
     expect(folioGroup.body.folio?.room?.is_combined).toBe(true);
     expect(folioGroup.body.folio?.room?.all_group_rooms?.length).toBe(2);
 
-    // Settle checkout with remaining 1200
+    // Settle checkout with remaining 1300
     const checkoutGroup = await request(app)
       .post(`/api/checkout/${testRoomId1}`)
       .set('Authorization', `Bearer ${token}`)
       .send({
         final_payment_mode: 'cash',
-        settle_amount: 1200,
-        split_cash: 1200
+        settle_amount: 1300,
+        split_cash: 1300
       });
     expect(checkoutGroup.status).toBe(200);
     expect(checkoutGroup.body.success).toBe(true);

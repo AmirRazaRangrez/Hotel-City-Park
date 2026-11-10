@@ -38,6 +38,7 @@ export default function ManagePage({ onPrintClosingReport }) {
       openManagerLock('hospitality', manageSubTab || 'analytics');
     }
   }, [isManagerUnlocked, openManagerLock, manageSubTab]);
+
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsFromDate, setAnalyticsFromDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [analyticsToDate, setAnalyticsToDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -68,6 +69,23 @@ export default function ManagePage({ onPrintClosingReport }) {
   // Rooms CRUD state
   const [rooms, setRooms] = useState([]);
   const [isRoomModalOpen, setIsRoomModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isRoomModalOpen) return undefined;
+    document.documentElement.classList.add('modal-open');
+    document.body.classList.add('modal-open');
+    const blockBackgroundWheel = (event) => {
+      const modal = document.querySelector('.modal-container');
+      if (modal && modal.contains(event.target)) return;
+      event.preventDefault();
+    };
+    window.addEventListener('wheel', blockBackgroundWheel, { passive: false, capture: true });
+    return () => {
+      window.removeEventListener('wheel', blockBackgroundWheel, { capture: true });
+      document.documentElement.classList.remove('modal-open');
+      document.body.classList.remove('modal-open');
+    };
+  }, [isRoomModalOpen]);
   const [editingRoom, setEditingRoom] = useState(null);
   const [isDailyClosingIgst, setIsDailyClosingIgst] = useState(false);
   const [roomForm, setRoomForm] = useState({
@@ -6184,7 +6202,11 @@ export default function ManagePage({ onPrintClosingReport }) {
 
       {/* Enhanced Room Add/Edit Modal */}
       {isRoomModalOpen && (
-        <div className="modal-overlay active" style={{ zIndex: 10050, background: 'rgba(15, 23, 42, 0.70)', backdropFilter: 'blur(8px)' }}>
+        <div
+          className="modal-overlay active"
+          style={{ zIndex: 10050, background: 'rgba(15, 23, 42, 0.70)', backdropFilter: 'blur(8px)', overflow: 'hidden', overscrollBehavior: 'none' }}
+          onWheel={(e) => e.stopPropagation()}
+        >
           <div
             className="modal-container"
             style={{
@@ -6196,7 +6218,8 @@ export default function ManagePage({ onPrintClosingReport }) {
               boxShadow: '0 30px 60px -15px rgba(0,0,0,0.35)',
               overflow: 'hidden',
               display: 'flex',
-              flexDirection: 'column'
+              flexDirection: 'column',
+              overscrollBehavior: 'contain'
             }}
           >
             <div className="modal-header" style={{ padding: '12px 22px', background: 'var(--bg-surface, #ffffff)', borderBottom: '1.5px solid var(--border-color, #e2e8f0)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
@@ -6232,6 +6255,7 @@ export default function ManagePage({ onPrintClosingReport }) {
                   gap: '12px',
                   overflowY: 'auto',
                   overflowX: 'hidden',
+                  overscrollBehavior: 'contain',
                   flex: 1,
                   boxSizing: 'border-box',
                   alignItems: 'start'
@@ -6275,80 +6299,47 @@ export default function ManagePage({ onPrintClosingReport }) {
 
                       <div style={{ minWidth: 0 }}>
                         <label style={{ fontSize: '0.78rem', fontWeight: 850, color: 'var(--text-primary)', display: 'block', marginBottom: '3px' }}>Floor *</label>
-                        <select
-                          className="form-input"
+                        <ThemedSelect
                           required
+                          height={36}
+                          colorTheme="blue"
                           value={roomForm.floor || 'First Floor'}
-                          onChange={(e) => setRoomForm({ ...roomForm, floor: e.target.value })}
-                          style={{ width: '100%', boxSizing: 'border-box', height: '36px', fontSize: '0.90rem', fontWeight: 850, border: '2px solid var(--border-color, #cbd5e1)', borderRadius: '8px', padding: '0 6px', background: 'var(--bg-app, #ffffff)', color: 'var(--text-primary)', cursor: 'pointer' }}
-                        >
-                          <option value="Basement">Basement</option>
-                          <option value="First Floor">First Floor</option>
-                          <option value="Second Floor">Second Floor</option>
-                          <option value="Third Floor">Third Floor</option>
-                          <option value="Fourth Floor">Fourth Floor</option>
-                          <option value="Fifth Floor">Fifth Floor</option>
-                        </select>
+                          onChange={(val) => setRoomForm({ ...roomForm, floor: val })}
+                          options={(() => {
+                            const floors = ['Basement', 'First Floor', 'Second Floor', 'Third Floor', 'Fourth Floor', 'Fifth Floor'];
+                            const current = String(roomForm.floor || '').trim();
+                            if (current && !floors.includes(current)) floors.push(current);
+                            return floors;
+                          })()}
+                        />
                       </div>
 
                       <div style={{ minWidth: 0 }}>
                         <label style={{ fontSize: '0.78rem', fontWeight: 850, color: 'var(--text-primary)', display: 'block', marginBottom: '3px' }}>Room Type / Category *</label>
-                        <input
-                          type="text"
-                          className="form-input"
+                        <ThemedSelect
                           required
-                          placeholder="e.g. Deluxe AC"
-                          value={roomForm.room_type}
-                          onChange={(e) => setRoomForm({ ...roomForm, room_type: e.target.value })}
-                          style={{ width: '100%', boxSizing: 'border-box', height: '36px', fontSize: '0.90rem', fontWeight: 850, border: '2px solid var(--border-color, #cbd5e1)', borderRadius: '8px', padding: '0 8px', background: 'var(--bg-app, #ffffff)', color: 'var(--text-primary)' }}
+                          height={36}
+                          colorTheme="blue"
+                          placeholder="Select category"
+                          value={roomForm.room_type || ''}
+                          onChange={(val) => setRoomForm({ ...roomForm, room_type: val })}
+                          options={(() => {
+                            const types = ['Executive Room', 'Executive Plus', 'Deluxe Room', 'Suit Room', 'Pent House'];
+                            (rooms || []).forEach((room) => {
+                              const name = String(room.room_type || '').trim();
+                              if (name && !types.includes(name)) types.push(name);
+                            });
+                            const current = String(roomForm.room_type || '').trim();
+                            if (current && !types.includes(current)) types.push(current);
+                            return types;
+                          })()}
                         />
                       </div>
 
-                      {/* Base Tariff (2+ Adults) */}
-                      <div style={{ minWidth: 0, gridColumn: 'span 2' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
-                          <label style={{ fontSize: '0.78rem', fontWeight: 850, color: 'var(--text-primary)', margin: 0 }}>Base Tariff (2+ Adults) *</label>
-                          <span style={{ fontSize: '0.66rem', fontWeight: 850, color: '#0369a1', background: '#e0f2fe', padding: '1px 5px', borderRadius: '4px' }}>
-                            Total: ₹{Math.round((Number(roomForm.price) || 0) * (1 + (Number(roomForm.gst_pct) || 5) / 100)).toLocaleString('en-IN')} for 24 hours
-                          </span>
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '6px' }}>
-                          <div>
-                            <input
-                              type="number"
-                              min="0"
-                              className="form-input"
-                              required
-                              placeholder="Base ₹"
-                              value={roomForm.price}
-                              onFocus={(e) => e.target.select()}
-                              onChange={(e) => setRoomForm({ ...roomForm, price: e.target.value === '' ? '' : Number(e.target.value) })}
-                              style={{ width: '100%', boxSizing: 'border-box', height: '36px', fontSize: '0.98rem', fontWeight: 950, color: 'var(--apple-blue, #0071e3)', border: '2px solid var(--apple-blue)', borderRadius: '8px', padding: '0 8px', background: 'var(--bg-app, #ffffff)' }}
-                            />
-                          </div>
-                          <div style={{ position: 'relative' }}>
-                            <input
-                              type="number"
-                              min="0"
-                              max="28"
-                              step="0.5"
-                              className="form-input"
-                              required
-                              placeholder="GST %"
-                              value={roomForm.gst_pct}
-                              onFocus={(e) => e.target.select()}
-                              onChange={(e) => setRoomForm({ ...roomForm, gst_pct: e.target.value === '' ? '' : Number(e.target.value) })}
-                              style={{ width: '100%', boxSizing: 'border-box', height: '36px', fontSize: '0.90rem', fontWeight: 900, border: '2px solid var(--border-color, #cbd5e1)', borderRadius: '8px', padding: '0 20px 0 8px', background: 'var(--bg-app, #ffffff)', color: 'var(--text-primary)' }}
-                            />
-                            <span style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', fontWeight: 850, color: 'var(--text-secondary)', fontSize: '0.74rem' }}>%</span>
-                          </div>
-                        </div>
-                      </div>
-
                       {/* Single Occupancy (1 Adult) */}
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
-                          <label style={{ fontSize: '0.78rem', fontWeight: 850, color: 'var(--text-primary)', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Single Occupancy</label>
+                      <div style={{ minWidth: 0, gridColumn: '1 / -1' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px', gap: '8px' }}>
+                          <label style={{ fontSize: '0.78rem', fontWeight: 850, color: 'var(--text-primary)', margin: 0, whiteSpace: 'normal' }}>Single Occupancy</label>
                           {roomForm.price_single !== '' && roomForm.price_single !== null && Number(roomForm.price_single) > 0 && (
                             <span style={{ fontSize: '0.64rem', fontWeight: 850, color: '#0284c7', background: '#f0f9ff', padding: '1px 4px', borderRadius: '3px', whiteSpace: 'nowrap' }}>
                               Total: ₹{Math.round(Number(roomForm.price_single) * (1 + (Number(roomForm.single_gst_pct || roomForm.gst_pct || 5)) / 100)).toLocaleString('en-IN')} for 24 hours
@@ -6386,10 +6377,51 @@ export default function ManagePage({ onPrintClosingReport }) {
                         </div>
                       </div>
 
+                      {/* Double Occupancy (2+ Adults) */}
+                      <div style={{ minWidth: 0, gridColumn: '1 / -1' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                          <label style={{ fontSize: '0.78rem', fontWeight: 850, color: 'var(--text-primary)', margin: 0 }}>Double Occupancy *</label>
+                          <span style={{ fontSize: '0.66rem', fontWeight: 850, color: '#0369a1', background: '#e0f2fe', padding: '1px 5px', borderRadius: '4px' }}>
+                            Total: ₹{Math.round((Number(roomForm.price) || 0) * (1 + (Number(roomForm.gst_pct) || 5) / 100)).toLocaleString('en-IN')} for 24 hours
+                          </span>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '6px' }}>
+                          <div>
+                            <input
+                              type="number"
+                              min="0"
+                              className="form-input"
+                              required
+                              placeholder="Base ₹"
+                              value={roomForm.price}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => setRoomForm({ ...roomForm, price: e.target.value === '' ? '' : Number(e.target.value) })}
+                              style={{ width: '100%', boxSizing: 'border-box', height: '36px', fontSize: '0.98rem', fontWeight: 950, color: 'var(--apple-blue, #0071e3)', border: '2px solid var(--apple-blue)', borderRadius: '8px', padding: '0 8px', background: 'var(--bg-app, #ffffff)' }}
+                            />
+                          </div>
+                          <div style={{ position: 'relative' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              max="28"
+                              step="0.5"
+                              className="form-input"
+                              required
+                              placeholder="GST %"
+                              value={roomForm.gst_pct}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => setRoomForm({ ...roomForm, gst_pct: e.target.value === '' ? '' : Number(e.target.value) })}
+                              style={{ width: '100%', boxSizing: 'border-box', height: '36px', fontSize: '0.90rem', fontWeight: 900, border: '2px solid var(--border-color, #cbd5e1)', borderRadius: '8px', padding: '0 20px 0 8px', background: 'var(--bg-app, #ffffff)', color: 'var(--text-primary)' }}
+                            />
+                            <span style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', fontWeight: 850, color: 'var(--text-secondary)', fontSize: '0.74rem' }}>%</span>
+                          </div>
+                        </div>
+                      </div>
+
                       {/* Max Discount Allowed */}
-                      <div style={{ minWidth: 0, gridColumn: 'span 3', marginTop: '2px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <label style={{ fontSize: '0.78rem', fontWeight: 850, color: 'var(--text-primary)', margin: 0, whiteSpace: 'nowrap' }}>Max Discount Allowed (%):</label>
+                      <div style={{ minWidth: 0, gridColumn: '1 / -1', marginTop: '2px' }}>
+                        <label style={{ fontSize: '0.78rem', fontWeight: 850, color: 'var(--text-primary)', display: 'block', margin: '0 0 6px', whiteSpace: 'normal' }}>Max Discount Allowed (%)</label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                           <input
                             type="number"
                             min="0"
@@ -6398,18 +6430,22 @@ export default function ManagePage({ onPrintClosingReport }) {
                             value={roomForm.max_discount_pct}
                             onFocus={(e) => e.target.select()}
                             onChange={(e) => setRoomForm({ ...roomForm, max_discount_pct: e.target.value === '' ? '' : Number(e.target.value) })}
-                            style={{ width: '64px', boxSizing: 'border-box', height: '32px', fontSize: '0.92rem', fontWeight: 850, border: '2px solid var(--border-color, #cbd5e1)', borderRadius: '6px', padding: '0 6px', textAlign: 'center', background: 'var(--bg-app, #ffffff)', color: 'var(--text-primary)' }}
+                            style={{ width: '72px', boxSizing: 'border-box', height: '32px', fontSize: '0.92rem', fontWeight: 850, border: '2px solid var(--border-color, #cbd5e1)', borderRadius: '6px', padding: '0 6px', textAlign: 'center', background: 'var(--bg-app, #ffffff)', color: 'var(--text-primary)' }}
                           />
-                          {/* Quick preset chips including 25% */}
-                          <div style={{ display: 'flex', gap: '4px', flex: 1 }}>
-                            {[0, 5, 10, 15, 20, 25].map((pct) => (
+                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                            {(() => {
+                              const steps = [0, 5, 10, 15, 20, 25];
+                              const current = Number(roomForm.max_discount_pct);
+                              if (Number.isFinite(current) && !steps.includes(current)) steps.push(current);
+                              return steps;
+                            })().map((pct) => (
                               <button
                                 key={pct}
                                 type="button"
                                 onClick={() => setRoomForm({ ...roomForm, max_discount_pct: pct })}
                                 style={{
-                                  flex: 1,
-                                  padding: '4px 0',
+                                  minWidth: '42px',
+                                  padding: '4px 8px',
                                   fontSize: '0.72rem',
                                   fontWeight: 800,
                                   borderRadius: '5px',
@@ -6442,7 +6478,6 @@ export default function ManagePage({ onPrintClosingReport }) {
                         <input
                           type="number"
                           min="1"
-                          max="10"
                           className="form-input"
                           required
                           value={roomForm.max_adults}
@@ -6458,7 +6493,6 @@ export default function ManagePage({ onPrintClosingReport }) {
                         <input
                           type="number"
                           min="0"
-                          max="10"
                           className="form-input"
                           value={roomForm.max_children}
                           onFocus={(e) => e.target.select()}
@@ -6473,7 +6507,6 @@ export default function ManagePage({ onPrintClosingReport }) {
                         <input
                           type="number"
                           min="0"
-                          max="5"
                           className="form-input"
                           value={roomForm.max_extra_beds}
                           onFocus={(e) => e.target.select()}

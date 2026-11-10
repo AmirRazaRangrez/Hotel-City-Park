@@ -20,7 +20,7 @@ if (fs.existsSync(envPath)) {
         }
       }
     });
-  } catch (e) {}
+  } catch (e) { }
 }
 
 let dbPath = path.join(__dirname, 'hotel_city_park.db');
@@ -75,7 +75,7 @@ if (isServerless) {
       const needCopy = !fs.existsSync(tmpDbPath) || (fs.statSync(tmpDbPath).size === 0);
       if (needCopy) {
         fs.copyFileSync(foundSrc, tmpDbPath);
-        try { fs.chmodSync(tmpDbPath, 0o666); } catch (e) {}
+        try { fs.chmodSync(tmpDbPath, 0o666); } catch (e) { }
       }
     } catch (err) {
       console.warn('Could not copy db to /tmp:', err);
@@ -88,7 +88,7 @@ if (isServerless) {
   if (!fs.existsSync(appDataDir)) {
     try {
       fs.mkdirSync(appDataDir, { recursive: true });
-    } catch (e) {}
+    } catch (e) { }
   }
   const appDataDbPath = path.join(appDataDir, 'hotel_city_park.db');
 
@@ -115,7 +115,7 @@ if (isServerless) {
   try {
     db.pragma('journal_mode = DELETE');
   } catch (e) {
-    try { db.pragma('journal_mode = TRUNCATE'); } catch (e2) {}
+    try { db.pragma('journal_mode = TRUNCATE'); } catch (e2) { }
   }
 } else {
   try {
@@ -123,7 +123,7 @@ if (isServerless) {
     db.pragma('synchronous = NORMAL');
     db.pragma('temp_store = MEMORY');
     db.pragma('cache_size = -64000');
-  } catch (e) {}
+  } catch (e) { }
 }
 
 // Initialize Tables
@@ -324,24 +324,24 @@ db.exec(`
 `);
 
 // Migrations
-try { db.exec("ALTER TABLE advance_bookings ADD COLUMN room_type TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE advance_bookings ADD COLUMN receipt_no TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE advance_bookings ADD COLUMN receipt_date TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE advance_bookings ADD COLUMN linked_booking_id INTEGER;"); } catch (e) {}
+try { db.exec("ALTER TABLE advance_bookings ADD COLUMN room_type TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE advance_bookings ADD COLUMN receipt_no TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE advance_bookings ADD COLUMN receipt_date TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE advance_bookings ADD COLUMN linked_booking_id INTEGER;"); } catch (e) { }
 
-try { db.exec("ALTER TABLE bookings ADD COLUMN advance_booking_id INTEGER;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN prebooked_amount REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN prebooked_receipt_no TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN prebooked_mode TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN prebooked_date TEXT;"); } catch (e) {}
+try { db.exec("ALTER TABLE bookings ADD COLUMN advance_booking_id INTEGER;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN prebooked_amount REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN prebooked_receipt_no TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN prebooked_mode TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN prebooked_date TEXT;"); } catch (e) { }
 
-try { db.exec("ALTER TABLE guests ADD COLUMN email TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE guests ADD COLUMN nationality TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE guests ADD COLUMN c_form_data TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN nationality TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN c_form_data TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE menu_items ADD COLUMN shortcode TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE menu_items ADD COLUMN is_veg INTEGER DEFAULT 1;"); } catch (e) {}
+try { db.exec("ALTER TABLE guests ADD COLUMN email TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE guests ADD COLUMN nationality TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE guests ADD COLUMN c_form_data TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN nationality TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN c_form_data TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE menu_items ADD COLUMN shortcode TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE menu_items ADD COLUMN is_veg INTEGER DEFAULT 1;"); } catch (e) { }
 try {
   const needsVegMigration = db.prepare("SELECT 1 FROM menu_items WHERE is_veg = 1 AND (LOWER(name) LIKE '%murg%' OR LOWER(name) LIKE '%chicken%' OR LOWER(name) LIKE '%mutton%' OR LOWER(name) LIKE '%fish%' OR LOWER(name) LIKE '%prawn%' OR LOWER(name) LIKE '%egg%') LIMIT 1").get();
   if (needsVegMigration) {
@@ -356,20 +356,20 @@ try {
          OR LOWER(name) LIKE '%egg%';
     `);
   }
-} catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN resettle_count INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN split_details_json TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN table_id INTEGER DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN token_number INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN waiter_name TEXT DEFAULT '';"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN resettle_count INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN split_details_json TEXT;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN table_id INTEGER DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN table_number TEXT DEFAULT '';"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN token_number INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN waiter_name TEXT DEFAULT '';"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN booking_id INTEGER DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN booking_id INTEGER DEFAULT NULL;"); } catch (e) {}
+} catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN resettle_count INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN split_details_json TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN table_id INTEGER DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN token_number INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN waiter_name TEXT DEFAULT '';"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN resettle_count INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN split_details_json TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN table_id INTEGER DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN table_number TEXT DEFAULT '';"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN token_number INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN waiter_name TEXT DEFAULT '';"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN booking_id INTEGER DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN booking_id INTEGER DEFAULT NULL;"); } catch (e) { }
 try {
   // Backfill booking_id for orders charged to rooms that don't have booking_id set
   const unlinkedRestOrders = db.prepare(`
@@ -407,12 +407,12 @@ try {
       db.prepare('UPDATE bar_orders SET booking_id = ? WHERE id = ?').run(matchingBooking.id, ord.id);
     }
   }
-} catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ext_grace_mins INTEGER NOT NULL DEFAULT 60;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ext_3h_rate REAL NOT NULL DEFAULT 500;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ext_6h_rate REAL NOT NULL DEFAULT 1000;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ext_9h_rate REAL NOT NULL DEFAULT 1500;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN floor TEXT DEFAULT 'First Floor';"); } catch (e) {}
+} catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ext_grace_mins INTEGER NOT NULL DEFAULT 60;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ext_3h_rate REAL NOT NULL DEFAULT 500;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ext_6h_rate REAL NOT NULL DEFAULT 1000;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ext_9h_rate REAL NOT NULL DEFAULT 1500;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN floor TEXT DEFAULT 'First Floor';"); } catch (e) { }
 try {
   db.exec(`
     UPDATE rooms SET floor = 'First Floor' WHERE (floor IS NULL OR floor = '' OR floor = 'First Floor') AND room_number LIKE '1%';
@@ -423,7 +423,7 @@ try {
     UPDATE rooms SET floor = 'Basement' WHERE (floor IS NULL OR floor = '' OR floor = 'First Floor') AND (room_number LIKE 'B%' OR room_number LIKE 'b%');
     UPDATE rooms SET floor = 'First Floor' WHERE floor IS NULL OR floor = '';
   `);
-} catch (e) {}
+} catch (e) { }
 
 // Seed default categories & menu items for Restaurant and Bar if missing
 const seedDefaultMenus = () => {
@@ -589,25 +589,25 @@ db.exec(`
 `);
 
 // Migrations for Bookings Booking Source & Manual Document Proofs
-try { db.exec("ALTER TABLE bookings ADD COLUMN booking_source TEXT DEFAULT 'Walk-in';"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN ota_platform TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN ota_booking_id TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN manual_entry INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN doc_proofs_json TEXT DEFAULT '[]';"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN meal_plan TEXT DEFAULT 'without_breakfast';"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN extra_beds INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN extra_bed_charge REAL DEFAULT 0;"); } catch (e) {}
+try { db.exec("ALTER TABLE bookings ADD COLUMN booking_source TEXT DEFAULT 'Walk-in';"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN ota_platform TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN ota_booking_id TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN manual_entry INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN doc_proofs_json TEXT DEFAULT '[]';"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN meal_plan TEXT DEFAULT 'without_breakfast';"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN extra_beds INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN extra_bed_charge REAL DEFAULT 0;"); } catch (e) { }
 
 // Migrations for Rooms Configurable Breakfast & Extra Beds
-try { db.exec("ALTER TABLE rooms ADD COLUMN breakfast_price REAL DEFAULT 250;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN max_extra_beds INTEGER DEFAULT 1;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN extra_bed_price REAL DEFAULT 500;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_tables ADD COLUMN room_id INTEGER DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_tables ADD COLUMN room_id INTEGER DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_tables ADD COLUMN customer_name TEXT DEFAULT '';"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_tables ADD COLUMN customer_phone TEXT DEFAULT '';"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_tables ADD COLUMN customer_name TEXT DEFAULT '';"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_tables ADD COLUMN customer_phone TEXT DEFAULT '';"); } catch (e) {}
+try { db.exec("ALTER TABLE rooms ADD COLUMN breakfast_price REAL DEFAULT 250;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN max_extra_beds INTEGER DEFAULT 1;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN extra_bed_price REAL DEFAULT 500;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_tables ADD COLUMN room_id INTEGER DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_tables ADD COLUMN room_id INTEGER DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_tables ADD COLUMN customer_name TEXT DEFAULT '';"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_tables ADD COLUMN customer_phone TEXT DEFAULT '';"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_tables ADD COLUMN customer_name TEXT DEFAULT '';"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_tables ADD COLUMN customer_phone TEXT DEFAULT '';"); } catch (e) { }
 
 // Room Visitors Table for Guest Visitor Logging & Photo Verification
 db.exec(`
@@ -654,9 +654,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_booking_extra_expenses_room_id ON booking_extra_expenses(room_id);
 `);
 
-try { db.exec("ALTER TABLE booking_extra_expenses ADD COLUMN added_by TEXT;"); } catch (_) {}
-try { db.exec("ALTER TABLE booking_extra_expenses ADD COLUMN category TEXT;"); } catch (_) {}
-try { db.exec("ALTER TABLE booking_extra_expenses ADD COLUMN notes TEXT;"); } catch (_) {}
+try { db.exec("ALTER TABLE booking_extra_expenses ADD COLUMN added_by TEXT;"); } catch (_) { }
+try { db.exec("ALTER TABLE booking_extra_expenses ADD COLUMN category TEXT;"); } catch (_) { }
+try { db.exec("ALTER TABLE booking_extra_expenses ADD COLUMN notes TEXT;"); } catch (_) { }
 
 
 // Staff Accounts Table for Role-Based Access & Cashier Auditing
@@ -695,25 +695,25 @@ db.exec(`
 `);
 
 // Migrations for Cashier Tracking & Manager Access Permissions
-try { db.exec("ALTER TABLE bookings ADD COLUMN checked_in_by TEXT DEFAULT 'Front Desk';"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN checked_out_by TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN cashier_name TEXT DEFAULT '';"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN cashier_name TEXT DEFAULT '';"); } catch (e) {}
-try { db.exec("ALTER TABLE staff_users ADD COLUMN can_access_manager INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE staff_users ADD COLUMN plain_password TEXT DEFAULT '';"); } catch (e) {}
-try { db.prepare("UPDATE staff_users SET can_access_manager = 1 WHERE role = 'manager';").run(); } catch (e) {}
-try { db.prepare("UPDATE staff_users SET full_name = 'Jaijeet sir' WHERE username = 'admin' OR (role = 'manager' AND full_name = 'General Manager');").run(); } catch (e) {}
-try { db.prepare("UPDATE staff_users SET plain_password = 'admin123' WHERE username = 'admin' AND (plain_password IS NULL OR plain_password = '');").run(); } catch (e) {}
-try { db.prepare("UPDATE staff_users SET plain_password = 'rest123' WHERE username IN ('rest1', 'rest2') AND (plain_password IS NULL OR plain_password = '');").run(); } catch (e) {}
-try { db.prepare("UPDATE staff_users SET plain_password = 'bar123' WHERE username IN ('bar1', 'bar2') AND (plain_password IS NULL OR plain_password = '');").run(); } catch (e) {}
-try { db.prepare("UPDATE staff_users SET plain_password = '1234' WHERE username IN ('waiter1', 'waiter2') AND (plain_password IS NULL OR plain_password = '');").run(); } catch (e) {}
+try { db.exec("ALTER TABLE bookings ADD COLUMN checked_in_by TEXT DEFAULT 'Front Desk';"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN checked_out_by TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN cashier_name TEXT DEFAULT '';"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN cashier_name TEXT DEFAULT '';"); } catch (e) { }
+try { db.exec("ALTER TABLE staff_users ADD COLUMN can_access_manager INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE staff_users ADD COLUMN plain_password TEXT DEFAULT '';"); } catch (e) { }
+try { db.prepare("UPDATE staff_users SET can_access_manager = 1 WHERE role = 'manager';").run(); } catch (e) { }
+try { db.prepare("UPDATE staff_users SET full_name = 'Jaijeet sir' WHERE username = 'admin' OR (role = 'manager' AND full_name = 'General Manager');").run(); } catch (e) { }
+try { db.prepare("UPDATE staff_users SET plain_password = 'admin123' WHERE username = 'admin' AND (plain_password IS NULL OR plain_password = '');").run(); } catch (e) { }
+try { db.prepare("UPDATE staff_users SET plain_password = 'rest123' WHERE username IN ('rest1', 'rest2') AND (plain_password IS NULL OR plain_password = '');").run(); } catch (e) { }
+try { db.prepare("UPDATE staff_users SET plain_password = 'bar123' WHERE username IN ('bar1', 'bar2') AND (plain_password IS NULL OR plain_password = '');").run(); } catch (e) { }
+try { db.prepare("UPDATE staff_users SET plain_password = '1234' WHERE username IN ('waiter1', 'waiter2') AND (plain_password IS NULL OR plain_password = '');").run(); } catch (e) { }
 const bcrypt = require('bcryptjs');
 try {
   const adminRow = db.prepare("SELECT id, password FROM staff_users WHERE username = 'admin'").get();
   if (adminRow && !bcrypt.compareSync('admin123', adminRow.password)) {
     db.prepare("UPDATE staff_users SET password = ?, plain_password = 'admin123' WHERE id = ?").run(bcrypt.hashSync('admin123', 10), adminRow.id);
   }
-} catch (e) {}
+} catch (e) { }
 
 // Seed Starter Accounts for Each Hotel Section (Front Desk, Restaurant, Bar, Management) if missing
 const ensureStaffAccount = (username, defaultPassword, fullName, role, phone, canAccessManager = null) => {
@@ -725,7 +725,7 @@ const ensureStaffAccount = (username, defaultPassword, fullName, role, phone, ca
         INSERT OR IGNORE INTO staff_users (username, password, plain_password, full_name, role, phone, status, can_access_manager)
         VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
       `).run(username, bcrypt.hashSync(defaultPassword, 10), defaultPassword, fullName, role, phone, managerAccess);
-    } catch (e) {}
+    } catch (e) { }
   }
 };
 
@@ -733,7 +733,7 @@ ensureStaffAccount('admin', 'admin123', 'Jaijeet sir', 'manager', '9876543210', 
 // Remove demo hospitality accounts (desk1 & desk2)
 try {
   db.prepare("DELETE FROM staff_users WHERE LOWER(username) IN ('desk1', 'desk2')").run();
-} catch (e) {}
+} catch (e) { }
 
 ensureStaffAccount('rest1', 'rest123', 'Ramesh Kumar (Restaurant POS)', 'restaurant', '9876543213');
 ensureStaffAccount('rest2', 'rest123', 'Amit Patel (Restaurant Captain)', 'restaurant', '9876543214');
@@ -804,99 +804,99 @@ db.exec(`
 `);
 
 // Migrations for Bookings (OTA Pre/Post-Paid, Manual Bill Override, Corporate BTC, Advance & Cheques)
-try { db.exec("ALTER TABLE bookings ADD COLUMN is_prepaid INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN ota_bill_amount REAL DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN rate_type TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN btc_company_id INTEGER DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN btc_company_name TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN btc_approval_ref TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN advance_payment REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN advance_payment_mode TEXT DEFAULT 'cash';"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN advance_receipt_no TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN advance_cheque_no TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN advance_cheque_bank TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN advance_cheque_status TEXT DEFAULT 'pending';"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN final_settlement_payment REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN final_settlement_mode TEXT DEFAULT 'cash';"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN final_receipt_no TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE guests ADD COLUMN alt_mobile TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN alt_mobile TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN cheque_photo TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN advance_cheque_photo TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN settlement_cheque_no TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN settlement_cheque_bank TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN settlement_cheque_date DATE DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN settlement_cheque_photo TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE payments ADD COLUMN cheque_photo TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE payments ADD COLUMN utr_number TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE payments ADD COLUMN card_surcharge REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN advance_utr_number TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN final_settlement_utr TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN utr_number TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN room_service_for TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN guest_phone TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN card_surcharge REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN settled_by TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN settled_at DATETIME DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN utr_number TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN room_service_for TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN guest_phone TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN card_surcharge REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN settled_by TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN settled_at DATETIME DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN member_documents_json TEXT DEFAULT '[]';"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN voucher_number TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE guests ADD COLUMN aadhar_number TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN is_early_checkin INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN original_checkin_time TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN early_checkin_time TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN ota_booked_adults INTEGER DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN ota_booked_children INTEGER DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN ota_booked_extra_beds INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN extra_adults INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN extra_children INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN extra_rooms_charge REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN extra_breakfast_charge REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN extra_meal_plan TEXT DEFAULT NULL;"); } catch (e) {}
+try { db.exec("ALTER TABLE bookings ADD COLUMN is_prepaid INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN ota_bill_amount REAL DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN rate_type TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN btc_company_id INTEGER DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN btc_company_name TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN btc_approval_ref TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN advance_payment REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN advance_payment_mode TEXT DEFAULT 'cash';"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN advance_receipt_no TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN advance_cheque_no TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN advance_cheque_bank TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN advance_cheque_status TEXT DEFAULT 'pending';"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN final_settlement_payment REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN final_settlement_mode TEXT DEFAULT 'cash';"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN final_receipt_no TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE guests ADD COLUMN alt_mobile TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN alt_mobile TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN cheque_photo TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN advance_cheque_photo TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN settlement_cheque_no TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN settlement_cheque_bank TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN settlement_cheque_date DATE DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN settlement_cheque_photo TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE payments ADD COLUMN cheque_photo TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE payments ADD COLUMN utr_number TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE payments ADD COLUMN card_surcharge REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN advance_utr_number TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN final_settlement_utr TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN utr_number TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN room_service_for TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN guest_phone TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN card_surcharge REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN settled_by TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN settled_at DATETIME DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN utr_number TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN room_service_for TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN guest_phone TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN card_surcharge REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN settled_by TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN settled_at DATETIME DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN member_documents_json TEXT DEFAULT '[]';"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN voucher_number TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE guests ADD COLUMN aadhar_number TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN is_early_checkin INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN original_checkin_time TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN early_checkin_time TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN ota_booked_adults INTEGER DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN ota_booked_children INTEGER DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN ota_booked_extra_beds INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN extra_adults INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN extra_children INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN extra_rooms_charge REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN extra_breakfast_charge REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN extra_meal_plan TEXT DEFAULT NULL;"); } catch (e) { }
 
 // OTA Early Check-In Policy Columns (Point: OTA Max 6 hrs early -> ₹900 extra charge, customizable per room)
-try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_checkin_price REAL DEFAULT 900;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_checkin_max_hours INTEGER DEFAULT 6;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_checkin_gst_pct REAL DEFAULT 5;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN early_checkin_charge REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN early_checkin_gst REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("UPDATE rooms SET ota_early_checkin_price = 900 WHERE ota_early_checkin_price IS NULL;"); } catch (e) {}
-try { db.exec("UPDATE rooms SET ota_early_checkin_max_hours = 6 WHERE ota_early_checkin_max_hours IS NULL;"); } catch (e) {}
-try { db.exec("UPDATE rooms SET ota_early_checkin_gst_pct = 5 WHERE ota_early_checkin_gst_pct IS NULL;"); } catch (e) {}
+try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_checkin_price REAL DEFAULT 900;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_checkin_max_hours INTEGER DEFAULT 6;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_checkin_gst_pct REAL DEFAULT 5;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN early_checkin_charge REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN early_checkin_gst REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("UPDATE rooms SET ota_early_checkin_price = 900 WHERE ota_early_checkin_price IS NULL;"); } catch (e) { }
+try { db.exec("UPDATE rooms SET ota_early_checkin_max_hours = 6 WHERE ota_early_checkin_max_hours IS NULL;"); } catch (e) { }
+try { db.exec("UPDATE rooms SET ota_early_checkin_gst_pct = 5 WHERE ota_early_checkin_gst_pct IS NULL;"); } catch (e) { }
 
 // OTA Early Check-In Slabs: 6hour, 9hour, 12hour (Base + GST % inputs per room)
-try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_6h_rate REAL DEFAULT 900;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_6h_gst_pct REAL DEFAULT 5;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_9h_rate REAL DEFAULT 1200;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_9h_gst_pct REAL DEFAULT 5;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_12h_rate REAL DEFAULT 1500;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_12h_gst_pct REAL DEFAULT 5;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN early_checkin_slab TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("UPDATE rooms SET ota_early_6h_rate = COALESCE(ota_early_checkin_price, 900) WHERE ota_early_6h_rate IS NULL;"); } catch (e) {}
-try { db.exec("UPDATE rooms SET ota_early_6h_gst_pct = COALESCE(ota_early_checkin_gst_pct, 5) WHERE ota_early_6h_gst_pct IS NULL;"); } catch (e) {}
-try { db.exec("UPDATE rooms SET ota_early_9h_rate = 1200 WHERE ota_early_9h_rate IS NULL;"); } catch (e) {}
-try { db.exec("UPDATE rooms SET ota_early_9h_gst_pct = 5 WHERE ota_early_9h_gst_pct IS NULL;"); } catch (e) {}
-try { db.exec("UPDATE rooms SET ota_early_12h_rate = 1500 WHERE ota_early_12h_rate IS NULL;"); } catch (e) {}
-try { db.exec("UPDATE rooms SET ota_early_12h_gst_pct = 5 WHERE ota_early_12h_gst_pct IS NULL;"); } catch (e) {}
+try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_6h_rate REAL DEFAULT 900;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_6h_gst_pct REAL DEFAULT 5;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_9h_rate REAL DEFAULT 1200;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_9h_gst_pct REAL DEFAULT 5;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_12h_rate REAL DEFAULT 1500;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ota_early_12h_gst_pct REAL DEFAULT 5;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN early_checkin_slab TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("UPDATE rooms SET ota_early_6h_rate = COALESCE(ota_early_checkin_price, 900) WHERE ota_early_6h_rate IS NULL;"); } catch (e) { }
+try { db.exec("UPDATE rooms SET ota_early_6h_gst_pct = COALESCE(ota_early_checkin_gst_pct, 5) WHERE ota_early_6h_gst_pct IS NULL;"); } catch (e) { }
+try { db.exec("UPDATE rooms SET ota_early_9h_rate = 1200 WHERE ota_early_9h_rate IS NULL;"); } catch (e) { }
+try { db.exec("UPDATE rooms SET ota_early_9h_gst_pct = 5 WHERE ota_early_9h_gst_pct IS NULL;"); } catch (e) { }
+try { db.exec("UPDATE rooms SET ota_early_12h_rate = 1500 WHERE ota_early_12h_rate IS NULL;"); } catch (e) { }
+try { db.exec("UPDATE rooms SET ota_early_12h_gst_pct = 5 WHERE ota_early_12h_gst_pct IS NULL;"); } catch (e) { }
 
 // Card Surcharge (2.5%) and UPI Tax (0.4% > ₹2000) Tracking Columns
-try { db.exec("ALTER TABLE payments ADD COLUMN upi_tax REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE payments ADD COLUMN split_cash REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE payments ADD COLUMN split_card REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE payments ADD COLUMN split_online REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE payments ADD COLUMN split_cheque REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN split_cheque REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN advance_card_surcharge REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN advance_upi_tax REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN final_card_surcharge REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN final_upi_tax REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN upi_tax REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bar_orders ADD COLUMN upi_tax REAL DEFAULT 0;"); } catch (e) {}
+try { db.exec("ALTER TABLE payments ADD COLUMN upi_tax REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE payments ADD COLUMN split_cash REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE payments ADD COLUMN split_card REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE payments ADD COLUMN split_online REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE payments ADD COLUMN split_cheque REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN split_cheque REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN advance_card_surcharge REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN advance_upi_tax REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN final_card_surcharge REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN final_upi_tax REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE restaurant_orders ADD COLUMN upi_tax REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bar_orders ADD COLUMN upi_tax REAL DEFAULT 0;"); } catch (e) { }
 
 // Monthly Serial Voucher Sequencing (resets every month, format: YYYYMMDD-SR)
 db.exec(`
@@ -919,16 +919,16 @@ db.exec(`
     cleaned_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
-try { db.exec("ALTER TABLE bookings ADD COLUMN cleaned_by TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN cleaned_at DATETIME DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN last_cleaned_by TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN last_cleaned_at DATETIME DEFAULT NULL;"); } catch (e) {}
+try { db.exec("ALTER TABLE bookings ADD COLUMN cleaned_by TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN cleaned_at DATETIME DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN last_cleaned_by TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN last_cleaned_at DATETIME DEFAULT NULL;"); } catch (e) { }
 
 // Room Visitors Breakfast Additions
-try { db.exec("ALTER TABLE room_visitors ADD COLUMN has_breakfast INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE room_visitors ADD COLUMN breakfast_status TEXT DEFAULT 'pending';"); } catch (e) {}
-try { db.exec("ALTER TABLE room_visitors ADD COLUMN breakfast_amount REAL DEFAULT 250;"); } catch (e) {}
-try { db.exec("ALTER TABLE room_visitors ADD COLUMN fnb_order_id INTEGER DEFAULT NULL;"); } catch (e) {}
+try { db.exec("ALTER TABLE room_visitors ADD COLUMN has_breakfast INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE room_visitors ADD COLUMN breakfast_status TEXT DEFAULT 'pending';"); } catch (e) { }
+try { db.exec("ALTER TABLE room_visitors ADD COLUMN breakfast_amount REAL DEFAULT 250;"); } catch (e) { }
+try { db.exec("ALTER TABLE room_visitors ADD COLUMN fnb_order_id INTEGER DEFAULT NULL;"); } catch (e) { }
 
 // Housekeeping / Cleaner Staff Table (Options managed via Manager Panel)
 db.exec(`
@@ -954,10 +954,10 @@ try {
     const insertCleaner = db.prepare('INSERT OR IGNORE INTO cleaner_staff (name, phone, status) VALUES (?, ?, ?)');
     seedCleaners.forEach(c => insertCleaner.run(c.name, c.phone, 'active'));
   }
-} catch (e) {}
+} catch (e) { }
 
 // Checkout Extension Audit Logs
-try { db.exec("ALTER TABLE bookings ADD COLUMN extension_logs_json TEXT DEFAULT '[]';"); } catch (e) {}
+try { db.exec("ALTER TABLE bookings ADD COLUMN extension_logs_json TEXT DEFAULT '[]';"); } catch (e) { }
 try {
   db.exec(`
     CREATE TABLE IF NOT EXISTS checkout_extension_logs (
@@ -971,55 +971,55 @@ try {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
-} catch (e) {}
+} catch (e) { }
 
 try {
   db.exec("ALTER TABLE rooms ADD COLUMN gst_pct REAL NOT NULL DEFAULT 5;");
-} catch (e) {}
+} catch (e) { }
 
 // Early Checkout & Refund Settlement columns
-try { db.exec("ALTER TABLE bookings ADD COLUMN refund_amount REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN refund_mode TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN refund_voucher_no TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN refund_reason TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN refund_utr TEXT DEFAULT NULL;"); } catch (e) {}
+try { db.exec("ALTER TABLE bookings ADD COLUMN refund_amount REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN refund_mode TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN refund_voucher_no TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN refund_reason TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN refund_utr TEXT DEFAULT NULL;"); } catch (e) { }
 
 // Room tariff per adult (Point 5)
-try { db.exec("ALTER TABLE rooms ADD COLUMN price_single REAL DEFAULT NULL;"); } catch (e) {}
+try { db.exec("ALTER TABLE rooms ADD COLUMN price_single REAL DEFAULT NULL;"); } catch (e) { }
 
 // Base & GST Rate Columns for Add-ons and Stay Extension Slabs
-try { db.exec("ALTER TABLE rooms ADD COLUMN extra_bed_gst_pct REAL DEFAULT 5;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN breakfast_gst_pct REAL DEFAULT 5;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ext_3h_gst_pct REAL DEFAULT 5;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ext_6h_gst_pct REAL DEFAULT 5;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN ext_9h_gst_pct REAL DEFAULT 5;"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN single_gst_pct REAL DEFAULT 5;"); } catch (e) {}
+try { db.exec("ALTER TABLE rooms ADD COLUMN extra_bed_gst_pct REAL DEFAULT 5;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN breakfast_gst_pct REAL DEFAULT 5;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ext_3h_gst_pct REAL DEFAULT 5;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ext_6h_gst_pct REAL DEFAULT 5;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN ext_9h_gst_pct REAL DEFAULT 5;"); } catch (e) { }
+try { db.exec("ALTER TABLE rooms ADD COLUMN single_gst_pct REAL DEFAULT 5;"); } catch (e) { }
 
 // Out-of-state IGST support (Point 22)
-try { db.exec("ALTER TABLE bookings ADD COLUMN tax_type TEXT DEFAULT 'cgst_sgst';"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN is_igst INTEGER DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN company_name TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN gst_number TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN company_address TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN checkout_discount_amount REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE bookings ADD COLUMN tax_invoice_snapshot_json TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE guests ADD COLUMN company_name TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE guests ADD COLUMN gst_number TEXT DEFAULT NULL;"); } catch (e) {}
+try { db.exec("ALTER TABLE bookings ADD COLUMN tax_type TEXT DEFAULT 'cgst_sgst';"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN is_igst INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN company_name TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN gst_number TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN company_address TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN checkout_discount_amount REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE bookings ADD COLUMN tax_invoice_snapshot_json TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE guests ADD COLUMN company_name TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE guests ADD COLUMN gst_number TEXT DEFAULT NULL;"); } catch (e) { }
 
 // Expenses purpose hierarchy, owner attribution & remainder adjustment (Points 12, 13, 16)
-try { db.exec("ALTER TABLE expenses ADD COLUMN purpose_category TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE expenses ADD COLUMN purpose_child TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE expenses ADD COLUMN owner_name TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE expenses ADD COLUMN original_amount REAL DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE expenses ADD COLUMN actual_used_amount REAL DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE expenses ADD COLUMN returned_amount REAL DEFAULT 0;"); } catch (e) {}
-try { db.exec("ALTER TABLE expenses ADD COLUMN bill_scan_photo TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE expenses ADD COLUMN cheque_photo TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE expenses ADD COLUMN owner_phone TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE payments ADD COLUMN cheque_photo TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE payments ADD COLUMN card_digits TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE payments ADD COLUMN particulars TEXT DEFAULT NULL;"); } catch (e) {}
-try { db.exec("ALTER TABLE payments ADD COLUMN voucher_number TEXT DEFAULT NULL;"); } catch (e) {}
+try { db.exec("ALTER TABLE expenses ADD COLUMN purpose_category TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE expenses ADD COLUMN purpose_child TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE expenses ADD COLUMN owner_name TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE expenses ADD COLUMN original_amount REAL DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE expenses ADD COLUMN actual_used_amount REAL DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE expenses ADD COLUMN returned_amount REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE expenses ADD COLUMN bill_scan_photo TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE expenses ADD COLUMN cheque_photo TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE expenses ADD COLUMN owner_phone TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE payments ADD COLUMN cheque_photo TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE payments ADD COLUMN card_digits TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE payments ADD COLUMN particulars TEXT DEFAULT NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE payments ADD COLUMN voucher_number TEXT DEFAULT NULL;"); } catch (e) { }
 
 // Seed Default Debit / Expense Categories & Owners Config (Point 12)
 const defaultExpenseCategories = db.prepare('SELECT value FROM system_settings WHERE key = ?').get('expense_categories_config');
@@ -1098,6 +1098,35 @@ if (!defaultSupabaseSync || defaultSupabaseSync.value === '1') {
 const defaultAutoSync = db.prepare('SELECT value FROM system_settings WHERE key = ?').get('cloud_auto_sync');
 if (!defaultAutoSync) {
   db.prepare('INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)').run('cloud_auto_sync', '1');
+}
+
+// Auto-heal auto_save_directory to a valid and writable local folder on this machine
+try {
+  const os = require('os');
+  const autoSaveRow = db.prepare("SELECT value FROM system_settings WHERE key = 'auto_save_directory'").get();
+  const defaultAutoSave = path.join(os.homedir(), 'Downloads');
+  if (autoSaveRow && autoSaveRow.value) {
+    const val = autoSaveRow.value.trim();
+    let isPathValid = false;
+    try {
+      if (fs.existsSync(val)) {
+        isPathValid = true;
+      } else {
+        fs.mkdirSync(val, { recursive: true });
+        isPathValid = true;
+      }
+    } catch (_) {
+      isPathValid = false;
+    }
+    if (!isPathValid) {
+      db.prepare("UPDATE system_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = 'auto_save_directory'").run(defaultAutoSave);
+      console.log(`[AutoSave] Auto-healed invalid auto_save_directory to current user directory: ${defaultAutoSave}`);
+    }
+  } else {
+    db.prepare("INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('auto_save_directory', ?, CURRENT_TIMESTAMP)").run(defaultAutoSave);
+  }
+} catch (e) {
+  console.warn('[AutoSave] Notice initializing auto_save_directory:', e.message);
 }
 
 // Performance Indexes for Instant Navigation & Sub-Millisecond History Lookups
@@ -1644,16 +1673,16 @@ function ensureGuestDiningTables(database) {
 
     try {
       db.prepare('ALTER TABLE guest_inroom_orders ADD COLUMN cloud_inbox_id TEXT').run();
-    } catch (_) {}
+    } catch (_) { }
     try {
       db.prepare('ALTER TABLE guest_inroom_orders ADD COLUMN rejection_reason TEXT DEFAULT NULL').run();
-    } catch (_) {}
+    } catch (_) { }
     try {
       db.prepare('ALTER TABLE guest_inroom_orders ADD COLUMN cancelled_at DATETIME DEFAULT NULL').run();
-    } catch (_) {}
+    } catch (_) { }
     try {
       db.prepare('ALTER TABLE guest_inroom_orders ADD COLUMN cancelled_by TEXT DEFAULT NULL').run();
-    } catch (_) {}
+    } catch (_) { }
 
     // Seed default restaurant operating and closing hours if not already present
     try {
@@ -1666,7 +1695,7 @@ function ensureGuestDiningTables(database) {
           ('restaurant_prep_time', '25-45 min'),
           ('storeman_pin', '1234');
       `);
-    } catch (_) {}
+    } catch (_) { }
   } catch (err) {
     console.warn('Notice ensuring guest dining tables:', err.message);
   }

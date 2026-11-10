@@ -465,6 +465,10 @@ export default function HospitalityPage({ onStartCheckin, onOpenFolio, onOpenVis
         }
       });
 
+      if (res?.notified === false) {
+        showToast(res.error || 'Owner phone was not notified. The room shift request was not delivered.', 'error', 5000);
+        return;
+      }
       if (res && (res.id || res.approval_id || res.success)) {
         const approvalId = res.id || res.approval_id;
         setTransferConfirmData((prev) => ({

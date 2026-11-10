@@ -60,7 +60,11 @@ export function formatTime12(timeInput) {
 
 export function formatDateTime(dateInput) {
   if (!dateInput) return '';
-  const d = new Date(dateInput);
+  let raw = dateInput;
+  if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw.trim())) {
+    raw = raw.trim().replace(' ', 'T') + 'Z';
+  }
+  const d = new Date(raw);
   if (isNaN(d.getTime())) return '';
   const dateStr = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });

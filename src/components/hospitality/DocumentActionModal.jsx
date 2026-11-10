@@ -94,11 +94,21 @@ export default function DocumentActionModal({
           extensionHours: baseCalc.extensionHours ?? activeCalc?.extensionHours ?? room.extension_hours,
           extensionCharge: baseCalc.extensionCharge ?? activeCalc?.extensionCharge ?? room.extension_charge
         },
-        settlement: invData.settlement || {
+        settlement: invData.settlement ? {
+          ...invData.settlement,
+          checkin_discount_amt: invData.settlement.checkin_discount_amt ?? (baseCalc.discountAmount ?? room.discount_amount ?? 0),
+          checkout_discount_amt: invData.settlement.checkout_discount_amt ?? Number(room.checkout_discount_amount || 0),
+          targetNetPayable: invData.settlement.targetNetPayable ?? (room.final_settlement_payment !== undefined && room.final_settlement_payment !== null ? Number(room.final_settlement_payment) : undefined),
+          isCheckoutSettlement: invData.settlement.isCheckoutSettlement ?? Boolean(room.checkout_discount_amount > 0 || room.status === 'checked_out')
+        } : {
           settleAmt: room.final_settlement_payment || room.final_settle_amount || 0,
+          targetNetPayable: room.final_settlement_payment !== undefined && room.final_settlement_payment !== null ? Number(room.final_settlement_payment) : undefined,
           refundAmt: room.refund_amount || 0,
           settled_at: room.actual_checkout_time || room.checkout_time || new Date(),
           invoiceNo: room.invoice_no,
+          checkin_discount_amt: baseCalc.discountAmount ?? room.discount_amount ?? 0,
+          checkout_discount_amt: Number(room.checkout_discount_amount || 0),
+          isCheckoutSettlement: Boolean(room.checkout_discount_amount > 0 || room.status === 'checked_out'),
           checked_out_by: room.checked_out_by || cashierName
         }
       };
@@ -148,10 +158,14 @@ export default function DocumentActionModal({
     };
     const settlement = {
       settleAmt: room.final_settlement_payment || room.final_settle_amount || 0,
+      targetNetPayable: room.final_settlement_payment !== undefined && room.final_settlement_payment !== null ? Number(room.final_settlement_payment) : undefined,
       refundAmt: room.refund_amount || 0,
       settled_at: room.actual_checkout_time || room.checkout_time || new Date(),
       discount_amount: activeCalc?.discountAmount ?? room.discount_amount ?? 0,
       discount_pct: activeCalc?.discountPct ?? room.discount_pct ?? 0,
+      checkin_discount_amt: activeCalc?.discountAmount ?? room.discount_amount ?? 0,
+      checkout_discount_amt: Number(room.checkout_discount_amount || 0),
+      isCheckoutSettlement: Boolean(room.checkout_discount_amount > 0 || room.status === 'checked_out'),
       invoiceNo: room.invoice_no || formatTaxInvoiceNumber(room.voucher_number || room.voucher_no || room.checkin_voucher_no || room.id),
       checked_out_by: room.checked_out_by || cashierName
     };

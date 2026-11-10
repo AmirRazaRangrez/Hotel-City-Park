@@ -1,8 +1,9 @@
 @echo off
-set "JAVA_HOME=C:\Program Files\Android\Android Studio\jbr"
-set "ANDROID_HOME=C:\Users\91937\AppData\Local\Android\Sdk"
+if defined LOCALAPPDATA (
+    set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
+)
 set "NODE_OPTIONS=--max-old-space-size=8192"
-cd /d "c:\Aamir Delta\city_backup\admin\android"
+cd /d "%~dp0android"
 if exist "app\build\outputs\apk\release\app-release.apk" del /f /q "app\build\outputs\apk\release\app-release.apk"
 call gradlew.bat assembleRelease
 if exist "app\build\outputs\apk\release\app-release.apk" (

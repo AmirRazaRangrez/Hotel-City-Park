@@ -34,12 +34,12 @@ export const useAuth = create<S>((set, get) => ({
       if (typeof window !== 'undefined' && window.location?.protocol === 'https:') {
         initialBase = CLOUD_TUNNEL_URL;
       }
-      fetchCloudTunnelUrl().then(fresh => {
-        if (fresh && fresh.startsWith('https://') && fresh !== get().baseUrl) {
-          set({ baseUrl: fresh });
-        }
-      }).catch(() => {});
+      try {
+        const fresh = await fetchCloudTunnelUrl();
+        if (fresh && fresh.startsWith('https://')) initialBase = fresh;
+      } catch (_) {}
     }
+    set({ baseUrl: initialBase });
     const [t, u] = await Promise.all([SS.getItemAsync('tok'), SS.getItemAsync('usr')]);
     if (t) {
       let user: any = null;
@@ -48,7 +48,7 @@ export const useAuth = create<S>((set, get) => ({
       return;
     }
     await get().signIn();
-    set({ready: true, baseUrl: initialBase, user: get().user || DEFAULT_USER});
+    set({ready: true, baseUrl: get().baseUrl || initialBase, user: get().user || DEFAULT_USER});
   },
 
   // Silent login with the built-in owner account. Safe to call any time.

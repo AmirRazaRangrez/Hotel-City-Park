@@ -1722,9 +1722,10 @@ async function syncApprovalRequestToCloud(req) {
         current_total: req.current_total,
         final_amount: req.final_amount,
         requested_by: req.requested_by,
-        reason: req.reason
+        reason: req.reason,
+        request_nonce: req.request_nonce || ''
       }),
-      settled_by: req.requested_by || 'Reception Staff',
+      settled_by: '',
       status: 'pending'
     };
     await withTimeout(supabase.from('room_charges_inbox').insert(payload));
@@ -1750,20 +1751,20 @@ async function pollCloudApprovals(db) {
       for (const row of data) {
         const approvalId = row.bill_no ? row.bill_no.replace('APP-', '') : null;
         if (approvalId) {
-          const newStatus = (row.status || '').toLowerCase() === 'approved' ? 'APPROVED' : 'REJECTED';
-          const existing = db.prepare('SELECT status FROM owner_approvals WHERE id = ?').get(approvalId);
-          if (existing && existing.status === 'PENDING') {
-            try {
-              const notificationService = require('./notificationService');
-              notificationService.updateApprovalStatus(approvalId, newStatus, row.settled_by || 'Admin');
-              console.log(`[Cloud Approval] Synced decision from cloud: Request #${approvalId} is now ${newStatus}`);
-            } catch (syncErr) {
-              db.prepare(`
-                UPDATE owner_approvals
-                SET status = ?, action_by = ?, action_at = datetime('now','localtime')
-                WHERE id = ?
-              `).run(newStatus, row.settled_by || 'Admin', approvalId);
+          try {
+            const notificationService = require('./notificationService');
+            const adopted = notificationService.adoptCloudDecision({
+              id: row.bill_no || approvalId,
+              status: row.status,
+              settled_by: row.settled_by,
+              items_summary: row.items_summary,
+              action_reason: row.action_reason || ''
+            });
+            if (adopted) {
+              console.log(`[Cloud Approval] Synced decision from cloud: Request #${approvalId} is now ${adopted.status}`);
             }
+          } catch (syncErr) {
+            console.warn('[Cloud Approval] Could not adopt cloud decision:', syncErr.message);
           }
         }
       }

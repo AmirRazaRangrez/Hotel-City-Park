@@ -57,17 +57,21 @@ describe('OTA Prepaid with F&B Bill & Dark Mode CSS Test Suite', () => {
       room = db.prepare("SELECT * FROM rooms LIMIT 1").get();
     }
 
+    const nowIso = new Date().toISOString();
+    const pastIso = new Date(Date.now() - 7200000).toISOString();
+    const futureIso = new Date(Date.now() + 86400000).toISOString();
+
     const bookingRes = db.prepare(`
       INSERT INTO bookings (
         room_id, guest_id, checkin_time, approx_checkout_time,
         booking_source, ota_platform, is_prepaid, rate_type,
         room_rate, total_room_charge, total_paid, status, ota_bill_amount
       ) VALUES (
-        ?, ?, datetime('now', '-2 hours'), datetime('now', '+1 day'),
+        ?, ?, ?, ?,
         'OTA', 'Goibibo', 1, 'prepaid',
         5000, 5000, 0, 'active', 5000
       )
-    `).run(room.id, guestId);
+    `).run(room.id, guestId, pastIso, futureIso);
     const bookingId = bookingRes.lastInsertRowid;
 
     db.prepare("UPDATE rooms SET status = 'occupied', current_booking_id = ? WHERE id = ?").run(bookingId, room.id);
@@ -81,9 +85,9 @@ describe('OTA Prepaid with F&B Bill & Dark Mode CSS Test Suite', () => {
       ) VALUES (
         ?, ?, 'OTA Prepaid Guest Test', 'room',
         '[]', 490, 25, 515, 0, 'room_folio',
-        ?, 'completed', datetime('now')
+        ?, 'completed', ?
       )
-    `).run(`RES-TEST-${Date.now()}`, room.id, bookingId);
+    `).run(`RES-TEST-${Date.now()}`, room.id, bookingId, nowIso);
 
     try {
       // 3. Call GET /api/rooms/:id/folio

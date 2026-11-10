@@ -15,7 +15,8 @@ const targetDirs = [
   path.resolve('release-electron', 'Hotel City Park CRM-win32-x64', 'resources', 'app', 'runtime'),
   path.resolve('release-electron', 'Hotel City Park CRM-win32-x64', 'resources', 'app', 'node_modules', 'better-sqlite3', 'build', 'Release'),
   path.resolve('release-electron', 'Hotel City Park CRM-win32-x64', 'resources', 'app', 'node_modules', 'better-sqlite3', 'prebuilds', 'win32-x64'),
-  path.resolve('release')
+  path.resolve('release'),
+  path.resolve('release', 'runtime')
 ];
 
 for (const t of targetDirs) {

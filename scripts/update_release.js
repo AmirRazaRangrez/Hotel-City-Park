@@ -10,6 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execSync } = require('child_process');
 
 const rootDir = path.resolve(__dirname, '..');
@@ -356,6 +357,7 @@ for (const reqFile of requiredReleaseFiles) {
 }
 
 // 6. Zip packaging for client distribution
+const skipZip = process.argv.includes('--no-zip') || process.argv.includes('--quick');
 console.log('\n📦 [6/6] Packaging updated release-electron zip archive for client delivery...');
 const electronFolder = path.join(rootDir, 'release-electron', 'Hotel City Park CRM-win32-x64');
 const zipFile = path.join(rootDir, 'release-electron', 'Hotel City Park CRM-win32-x64.zip');
@@ -375,9 +377,13 @@ for (const dbPath of embeddedDbs) {
   }
 }
 
-if (fs.existsSync(electronFolder)) {
+if (!skipZip && fs.existsSync(electronFolder)) {
   let zipped = false;
-  const s7zPath = 'C:\\Users\\91937\\scoop\\shims\\7z.exe';
+  const s7zPath = [
+    path.join(os.homedir(), 'scoop', 'shims', '7z.exe'),
+    'C:\\Program Files\\7-Zip\\7z.exe',
+    'C:\\Program Files (x86)\\7-Zip\\7z.exe'
+  ].find(p => fs.existsSync(p));
   if (fs.existsSync(s7zPath)) {
     try {
       console.log('  ⚡ Compressing package with high-speed 7-Zip...');
@@ -389,6 +395,20 @@ if (fs.existsSync(electronFolder)) {
       zipped = true;
     } catch (err) {
       console.warn('  ⚠️ 7-Zip compression error:', err.message);
+    }
+  }
+
+  if (!zipped) {
+    try {
+      console.log('  ⚡ Compressing package with high-speed tar...');
+      if (fs.existsSync(zipFile)) fs.unlinkSync(zipFile);
+      execSync(`tar -a -c -f "${zipFile}" "Hotel City Park CRM-win32-x64"`, {
+        cwd: path.join(rootDir, 'release-electron'),
+        stdio: 'inherit'
+      });
+      zipped = true;
+    } catch (err) {
+      console.warn('  ⚠️ tar compression error:', err.message);
     }
   }
 

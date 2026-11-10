@@ -10,6 +10,12 @@ const db = require('../database');
 
 // Add compatibility column if needed
 try { db.exec("ALTER TABLE owner_notifications ADD COLUMN read INTEGER DEFAULT 0;"); } catch (e) {}
+try { db.exec("ALTER TABLE owner_notifications ADD COLUMN is_read INTEGER DEFAULT 0;"); } catch (e) {}
+try { db.exec("ALTER TABLE owner_notifications ADD COLUMN metadata TEXT;"); } catch (e) {}
+try { db.exec("ALTER TABLE owner_notifications ADD COLUMN deep_link TEXT;"); } catch (e) {}
+try { db.exec("ALTER TABLE owner_push_tokens ADD COLUMN device_name TEXT;"); } catch (e) {}
+try { db.exec("ALTER TABLE owner_push_tokens ADD COLUMN last_used DATETIME;"); } catch (e) {}
+try { db.exec("ALTER TABLE owner_push_tokens ADD COLUMN platform TEXT DEFAULT 'android';"); } catch (e) {}
 try { db.exec("ALTER TABLE owner_push_tokens ADD COLUMN platform TEXT DEFAULT 'android';"); } catch (e) {}
 try {
   db.exec(`
@@ -46,13 +52,15 @@ function savePushToken(token, platform = 'android') {
   if (!cleanToken || cleanToken.includes('TEST_TOKEN')) return null;
 
   try {
-    db.prepare(`
+    const saved = db.prepare(`
       INSERT INTO owner_push_tokens (token, device_name, platform, last_used)
       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(token) DO UPDATE SET last_used = CURRENT_TIMESTAMP, platform = excluded.platform
     `).run(cleanToken, (platform || 'Owner Android').trim(), platform);
+    if (!saved.changes) return false;
   } catch (err) {
     console.warn('[NotificationService] Error saving push token to SQLite:', err.message);
+    return false;
   }
 
   // Also sync to Firebase Cloud 'owner_devices' collection
@@ -82,35 +90,267 @@ function getPushTokens() {
 }
 
 async function getAllPushTokens() {
-  const localTokens = getPushTokens();
+  // Tokens registered on this CRM are the send list. A Firestore quota error must not add or replace them.
+  return getPushTokens();
+}
+
+let lastFcmSetupError = null;
+let cachedGoogleAccessToken = null;
+let cachedGoogleTokenExpiry = 0;
+let cachedClockOffsetMs = null;
+let lastOffsetCheckTime = 0;
+
+async function getGoogleServerClockOffsetMs() {
+  const now = Date.now();
+  if (cachedClockOffsetMs !== null && now - lastOffsetCheckTime < 10 * 60 * 1000) {
+    return cachedClockOffsetMs;
+  }
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 2000);
-    const FIREBASE_REST_URL = 'https://firestore.googleapis.com/v1/projects/hotelcitypark-crm/databases/(default)/documents';
-    const FIREBASE_API_KEY = 'AIzaSyCtZnkdk1_q8rWrISnD8P2Rhi-jcPn1QTI';
-    const res = await fetch(`${FIREBASE_REST_URL}/owner_devices?key=${FIREBASE_API_KEY}`, {
-      signal: controller.signal
-    }).finally(() => clearTimeout(timer));
-    if (res.ok) {
-      const data = await res.json();
-      if (data.documents && Array.isArray(data.documents)) {
-        for (const d of data.documents) {
-          const tok = d.fields?.fcm_token?.stringValue;
-          if (tok && typeof tok === 'string' && !tok.includes('TEST_TOKEN') && !localTokens.includes(tok)) {
-            localTokens.push(tok);
-            try {
-              db.prepare(`
-                INSERT INTO owner_push_tokens (token, device_name, platform, last_used)
-                VALUES (?, 'Owner Android (Cloud Synced)', 'android', CURRENT_TIMESTAMP)
-                ON CONFLICT(token) DO UPDATE SET last_used = CURRENT_TIMESTAMP
-              `).run(tok);
-            } catch {}
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 3000) : null;
+    const res = await fetch('https://oauth2.googleapis.com', { method: 'HEAD', signal: controller?.signal });
+    if (timer) clearTimeout(timer);
+    const dateStr = res.headers.get('date');
+    if (dateStr) {
+      const googleServerTimeMs = new Date(dateStr).getTime();
+      cachedClockOffsetMs = Date.now() - googleServerTimeMs;
+      lastOffsetCheckTime = now;
+      console.log(`⏱️ [Google Clock Sync] Local clock offset from Google servers: ${(cachedClockOffsetMs / 1000 / 3600).toFixed(2)} hours`);
+      return cachedClockOffsetMs;
+    }
+  } catch (err) {
+    console.warn('[Google Clock Sync] Could not fetch Google server time:', err.message);
+  }
+  return cachedClockOffsetMs || 0;
+}
+
+function normalizeServiceAccountKey(raw) {
+  let key = String(raw || '').trim().replace(/\r/g, '');
+  key = key.replace(/\\n/g, '\n');
+  if (!key.includes('-----BEGIN PRIVATE KEY-----')) return key;
+  if (!key.includes('\n')) {
+    key = key
+      .replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
+      .replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----');
+  }
+  const lines = key.split('\n').map(line => line.trim()).filter(Boolean);
+  const header = lines[0];
+  const footer = lines[lines.length - 1];
+  const body = lines.slice(1, -1).join('');
+  const bad = [];
+  for (let i = 0; i < body.length; i++) {
+    if (!/[A-Za-z0-9+/=]/.test(body[i])) bad.push(i + ':' + body.charCodeAt(i));
+  }
+  if (body.length % 4 !== 0 || bad.length) {
+    console.warn('[FCM Token] Push key is not valid base64. body', body.length, 'mod', body.length % 4, 'bad', bad.slice(0, 8).join(',') || 'none');
+  }
+  const wrapped = body.match(/.{1,64}/g)?.join('\n') || body;
+  return `${header}\n${wrapped}\n${footer}\n`;
+}
+
+function loadEmbeddedPushServiceAccount() {
+  try {
+    const embeddedPath = path.resolve(__dirname, '..', 'supabase', 'functions', 'send-push', 'index.ts');
+    if (!fs.existsSync(embeddedPath)) return null;
+    const src = fs.readFileSync(embeddedPath, 'utf8');
+    const blockStart = src.indexOf('const EMBEDDED_FIREBASE_SA = {');
+    const blockEnd = src.indexOf('function getServiceAccount');
+    if (blockStart < 0 || blockEnd < 0) return null;
+    const block = src.slice(blockStart, blockEnd);
+    const readQuoted = (field) => {
+      const match = block.match(new RegExp(field + ':\\s*"((?:\\\\.|[^"\\\\])*)"'));
+      return match ? JSON.parse('"' + match[1] + '"') : '';
+    };
+    const sa = {
+      type: 'service_account',
+      project_id: readQuoted('project_id'),
+      private_key_id: readQuoted('private_key_id'),
+      private_key: readQuoted('private_key'),
+      client_email: readQuoted('client_email'),
+      token_uri: readQuoted('token_uri') || 'https://oauth2.googleapis.com/token'
+    };
+    if (sa.private_key && sa.client_email && String(sa.private_key).includes('BEGIN PRIVATE KEY')) {
+      return sa;
+    }
+  } catch (err) {
+    console.warn('[NotificationService] Embedded push account could not be loaded:', err.message);
+  }
+  return null;
+}
+
+function loadNotificationServiceAccount() {
+  const saPaths = [
+    path.resolve(__dirname, '..', 'firebase-service-account.json'),
+    path.resolve(__dirname, '..', 'hotelcitypark-crm-firebase-adminsdk-fbsvc-cb2c37b86c.json'),
+    path.resolve(__dirname, 'firebase-service-account.json')
+  ];
+  for (const p of saPaths) {
+    if (fs.existsSync(p)) {
+      try {
+        const sa = JSON.parse(fs.readFileSync(p, 'utf8'));
+        if (sa && sa.private_key && sa.client_email) return sa;
+      } catch (_) {}
+    }
+  }
+  return loadEmbeddedPushServiceAccount();
+}
+
+async function getGoogleOAuthAccessToken() {
+  const now = Date.now();
+  if (cachedGoogleAccessToken && cachedGoogleTokenExpiry > now + 60 * 1000) {
+    return cachedGoogleAccessToken;
+  }
+
+  const sa = loadNotificationServiceAccount();
+  if (!sa) return null;
+  sa.private_key = normalizeServiceAccountKey(sa.private_key);
+
+  const clockOffsetMs = await getGoogleServerClockOffsetMs();
+  const googleNowSec = Math.floor((Date.now() - clockOffsetMs) / 1000);
+
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+  const claim = Buffer.from(JSON.stringify({
+    iss: sa.client_email,
+    scope: 'https://www.googleapis.com/auth/firebase.messaging',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: googleNowSec + 3600,
+    iat: googleNowSec - 10
+  })).toString('base64url');
+
+  const crypto = require('crypto');
+  let signingKey = sa.private_key;
+  try {
+    signingKey = crypto.createPrivateKey({ key: sa.private_key, format: 'pem' });
+  } catch (keyErr) {
+    const lines = String(sa.private_key || '').split('\n');
+    lastFcmSetupError = 'The Firebase push key in this project is damaged, so the owner phone cannot be notified. Add a valid firebase-service-account.json to the CRM folder.';
+    console.warn('[FCM Token] Private key could not be decoded:', keyErr.message, 'lines', lines.length, 'chars', String(sa.private_key || '').length);
+    return null;
+  }
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(header + '.' + claim);
+  const sig = signer.sign(signingKey, 'base64url');
+  const jwt = header + '.' + claim + '.' + sig;
+
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=' + jwt,
+    signal: controller?.signal
+  });
+  if (timer) clearTimeout(timer);
+
+  if (!tokenRes.ok) {
+    const errText = await tokenRes.text();
+    console.warn('[FCM Token] Failed to fetch Google OAuth token:', errText);
+    return null;
+  }
+
+  const tokenData = await tokenRes.json();
+  if (tokenData.access_token) {
+    cachedGoogleAccessToken = tokenData.access_token;
+    cachedGoogleTokenExpiry = now + (Number(tokenData.expires_in) || 3600) * 1000;
+    return cachedGoogleAccessToken;
+  }
+  return null;
+}
+
+async function sendFcmHttpV1Message({ tokens, title, body, data = {} }) {
+  const sa = loadNotificationServiceAccount();
+  if (!sa || !tokens || tokens.length === 0) {
+    console.warn('[FCM HTTP v1] No Firebase service account available. Push was not sent.');
+    return { successCount: 0, failureCount: tokens?.length || 0, error: 'Firebase service account is missing' };
+  }
+
+  const accessToken = await getGoogleOAuthAccessToken();
+  if (!accessToken) {
+    console.warn('[FCM HTTP v1] No OAuth access token available.');
+    return { successCount: 0, failureCount: tokens.length, error: lastFcmSetupError || 'Google OAuth token was not issued' };
+  }
+
+  const projectId = sa.project_id || 'hotelcitypark-crm';
+  const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
+
+  const stringData = {};
+  if (data && typeof data === 'object') {
+    for (const [k, v] of Object.entries(data)) {
+      stringData[k] = (v === null || v === undefined) ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+    }
+  }
+  stringData.title = String(title || '');
+  stringData.body = String(body || '');
+
+  let successCount = 0;
+  let failureCount = 0;
+  const deliveredPrefixes = [];
+
+  for (const token of tokens) {
+    try {
+      const messagePayload = {
+        message: {
+          token,
+          notification: {
+            title: String(title),
+            body: String(body)
+          },
+          data: stringData,
+          android: {
+            priority: 'HIGH',
+            notification: {
+              channel_id: 'high_importance_channel',
+              sound: 'default',
+              default_sound: true,
+              default_vibrate_timings: true,
+              notification_priority: 'PRIORITY_MAX'
+            }
           }
         }
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + accessToken,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(messagePayload)
+      });
+
+      const resData = await res.json();
+      if (res.ok && resData.name) {
+        successCount++;
+        deliveredPrefixes.push(token.slice(0, 12));
+      } else {
+        failureCount++;
+        const errDetails = resData.error || {};
+        const detailCode = Array.isArray(errDetails.details)
+          ? errDetails.details.map(d => d && (d.errorCode || d.status)).filter(Boolean).join(',')
+          : '';
+        const code = String(errDetails.status || errDetails.message || detailCode || res.status);
+        console.warn(`[FCM HTTP v1] Token ${token.slice(0, 12)}... rejected: ${code}`);
+        if (code.includes('NOT_FOUND') || code.includes('UNREGISTERED')) {
+          try {
+            db.prepare('DELETE FROM owner_push_tokens WHERE token = ?').run(token);
+            console.log('[NotificationService] Cleaned up unregistered FCM token:', token.slice(0, 15) + '...');
+          } catch (_) {}
+          try {
+            const docId = token.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+            const FIREBASE_REST_URL = 'https://firestore.googleapis.com/v1/projects/hotelcitypark-crm/databases/(default)/documents';
+            const FIREBASE_API_KEY = 'AIzaSyCtZnkdk1_q8rWrISnD8P2Rhi-jcPn1QTI';
+            fetch(`${FIREBASE_REST_URL}/owner_devices/${docId}?key=${FIREBASE_API_KEY}`, { method: 'DELETE' }).catch(() => {});
+          } catch (_) {}
+        }
       }
+    } catch (err) {
+      failureCount++;
+      console.warn(`[FCM HTTP v1] Error sending to token ${token.slice(0, 15)}...:`, err.message);
     }
-  } catch (err) {}
-  return localTokens;
+  }
+
+  console.log(`⚡ [NotificationService] Clock-Synced FCM HTTP v1 dispatch: ${successCount} succeeded, ${failureCount} failed`);
+  return { successCount, failureCount, deliveredPrefixes };
 }
 
 async function sendPushNotification({ title, body, data = {}, type = 'general' }) {
@@ -133,96 +373,46 @@ async function sendPushNotification({ title, body, data = {}, type = 'general' }
   const allTokens = await getAllPushTokens();
   console.log(`[NotificationService] Dispatching push '${title}' to ${allTokens.length} device tokens:`, allTokens.map(t => t.slice(0, 15) + '...'));
 
-  // 3. Dispatch to Native Android APKs via Firebase Cloud Messaging (FCM)
+  // 3. Dispatch to Native Android APKs via Clock-Synced Firebase Cloud Messaging (FCM)
+  let delivered = 0;
+  let fcmError = null;
+  let deliveredPrefixes = [];
   const fcmTokens = allTokens.filter(t => t && !t.startsWith('ExponentPushToken[') && !t.startsWith('ExpoPushToken[') && t.length > 20);
   if (fcmTokens.length > 0) {
     try {
-      const admin = require('firebase-admin');
-      const { getMessaging } = require('firebase-admin/messaging');
-      let app = admin.getApps().length > 0 ? admin.getApp() : null;
-      if (!app) {
-        const path = require('path');
-        const fs = require('fs');
-        const saPaths = [
-          path.resolve(__dirname, '..', 'firebase-service-account.json'),
-          path.resolve(__dirname, '..', 'hotelcitypark-crm-firebase-adminsdk-fbsvc-cb2c37b86c.json'),
-          path.resolve(__dirname, 'firebase-service-account.json')
-        ];
-        for (const p of saPaths) {
-          if (fs.existsSync(p)) {
-            try {
-              const sa = JSON.parse(fs.readFileSync(p, 'utf8'));
-              app = admin.initializeApp({ credential: admin.cert(sa) });
-              break;
-            } catch (_) {}
-          }
-        }
-      }
-
-      if (app) {
-        const messaging = getMessaging(app);
-        
-        // Convert all data fields to string format for FCM compatibility
-        const stringData = {};
-        if (data && typeof data === 'object') {
-          for (const [k, v] of Object.entries(data)) {
-            stringData[k] = (v === null || v === undefined) ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
-          }
-        }
-        stringData.title = String(title || '');
-        stringData.body = String(body || '');
-        stringData.type = String(type || 'general');
-
-        // FCM supports up to 500 tokens per multicast batch
-        for (let i = 0; i < fcmTokens.length; i += 500) {
-          const batch = fcmTokens.slice(i, i + 500);
-          const fcmMessage = {
-            tokens: batch,
-            notification: {
-              title: String(title),
-              body: String(body)
-            },
-            data: stringData,
-            android: {
-              priority: 'high',
-              notification: {
-                channelId: 'high_importance_channel',
-                sound: 'default',
-                defaultSound: true,
-                defaultVibrateTimings: true,
-                priority: 'high'
+      const fcmRes = await sendFcmHttpV1Message({ tokens: fcmTokens, title, body, data });
+      delivered += Number(fcmRes?.successCount || 0);
+      if (Array.isArray(fcmRes?.deliveredPrefixes)) deliveredPrefixes = fcmRes.deliveredPrefixes;
+      if (fcmRes?.error) fcmError = fcmRes.error;
+      if (delivered === 0) {
+        // Fallback to Admin SDK multicast if HTTP v1 had zero successes
+        try {
+          const admin = require('firebase-admin');
+          const { getMessaging } = require('firebase-admin/messaging');
+          let app = admin.getApps().length > 0 ? admin.getApp() : null;
+          if (app) {
+            const messaging = getMessaging(app);
+            const stringData = {};
+            if (data && typeof data === 'object') {
+              for (const [k, v] of Object.entries(data)) {
+                stringData[k] = (v === null || v === undefined) ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
               }
             }
-          };
-
-          const fcmRes = await messaging.sendEachForMulticast(fcmMessage);
-          console.log(`[NotificationService] FCM Multicast dispatch: ${fcmRes.successCount} succeeded, ${fcmRes.failureCount} failed`);
-
-          // Clean up dead/unregistered tokens from SQLite AND Firestore
-          if (fcmRes.failureCount > 0) {
-            fcmRes.responses.forEach((resp, idx) => {
-              if (!resp.success && resp.error) {
-                const code = resp.error.code || resp.error.message || '';
-                if (code.includes('not-registered') || code.includes('invalid-registration') || code.includes('NotRegistered')) {
-                  const deadToken = batch[idx];
-                  try {
-                    db.prepare('DELETE FROM owner_push_tokens WHERE token = ?').run(deadToken);
-                    console.log('[NotificationService] Cleaned up unregistered FCM token from SQLite:', deadToken.slice(0, 15) + '...');
-                  } catch (_) {}
-                  try {
-                    const docId = deadToken.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
-                    const FIREBASE_REST_URL = 'https://firestore.googleapis.com/v1/projects/hotelcitypark-crm/databases/(default)/documents';
-                    const FIREBASE_API_KEY = 'AIzaSyCtZnkdk1_q8rWrISnD8P2Rhi-jcPn1QTI';
-                    fetch(`${FIREBASE_REST_URL}/owner_devices/${docId}?key=${FIREBASE_API_KEY}`, { method: 'DELETE' }).catch(() => {});
-                    console.log('[NotificationService] Cleaned up unregistered FCM token from Firestore:', docId);
-                  } catch (_) {}
-                }
-              }
+            stringData.title = String(title || '');
+            stringData.body = String(body || '');
+            stringData.type = String(type || 'general');
+            const batch = await messaging.sendEachForMulticast({
+              tokens: fcmTokens,
+              notification: { title: String(title), body: String(body) },
+              data: stringData,
+              android: { priority: 'high', notification: { channelId: 'high_importance_channel', priority: 'high' } }
             });
+            delivered += Number(batch?.successCount || 0);
           }
-        }
+        } catch (_) {}
       }
     } catch (fcmErr) {
+      fcmError = fcmErr.message;
       console.warn('[NotificationService] FCM dispatch error:', fcmErr.message);
     }
   }
@@ -230,7 +420,7 @@ async function sendPushNotification({ title, body, data = {}, type = 'general' }
   // 4. Dispatch directly via Expo Push Service (for Expo Go / Expo tokens)
   const expoTokens = allTokens.filter(t => t && (t.startsWith('ExponentPushToken[') || t.startsWith('ExpoPushToken[')));
   if (expoTokens.length === 0) {
-    return { success: true, count: fcmTokens.length };
+    return { success: delivered > 0, delivered, deliveredPrefixes, tokenCount: fcmTokens.length, error: delivered > 0 ? undefined : fcmError };
   }
 
   const messages = expoTokens.map(token => ({
@@ -258,10 +448,15 @@ async function sendPushNotification({ title, body, data = {}, type = 'general' }
       body: JSON.stringify(messages)
     }).finally(() => clearTimeout(timer));
     const expoResult = await res.json().catch(() => null);
-    return { success: true, expo: expoResult, fcmCount: fcmTokens.length };
+    const tickets = Array.isArray(expoResult?.data) ? expoResult.data : [];
+    const expoDelivered = tickets.length > 0
+      ? tickets.filter(ticket => ticket && ticket.status === 'ok').length
+      : (res.ok ? expoTokens.length : 0);
+    delivered += expoDelivered;
+    return { success: delivered > 0, delivered, deliveredPrefixes, expo: expoResult, tokenCount: fcmTokens.length + expoTokens.length };
   } catch (pushErr) {
     console.warn('[NotificationService] Direct Expo push dispatch error:', pushErr.message);
-    return { success: true, error: pushErr.message, fcmCount: fcmTokens.length };
+    return { success: delivered > 0, delivered, deliveredPrefixes, error: pushErr.message, tokenCount: fcmTokens.length + expoTokens.length };
   }
 }
 
@@ -292,7 +487,7 @@ function notifyStoreBill({ vendorName = 'Vendor', billNumber = '', amount = 0, b
   const deepLink = `hcpowner://store?billId=${billId || ''}`;
 
   setImmediate(() => {
-    sendPushNotification({
+    dispatchOwnerPush('Store bill alert', {
       title,
       body,
       type: 'store_bill',
@@ -306,7 +501,7 @@ function notifyStoreBill({ vendorName = 'Vendor', billNumber = '', amount = 0, b
         amount,
         paymentMode
       }
-    }).catch(e => console.warn('[NotificationService] Async store bill notice error:', e.message));
+    });
   });
 }
 
@@ -440,6 +635,18 @@ function notifyStorePayment({
   });
 }
 
+function dispatchOwnerPush(label, payload) {
+  return sendPushNotification(payload).then((result) => {
+    if (!Number(result?.delivered)) {
+      console.warn(`[NotificationService] ${label} was saved on the desk but not delivered to an owner phone (${result?.tokenCount || 0} registered tokens).`);
+    }
+    return result;
+  }).catch((err) => {
+    console.warn(`[NotificationService] ${label} push error:`, err.message);
+    return { success: false, delivered: 0, error: err.message };
+  });
+}
+
 function notifyCheckin({ roomNumbers = [], guestName = 'Guest', totalPaid = 0, bookingId = null, phone = '', roomType = '', voucherNumber = '', advanceReceiptNo = '' }) {
   const roomsStr = Array.isArray(roomNumbers) ? roomNumbers.join(', ') : String(roomNumbers || '');
   const title = `🛎️ Check-In: Room ${roomsStr}`;
@@ -447,12 +654,12 @@ function notifyCheckin({ roomNumbers = [], guestName = 'Guest', totalPaid = 0, b
   const body = `${guestName} checked in${paidText}`;
   
   setImmediate(() => {
-    sendPushNotification({
+    dispatchOwnerPush('Check-in alert', {
       title,
       body,
       type: 'checkin',
       data: { roomNumbers, room_number: roomsStr, room: roomsStr, guestName, totalPaid, bookingId, phone, roomType, voucherNumber, advanceReceiptNo }
-    }).catch(e => console.warn('[NotificationService] Async checkin notice error:', e.message));
+    });
   });
 }
 
@@ -465,7 +672,7 @@ function notifyCheckout({ roomNumbers = [], guestName = 'Guest', settleAmount = 
   const body = `${guestName} checked out${settleText}`;
 
   setImmediate(() => {
-    sendPushNotification({
+    dispatchOwnerPush('Check-out alert', {
       title,
       body,
       type: 'checkout',
@@ -480,7 +687,7 @@ function notifyCheckout({ roomNumbers = [], guestName = 'Guest', settleAmount = 
         refundAmount,
         bookingId
       }
-    }).catch(e => console.warn('[NotificationService] Async checkout notice error:', e.message));
+    });
   });
 }
 
@@ -489,12 +696,12 @@ function notifyDiscountRequest({ discount = 0, total = 0, by = 'Staff', billId =
   const body = `${by} requested discount on ${room ? 'Room ' + room : 'Bill #' + billId}`;
 
   setImmediate(() => {
-    sendPushNotification({
+    dispatchOwnerPush('Discount alert', {
       title,
       body,
       type: 'discount',
       data: { discount, total, by, billId, guest, room }
-    }).catch(e => console.warn('[NotificationService] Async discount notice error:', e.message));
+    });
   });
 }
 
@@ -502,7 +709,7 @@ function notifyExpense({ voucherNo = '', amount = 0, category = 'General', paidT
   const formattedAmt = `₹${Number(amount || 0).toLocaleString('en-IN')}`;
   const title = `💸 Expense Recorded: ${formattedAmt}`;
   const body = `${String(category || 'Expense').toUpperCase()} • Paid to ${paidTo || 'Vendor'} by ${cashierName}${voucherNo ? ` (Voucher #${voucherNo})` : ''}`;
-  return sendPushNotification({
+  return dispatchOwnerPush('Expense alert', {
     title,
     body,
     type: 'expense',
@@ -515,27 +722,37 @@ function notifyExpense({ voucherNo = '', amount = 0, category = 'General', paidT
       cashierName,
       url: '/expenses'
     }
-  }).catch(e => console.warn('[NotificationService] Async expense notice error:', e.message));
+  });
+}
+
+function parseNotificationMeta(raw) {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(raw); } catch { return {}; }
 }
 
 function getNotifications(limit = 50) {
   try {
     return db.prepare(`
-      SELECT id, type, title, body, deep_link, metadata, is_read, created_at
+      SELECT id, type, title, body, deep_link, metadata, is_read, read, created_at
       FROM owner_notifications
       ORDER BY id DESC
       LIMIT ?
-    `).all(limit).map(r => ({
-      id: String(r.id),
-      type: r.type,
-      title: r.title,
-      body: r.body,
-      deep_link: r.deep_link || (r.metadata ? (JSON.parse(r.metadata).deepLink || JSON.parse(r.metadata).url) : null),
-      read: Boolean(r.is_read === 1 || r.read === 1),
-      created_at: r.created_at,
-      data: r.metadata ? JSON.parse(r.metadata) : {}
-    }));
+    `).all(limit).map(r => {
+      const meta = parseNotificationMeta(r.metadata);
+      return {
+        id: String(r.id),
+        type: r.type,
+        title: r.title,
+        body: r.body,
+        deep_link: r.deep_link || meta.deepLink || meta.url || null,
+        read: Boolean(r.is_read === 1 || r.read === 1),
+        created_at: r.created_at,
+        data: meta
+      };
+    });
   } catch (err) {
+    console.warn('[NotificationService] getNotifications error:', err.message);
     return [];
   }
 }
@@ -774,7 +991,7 @@ try { db.prepare('ALTER TABLE owner_approvals ADD COLUMN meal_plan TEXT').run();
 try { db.prepare('ALTER TABLE owner_approvals ADD COLUMN members TEXT').run(); } catch (_) {}
 try { db.prepare('ALTER TABLE owner_approvals ADD COLUMN expected_checkout TEXT').run(); } catch (_) {}
 
-function createApprovalRequest({
+async function createApprovalRequest({
   type = 'discount',
   dept = 'Room',
   bill_id = null,
@@ -800,50 +1017,81 @@ function createApprovalRequest({
       ? room_number
       : (derivedRoomCount > 1 ? `Rooms ${room_number}` : `Room ${room_number}`);
 
+    const requestNonce = require('crypto').randomBytes(12).toString('hex');
     const metaObj = typeof metadata === 'object' && metadata !== null
-      ? { ...metadata, room_count: derivedRoomCount, rooms_list, meal_plan, requested_by }
-      : { room_count: derivedRoomCount, rooms_list, members, expected_checkout, meal_plan, requested_by };
+      ? { ...metadata, room_count: derivedRoomCount, rooms_list, meal_plan, requested_by, request_nonce: requestNonce }
+      : { room_count: derivedRoomCount, rooms_list, members, expected_checkout, meal_plan, requested_by, request_nonce: requestNonce };
     const metaStr = JSON.stringify(metaObj);
 
-    const info = db.prepare(`
-      INSERT INTO owner_approvals (
-        type, dept, bill_id, bill_number, guest_name, room_number,
-        members, expected_checkout, meal_plan, discount, discount_pct, current_total, final_amount,
-        requested_by, reason, status, metadata
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
-    `).run(
-      type, dept, bill_id ? String(bill_id) : null, bill_number || '', guest_name || '',
-      room_number ? String(room_number) : '', String(members || ''), String(expected_checkout || ''),
-      String(meal_plan || ''),
-      Number(discount) || 0, Number(discount_pct) || 0,
-      Number(current_total) || 0, Number(final_amount) || 0, requested_by || 'Front Desk', reason || '',
-      metaStr
-    );
+    const cleanRoom = room_number ? String(room_number).trim() : '';
 
-    const id = info.lastInsertRowid;
+    // Smart Request Deduplication: Check if there is already an active PENDING request for this room & type
+    let id;
+    const existingPending = cleanRoom ? db.prepare(`
+      SELECT id FROM owner_approvals
+      WHERE room_number = ? AND type = ? AND status = 'PENDING'
+      ORDER BY id DESC LIMIT 1
+    `).get(cleanRoom, type) : null;
 
-    // Sync to Firebase & Supabase cloud immediately so Admin phone on 5G / outside WiFi can see and approve it!
-    try {
-      const firebaseService = require('./firebaseService');
-      firebaseService.syncApprovalRequestToCloud({
-        id,
-        type,
-        room_number,
-        room_count: derivedRoomCount,
-        rooms_list,
-        guest_name,
-        members,
-        expected_checkout,
-        meal_plan,
-        discount,
-        discount_pct,
-        current_total,
-        final_amount,
-        requested_by,
-        reason,
-        metadata: metaObj
-      });
-    } catch (_) {}
+    if (existingPending) {
+      id = existingPending.id;
+      db.prepare(`
+        UPDATE owner_approvals
+        SET discount = ?, discount_pct = ?, current_total = ?, final_amount = ?,
+            requested_by = ?, reason = ?, metadata = ?
+        WHERE id = ?
+      `).run(
+        Number(discount) || 0, Number(discount_pct) || 0,
+        Number(current_total) || 0, Number(final_amount) || 0,
+        requested_by || 'Front Desk', reason || '',
+        metaStr, id
+      );
+    } else {
+      const info = db.prepare(`
+        INSERT INTO owner_approvals (
+          type, dept, bill_id, bill_number, guest_name, room_number,
+          members, expected_checkout, meal_plan, discount, discount_pct, current_total, final_amount,
+          requested_by, reason, status, metadata
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+      `).run(
+        type, dept, bill_id ? String(bill_id) : null, bill_number || '', guest_name || '',
+        cleanRoom, String(members || ''), String(expected_checkout || ''),
+        String(meal_plan || ''),
+        Number(discount) || 0, Number(discount_pct) || 0,
+        Number(current_total) || 0, Number(final_amount) || 0, requested_by || 'Front Desk', reason || '',
+        metaStr
+      );
+      id = info.lastInsertRowid;
+    }
+
+    // Cloud copy is optional. A failed or stale write must not be treated as an owner decision.
+    const cloudPromise = (async () => {
+      try {
+        const firebaseService = require('./firebaseService');
+        return await firebaseService.syncApprovalRequestToCloud({
+          id,
+          type,
+          room_number,
+          room_count: derivedRoomCount,
+          rooms_list,
+          guest_name,
+          members,
+          expected_checkout,
+          meal_plan,
+          discount,
+          discount_pct,
+          current_total,
+          final_amount,
+          requested_by,
+          reason,
+          request_nonce: requestNonce,
+          metadata: metaObj
+        });
+      } catch (cloudErr) {
+        console.warn('[NotificationService] Approval cloud sync failed:', cloudErr.message);
+        return { synced: false };
+      }
+    })();
 
 
 
@@ -880,7 +1128,8 @@ function createApprovalRequest({
       body = `Shift ${guest_name ? guest_name + ' ' : ''}from Room ${room_number} (${fromType}) to Room ${toRoom} (${toType}). Declared check-in rates preserved (no extra cost). Tap to approve.`;
       pushType = 'room_transfer_approval';
     } else {
-      title = `⚠️ Discount Permission: ${discount_pct ? discount_pct + '%' : ''} (${roomLabel})`;
+      const rupeeDiscount = Number(discount) || 0;
+      title = `⚠️ Discount Permission: ₹${rupeeDiscount.toLocaleString('en-IN')} (${roomLabel})`;
       const details = [
         derivedRoomCount > 1 ? `Total Rooms: ${derivedRoomCount}` : null,
         guest_name ? `Guest: ${guest_name}` : null,
@@ -889,20 +1138,21 @@ function createApprovalRequest({
         meal_plan ? `Plan: ${meal_plan}` : null,
         requested_by ? `Raised by: ${requested_by}` : null,
         `Tariff: ₹${Number(current_total).toLocaleString('en-IN')}`,
-        `Discount: ${discount_pct}% (−₹${Number(discount).toLocaleString('en-IN')})`,
+        `Discount: −₹${rupeeDiscount.toLocaleString('en-IN')}${discount_pct ? ` (${discount_pct}% of bill)` : ''}`,
         `Net: ₹${Number(final_amount).toLocaleString('en-IN')}`
       ].filter(Boolean).join(' • ');
       body = `${details}. Tap to review and approve/reject.`;
       pushType = 'discount_approval';
     }
 
-    sendPushNotification({
+    const pushResult = await sendPushNotification({
       title,
       body,
       type: pushType,
       data: {
         approval_id: id,
         type: pushType,
+        request_nonce: requestNonce,
         ...metaObj,
         room_number,
         room_count: derivedRoomCount,
@@ -915,9 +1165,25 @@ function createApprovalRequest({
         discount_pct,
         final_amount
       }
-    }).catch(() => {});
+    }).catch((pushErr) => {
+      console.warn('[NotificationService] Owner push failed:', pushErr.message);
+      return { success: false, delivered: 0, error: pushErr.message };
+    });
 
-    return { success: true, id, status: 'PENDING' };
+    const cloudResult = await Promise.race([
+      cloudPromise,
+      new Promise((resolve) => setTimeout(() => resolve({ synced: false }), 4000))
+    ]);
+    const notified = Number(pushResult?.delivered || 0) > 0;
+    return {
+      success: true,
+      id,
+      status: 'PENDING',
+      notified,
+      delivered_prefixes: Array.isArray(pushResult?.deliveredPrefixes) ? pushResult.deliveredPrefixes : [],
+      cloud_synced: !!(cloudResult && cloudResult.synced),
+      error: notified ? undefined : (pushResult?.error || 'Owner phone was not notified. The discount is still pending here, but it was not delivered to the owner device.')
+    };
   } catch (err) {
     console.error('[NotificationService] createApprovalRequest error:', err);
     throw err;
@@ -1103,23 +1369,105 @@ function executeRoomTransferFromApproval(approval, user = 'Admin') {
   }
 }
 
+function cloudRequestNonce(cloudDoc) {
+  if (!cloudDoc) return '';
+  if (cloudDoc.request_nonce) return String(cloudDoc.request_nonce);
+  let summary = cloudDoc.items_summary;
+  if (typeof summary === 'string') {
+    try { summary = JSON.parse(summary); } catch { summary = null; }
+  }
+  if (!summary || typeof summary !== 'object') return '';
+  return String(summary.request_nonce || summary.metadata?.request_nonce || '');
+}
+
+function localRequestNonce(row) {
+  try {
+    const meta = JSON.parse(row?.metadata || '{}');
+    return String(meta.request_nonce || '');
+  } catch {
+    return '';
+  }
+}
+
+// A cloud document that still says APPROVED from an older stay must not close the new row.
+function adoptCloudDecision(cloudDoc) {
+  if (!cloudDoc) return null;
+  const st = String(cloudDoc.status || '').toLowerCase();
+  if (st !== 'approved' && st !== 'rejected') return null;
+
+  const rawId = String(cloudDoc.id || cloudDoc.bill_no || '').replace(/^APP-/, '').trim();
+  const approvalId = Number(rawId);
+  if (!approvalId) return null;
+
+  const existing = db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(approvalId);
+  if (!existing || String(existing.status || '').toUpperCase() !== 'PENDING') return null;
+
+  const localNonce = localRequestNonce(existing);
+  const remoteNonce = cloudRequestNonce(cloudDoc);
+  if (!localNonce || localNonce !== remoteNonce) {
+    console.warn(`[Approval] Ignored stale cloud ${st} for request #${approvalId}`);
+    return null;
+  }
+
+  const cashier = String(existing.requested_by || '').trim().toLowerCase();
+  let actor = String(cloudDoc.settled_by || cloudDoc.action_by || '').trim();
+  if (!actor || actor.toLowerCase() === cashier) actor = 'Admin';
+  return updateApprovalStatus(approvalId, st.toUpperCase(), actor, cloudDoc.action_reason || '');
+}
+
 function updateApprovalStatus(id, newStatus, user = 'Admin', reason = '') {
   try {
-    const existing = db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(id);
+    const cleanId = String(id || '').replace(/^APP-/, '').trim();
+    const existing = db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(cleanId);
     if (!existing) return null;
 
     db.prepare(`
       UPDATE owner_approvals
       SET status = ?, action_by = ?, action_at = CURRENT_TIMESTAMP, action_reason = ?
       WHERE id = ?
-    `).run(newStatus, user, reason, id);
+    `).run(newStatus, user, reason, cleanId);
+
+    // Smart Room Deduplication: Also update other active pending requests for the same room & type within the last 30 minutes!
+    if (existing.room_number) {
+      try {
+        db.prepare(`
+          UPDATE owner_approvals
+          SET status = ?, action_by = ?, action_at = CURRENT_TIMESTAMP, action_reason = ?
+          WHERE room_number = ? AND type = ? AND status = 'PENDING' AND requested_at >= datetime('now', '-30 minutes')
+        `).run(newStatus, user, reason, existing.room_number, existing.type);
+      } catch (_) {}
+    }
 
     // If approved and this was a room_transfer, immediately execute the room shift!
     if (newStatus === 'APPROVED' && existing.type === 'room_transfer') {
       executeRoomTransferFromApproval(existing, user);
     }
 
-    return db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(id);
+    // Instant WebSocket broadcast to all active CRM screens (Checkin, Checkout, Transfer)
+    try {
+      const socketServer = require('./socketServer');
+      socketServer.broadcast('APPROVAL_STATUS_CHANGED', {
+        id: existing.id,
+        approvalId: existing.id,
+        status: newStatus,
+        type: existing.type,
+        room_number: existing.room_number,
+        discount: existing.discount,
+        discount_pct: existing.discount_pct,
+        action_by: user,
+        action_reason: reason
+      });
+    } catch (_) {}
+
+    // Cloud sync: update status in Firebase doc so cloud reflects it too
+    try {
+      const firebaseService = require('./firebaseService');
+      if (typeof firebaseService.updateApprovalInCloud === 'function') {
+        firebaseService.updateApprovalInCloud(cleanId, newStatus, user);
+      }
+    } catch (_) {}
+
+    return db.prepare('SELECT * FROM owner_approvals WHERE id = ?').get(cleanId);
   } catch (err) {
     console.error('[NotificationService] updateApprovalStatus error:', err);
     throw err;
@@ -1141,6 +1489,7 @@ module.exports = {
   getActivityFeed,
   createApprovalRequest,
   getApprovals,
-  updateApprovalStatus
+  updateApprovalStatus,
+  adoptCloudDecision
 };
 

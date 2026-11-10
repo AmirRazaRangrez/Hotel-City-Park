@@ -316,7 +316,7 @@ export async function recordStorePayment(body: any, sendPush: boolean = true) {
 export async function fetchOccupiedStays() {
   const occupancies = await fetchFirestoreCollection('active_occupancies');
   const charges = await fetchFirestoreCollection('room_charges_inbox');
-  const folioDocs = charges.filter((c: any) => c.department === 'room_folio');
+  const folioDocs = charges.filter((c: any) => c.department === 'room_folio' && String(c.status || '').toLowerCase() !== 'checked_out');
   const folioMap = new Map<string, any>();
   folioDocs.forEach((f: any) => {
     const rNum = cleanRoomNumber(f.room_number);
@@ -327,6 +327,7 @@ export async function fetchOccupiedStays() {
 
   const out: any[] = [];
   occupancies.forEach((o: any) => {
+    if (String(o.status || '').toLowerCase() === 'checked_out') return;
     const rNum = cleanRoomNumber(o.room_number);
     if (!rNum) return;
     const folio = folioMap.get(rNum) || {};
@@ -370,17 +371,59 @@ export async function fetchOccupiedStays() {
   return out.map(toStay);
 }
 
+export const MASTER_HOTEL_ROOMS = [
+  { room: '102', type: 'Executive Room', price: 2350 },
+  { room: '103', type: 'Executive Room', price: 2350 },
+  { room: '104', type: 'Executive Room', price: 2350 },
+  { room: '201', type: 'Deluxe Room', price: 2650 },
+  { room: '202', type: 'Executive Plus', price: 2450 },
+  { room: '203', type: 'Executive Plus', price: 2450 },
+  { room: '204', type: 'Executive Room', price: 2350 },
+  { room: '205', type: 'Executive Room', price: 2350 },
+  { room: '206', type: 'Executive Room', price: 2350 },
+  { room: '207', type: 'Executive Room', price: 2350 },
+  { room: '208', type: 'Executive Room', price: 2350 },
+  { room: '209', type: 'Executive Room', price: 2500 },
+  { room: '210', type: 'Executive Plus', price: 2450 },
+  { room: '211', type: 'Executive Plus', price: 2450 },
+  { room: '212', type: 'Deluxe Room', price: 2650 },
+  { room: '301', type: 'Deluxe Room', price: 2650 },
+  { room: '302', type: 'Executive Plus', price: 2450 },
+  { room: '303', type: 'Executive Room', price: 2350 },
+  { room: '304', type: 'Executive Room', price: 2350 },
+  { room: '305', type: 'Executive Room', price: 2350 },
+  { room: '306', type: 'Executive Room', price: 2350 },
+  { room: '307', type: 'Executive Room', price: 2350 },
+  { room: '308', type: 'Executive Room', price: 2500 },
+  { room: '309', type: 'Executive Plus', price: 2450 },
+  { room: '310', type: 'Suit Room', price: 4000 },
+  { room: '401', type: 'Pent House', price: 5000 },
+  { room: '402', type: 'Executive Room', price: 2350 },
+  { room: '403', type: 'Executive Room', price: 2350 },
+  { room: '404', type: 'Executive Room', price: 2350 },
+  { room: '405', type: 'Executive Room', price: 2350 },
+  { room: '406', type: 'Executive Room', price: 2350 },
+  { room: '407', type: 'Executive Room', price: 2350 },
+  { room: '408', type: 'Executive Room', price: 2350 },
+  { room: '409', type: 'Executive Room', price: 2350 },
+  { room: '501', type: 'Executive Room', price: 2350 },
+  { room: '502', type: 'Executive Room', price: 2350 },
+  { room: '503', type: 'Executive Room', price: 2350 },
+  { room: '504', type: 'Executive Room', price: 2350 },
+  { room: '505', type: 'Suit Room', price: 4000 },
+  { room: '506', type: 'Deluxe Room', price: 2650 }
+];
+
 export async function fetchAvailableRooms() {
   const occupancies = await fetchFirestoreCollection('active_occupancies');
   const occupiedNums = new Set(occupancies.map((o: any) => cleanRoomNumber(o.room_number)));
-  const allRooms: string[] = ['101','102','103','104','105','201','202','203','204','205','301','302','303','304','305','401','402','403','404','405','501','502'];
-  return allRooms.filter(r => !occupiedNums.has(r)).map(r => ({
-    id: r,
-    room: r,
-    room_number: r,
-    room_type: 'Standard Room',
+  return MASTER_HOTEL_ROOMS.filter(r => !occupiedNums.has(r.room)).map(r => ({
+    id: r.room,
+    room: r.room,
+    room_number: r.room,
+    room_type: r.type,
     status: 'available',
-    price: 2400
+    price: r.price
   }));
 }
 
@@ -392,47 +435,91 @@ export async function fetchDailyAnalytics(startDate: string, endDate: string) {
   });
 }
 
-export async function fetchApprovals(): Promise<{ pending: any[]; history: any[] }> {
-  const charges = await fetchFirestoreCollection('room_charges_inbox');
-  const approvalDocs = charges.filter((c: any) => c.department === 'discount_approval');
+let approvalsCache: { time: number; data: { pending: any[]; history: any[] } } | null = null;
+let approvalsInflight: Promise<{ pending: any[]; history: any[] }> | null = null;
 
-  const pending: any[] = [];
-  const history: any[] = [];
+export async function fetchApprovals(forceFresh = false): Promise<{ pending: any[]; history: any[] }> {
+  const now = Date.now();
+  if (!forceFresh && approvalsCache && (now - approvalsCache.time) < 15000) {
+    return approvalsCache.data;
+  }
+  if (approvalsInflight) return approvalsInflight;
 
-  for (const c of approvalDocs) {
-    let meta: any = {};
+  approvalsInflight = (async () => {
     try {
-      meta = typeof c.items_summary === 'string' ? JSON.parse(c.items_summary || '{}') : (c.items_summary || {});
-    } catch (_) {}
+      const res = await fetch(`${FIREBASE_REST_URL}/room_charges_inbox?pageSize=100&key=${FIREBASE_API_KEY}`);
+      const body = await res.json().catch(() => null);
+      if (!res.ok || body?.error) {
+        if (approvalsCache?.data) return approvalsCache.data;
+        const err: any = new Error(body?.error?.message || `Could not load owner approvals (${res.status})`);
+        err.status = res.status;
+        throw err;
+      }
+      const charges = Array.isArray(body?.documents) ? body.documents.map(parseFirestoreDoc) : [];
+      const approvalDocs = charges.filter((c: any) => c.department === 'discount_approval');
 
-    const rawId = String(c.id || '').replace(/^APP-/, '');
-    const numId = !isNaN(Number(rawId)) && Number(rawId) > 0 ? Number(rawId) : c.id;
+      const pending: any[] = [];
+      const history: any[] = [];
 
-    const roomNum = String(c.room_number || meta.room_number || '0');
-    const st = String(c.status || meta.status || 'PENDING').toUpperCase();
+      for (const c of approvalDocs) {
+        let meta: any = {};
+        try {
+          meta = typeof c.items_summary === 'string' ? JSON.parse(c.items_summary || '{}') : (c.items_summary || {});
+        } catch (_) {}
 
-    const item: any = {
-      id: numId,
-      cloud_id: c.id,
-      type: meta.type || 'discount',
-      dept: meta.dept || 'Room',
-      bill_id: meta.bill_id || null,
-      bill_number: meta.bill_number || c.bill_no || '',
-      room_number: roomNum,
-      room_count: meta.room_count || (roomNum.includes(',') ? roomNum.split(',').length : 1),
-      rooms_list: meta.rooms_list || null,
-      guest_name: meta.guest_name || c.guest_name || 'Guest',
-      members: meta.members || '',
-      expected_checkout: meta.expected_checkout || '',
-      meal_plan: meta.meal_plan || '',
-      discount: Number(meta.discount !== undefined ? meta.discount : (c.subtotal && c.grand_total ? Math.max(0, c.subtotal - c.grand_total) : 0)),
-      discount_pct: Number(meta.discount_pct || 0),
-      current_total: Number(meta.current_total !== undefined ? meta.current_total : (c.subtotal || 0)),
-      final_amount: Number(meta.final_amount !== undefined ? meta.final_amount : (c.grand_total || c.subtotal || 0)),
-      requested_by: meta.requested_by || c.settled_by || 'Staff',
-      requested_at: c.created_at || meta.requested_at || new Date().toISOString(),
-      reason: meta.reason || `Checkout Discount for Room #${roomNum}`,
-      status: st,
+        const rawId = String(c.id || '').replace(/^APP-/, '');
+        const numId = !isNaN(Number(rawId)) && Number(rawId) > 0 ? Number(rawId) : c.id;
+
+        const roomNum = String(c.room_number || meta.room_number || '0');
+        const st = String(c.status || meta.status || 'PENDING').toUpperCase();
+
+        const item: any = {
+          id: numId,
+          cloud_id: c.id,
+          type: meta.type || 'discount',
+          dept: meta.dept || 'Room',
+          bill_id: meta.bill_id || null,
+          bill_number: meta.bill_number || c.bill_no || '',
+          room_number: roomNum,
+          room_count: meta.room_count || (roomNum.includes(',') ? roomNum.split(',').length : 1),
+          rooms_list: meta.rooms_list || null,
+          guest_name: meta.guest_name || c.guest_name || 'Guest',
+          members: meta.members || '',
+          expected_checkout: meta.expected_checkout || '',
+          meal_plan: meta.meal_plan || '',
+          discount: Number(meta.discount !== undefined ? meta.discount : (c.subtotal && c.grand_total ? Math.max(0, c.subtotal - c.grand_total) : 0)),
+          discount_pct: Number(meta.discount_pct || 0),
+          current_total: Number(meta.current_total !== undefined ? meta.current_total : (c.subtotal || 0)),
+          final_amount: Number(meta.final_amount !== undefined ? meta.final_amount : (c.grand_total || c.subtotal || 0)),
+          requested_by: meta.requested_by || c.settled_by || 'Staff',
+          requested_at: c.created_at || meta.requested_at || new Date().toISOString(),
+          reason: meta.reason || `Checkout Discount for Room #${roomNum}`,
+          status: st,
+          created_at: c.created_at || meta.requested_at || new Date().toISOString(),
+          updated_at: c.updated_at || new Date().toISOString()
+        };
+
+        if (st === 'PENDING') {
+          pending.push(item);
+        } else {
+          history.push(item);
+        }
+      }
+
+      const result = {
+        pending: pending.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+        history: history.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 50)
+      };
+
+      approvalsCache = { time: Date.now(), data: result };
+      return result;
+    } finally {
+      approvalsInflight = null;
+    }
+  })();
+
+  return approvalsInflight;
+}
       action_by: c.settled_by || meta.action_by || null,
       action_at: c.updated_at || meta.action_at || null,
       metadata: meta.metadata || meta
@@ -620,9 +707,9 @@ export async function fetchActivity(): Promise<any[]> {
 
 export async function registerDeviceToken(token: string) {
   const cleanToken = String(token || '').trim();
-  if (!cleanToken) return;
+  if (!cleanToken) return false;
   const docId = cleanToken.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
-  await fetch(`${FIREBASE_REST_URL}/owner_devices/${docId}?key=${FIREBASE_API_KEY}`, {
+  const res = await fetch(`${FIREBASE_REST_URL}/owner_devices/${docId}?key=${FIREBASE_API_KEY}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -632,7 +719,14 @@ export async function registerDeviceToken(token: string) {
         updated_at: { stringValue: new Date().toISOString() }
       }
     })
-  }).catch(() => null);
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || body?.error) {
+    const err: any = new Error(body?.error?.message || `Device token was not saved in Firebase (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return true;
 }
 
 export async function fetchLiveState() {

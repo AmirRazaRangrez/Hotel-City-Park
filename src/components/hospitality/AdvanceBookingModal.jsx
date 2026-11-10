@@ -5,6 +5,16 @@ import ThemedSelect from '../common/ThemedSelect';
 import ThemedDatePicker from '../common/ThemedDatePicker';
 import { printCashReceipt } from '../../services/printService';
 
+function localDateString(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function localTimeString(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export default function AdvanceBookingModal({
   isOpen,
   onClose,
@@ -13,7 +23,8 @@ export default function AdvanceBookingModal({
   initialBooking = null,
   initialTab = 'pending'
 }) {
-  const { showToast, showConfirm, showAlert, theme } = useApp();
+  const { showToast, showConfirm, showAlert, theme, currentUser } = useApp();
+  const staffName = currentUser?.full_name || currentUser?.username || '';
   const isDark = theme === 'dark' || (typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark');
 
   const [activeTab, setActiveTab] = useState(initialTab || 'pending'); // 'pending' | 'completed' | 'new'
@@ -83,23 +94,34 @@ export default function AdvanceBookingModal({
 
     Object.entries(selectedRoomCounts).forEach(([cat, qty]) => {
       const q = parseInt(qty) || 0;
-      if (q > 0) {
-        const rInfo = Array.isArray(rooms) ? rooms.find(r => r.room_type === cat) : null;
-        const bAdults = rInfo?.max_adults || 2;
-        const bChildren = rInfo?.max_children || 2;
-        const bExtraBeds = rInfo?.max_extra_beds !== undefined ? rInfo.max_extra_beds : 1;
-        maxAdults += (bAdults + bExtraBeds) * q;
-        maxChildren += bChildren * q;
-        maxExtraBeds += bExtraBeds * q;
-        totalMaxGuests += (bAdults + bChildren + bExtraBeds) * q;
+      if (q > 0 && Array.isArray(rooms)) {
+        const ofType = rooms
+          .filter((r) => r.room_type === cat)
+          .sort((a, b) => String(a.room_number).localeCompare(String(b.room_number), undefined, { numeric: true }));
+        const picked = ofType.slice(0, q);
+        const sample = picked.length > 0 ? picked : ofType.slice(0, 1);
+        const count = picked.length > 0 ? picked.length : q;
+        if (picked.length > 0) {
+          picked.forEach((rInfo) => {
+            maxAdults += Number(rInfo.max_adults) || 0;
+            maxChildren += Number(rInfo.max_children) || 0;
+            maxExtraBeds += Number(rInfo.max_extra_beds) || 0;
+          });
+        } else if (sample[0]) {
+          maxAdults += (Number(sample[0].max_adults) || 0) * count;
+          maxChildren += (Number(sample[0].max_children) || 0) * count;
+          maxExtraBeds += (Number(sample[0].max_extra_beds) || 0) * count;
+        }
+        totalMaxGuests = maxAdults + maxChildren;
       }
     });
 
+    const adultsWithMattress = maxAdults + maxExtraBeds;
     return {
-      maxAdults: Math.max(maxAdults, 2),
-      maxChildren: Math.max(maxChildren, 2),
+      maxAdults: Math.max(adultsWithMattress, 1),
+      maxChildren,
       maxExtraBeds,
-      totalMaxGuests: Math.max(totalMaxGuests, 4)
+      totalMaxGuests: Math.max(adultsWithMattress + maxChildren, 1)
     };
   }, [selectedRoomCounts, rooms]);
 
@@ -173,6 +195,7 @@ export default function AdvanceBookingModal({
     const pad = (n) => String(n).padStart(2, '0');
     const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
     const tomorrowStr = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`;
+    const nowTime = `${pad(today.getHours())}:${pad(today.getMinutes())}`;
 
     const defaultCat = availableRoomTypes[0] || 'Executive Room';
     setEditingId(null);
@@ -187,7 +210,7 @@ export default function AdvanceBookingModal({
       adults: 2,
       children: 0,
       checkin_date: todayStr,
-      checkin_time: '12:00',
+      checkin_time: nowTime,
       checkout_date: tomorrowStr,
       checkout_time: '11:00',
       advance_amount: '',
@@ -273,7 +296,7 @@ export default function AdvanceBookingModal({
       mode: modeKey,
       room_numbers: b.room_number ? `Room #${b.room_number}` : (b.room_type || 'Executive Room'),
       particulars: `Advance Pre-Booking (#${b.booking_number || 'NEW'}) - Category: ${b.room_type || 'Executive Room'}`,
-      cashier_name: 'Front Desk',
+      cashier_name: b.cashier_name || staffName || 'Cashier',
       is_split: false
     };
 
@@ -290,6 +313,11 @@ export default function AdvanceBookingModal({
     }
     if (!formData.checkin_date || !formData.checkout_date) {
       showToast('Please specify check-in and check-out dates', 'error', 3000);
+      return;
+    }
+    const checkinAt = new Date(`${formData.checkin_date}T${formData.checkin_time || '00:00'}`);
+    if (isNaN(checkinAt.getTime()) || checkinAt.getTime() < Date.now() - 60000) {
+      showToast('Check-in date and time cannot be before the current time.', 'error', 4000);
       return;
     }
     if (totalSelectedRooms === 0) {
@@ -311,15 +339,14 @@ export default function AdvanceBookingModal({
     // Room Capacity Validation (including extra beds)
     const curAdults = parseInt(formData.adults) || 1;
     const curChildren = parseInt(formData.children) || 0;
-    const curTotalGuests = curAdults + curChildren;
 
     if (curAdults > selectedCapacity.maxAdults) {
-      showToast(`Number of adults (${curAdults}) exceeds maximum adult capacity (${selectedCapacity.maxAdults}) for selected rooms (including extra beds). Please select more rooms.`, 'error', 4500);
+      showToast(`Number of adults (${curAdults}) exceeds Max Adults (${selectedCapacity.maxAdults}) set on the selected rooms.`, 'error', 4500);
       return;
     }
 
-    if (curTotalGuests > selectedCapacity.totalMaxGuests) {
-      showToast(`Total guests (${curTotalGuests} = ${curAdults} Adults + ${curChildren} Children) exceeds maximum capacity (${selectedCapacity.totalMaxGuests}) of selected rooms (including extra beds). Please select more rooms.`, 'error', 4500);
+    if (curChildren > selectedCapacity.maxChildren) {
+      showToast(`Number of children (${curChildren}) exceeds Max Child (${selectedCapacity.maxChildren}) set on the selected rooms.`, 'error', 4500);
       return;
     }
 
@@ -331,7 +358,9 @@ export default function AdvanceBookingModal({
         age: formData.age ? parseInt(formData.age) : null,
         adults: parseInt(formData.adults) || 1,
         children: parseInt(formData.children) || 0,
-        advance_amount: formData.advance_amount ? parseFloat(formData.advance_amount) : 0
+        advance_amount: formData.advance_amount ? parseFloat(formData.advance_amount) : 0,
+        payment_mode: ['cash', 'online', 'card'].includes(formData.payment_mode) ? formData.payment_mode : 'cash',
+        cashier_name: staffName
       };
 
       if (editingId) {
@@ -1016,8 +1045,8 @@ export default function AdvanceBookingModal({
                         <label style={{ fontSize: '0.80rem', fontWeight: 800, color: t.labelSecondary, textTransform: 'uppercase' }}>
                           Guests (Ad / Ch)
                         </label>
-                        <span style={{ fontSize: '0.70rem', fontWeight: 800, color: (formData.adults > selectedCapacity.maxAdults || (formData.adults + formData.children) > selectedCapacity.totalMaxGuests) ? '#ef4444' : '#059669' }}>
-                          Max: {selectedCapacity.maxAdults} Ad, {selectedCapacity.totalMaxGuests} Tot
+                        <span style={{ fontSize: '0.70rem', fontWeight: 800, color: (formData.adults > selectedCapacity.maxAdults || formData.children > selectedCapacity.maxChildren) ? '#ef4444' : '#059669' }}>
+                          Max: {selectedCapacity.maxAdults} Adults, {selectedCapacity.maxChildren} Children
                         </span>
                       </div>
                       <div style={{ display: 'flex', gap: '8px' }}>
@@ -1029,7 +1058,11 @@ export default function AdvanceBookingModal({
                             title={`Adults (Max ${selectedCapacity.maxAdults} for selected rooms)`}
                             placeholder="Adults"
                             value={formData.adults}
-                            onChange={(e) => setFormData({ ...formData, adults: parseInt(e.target.value) || 1 })}
+                            onChange={(e) => {
+                              const typed = parseInt(e.target.value, 10);
+                              const next = Number.isFinite(typed) ? Math.min(Math.max(typed, 1), selectedCapacity.maxAdults) : 1;
+                              setFormData({ ...formData, adults: next });
+                            }}
                             style={{
                               width: '100%',
                               boxSizing: 'border-box',
@@ -1049,17 +1082,21 @@ export default function AdvanceBookingModal({
                           <input
                             type="number"
                             min="0"
-                            max={selectedCapacity.totalMaxGuests - 1}
-                            title="Children"
+                            max={selectedCapacity.maxChildren}
+                            title={`Children (Max ${selectedCapacity.maxChildren} for selected rooms)`}
                             placeholder="Children"
                             value={formData.children}
-                            onChange={(e) => setFormData({ ...formData, children: parseInt(e.target.value) || 0 })}
+                            onChange={(e) => {
+                              const typed = parseInt(e.target.value, 10);
+                              const next = Number.isFinite(typed) ? Math.min(Math.max(typed, 0), selectedCapacity.maxChildren) : 0;
+                              setFormData({ ...formData, children: next });
+                            }}
                             style={{
                               width: '100%',
                               boxSizing: 'border-box',
                               padding: '11px 12px',
                               background: t.inputBg,
-                              border: `1.5px solid ${(formData.adults + formData.children) > selectedCapacity.totalMaxGuests ? '#ef4444' : t.inputBorder}`,
+                              border: `1.5px solid ${formData.children > selectedCapacity.maxChildren ? '#ef4444' : t.inputBorder}`,
                               borderRadius: '10px',
                               color: t.inputText,
                               fontSize: '0.92rem',
@@ -1284,7 +1321,7 @@ export default function AdvanceBookingModal({
                         )}
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                         <div
                           style={{
                             padding: '6px 14px',
@@ -1315,7 +1352,7 @@ export default function AdvanceBookingModal({
                           }}
                         >
                           <span>Max Capacity:</span>
-                          <span style={{ fontWeight: 900 }}>{selectedCapacity.maxAdults} Adults / {selectedCapacity.totalMaxGuests} Guests</span>
+                          <span style={{ fontWeight: 900 }}>{selectedCapacity.maxAdults} Adults / {selectedCapacity.maxChildren} Children</span>
                         </div>
                         <span style={{ fontSize: '0.74rem', color: t.textSecondary }}>
                           (Informational summary for reservation)
@@ -1348,8 +1385,16 @@ export default function AdvanceBookingModal({
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         <ThemedDatePicker
                           required
+                          min={localDateString()}
                           value={formData.checkin_date}
-                          onChange={(e) => setFormData({ ...formData, checkin_date: e.target.value })}
+                          onChange={(e) => {
+                            const today = localDateString();
+                            const nextDate = e.target.value;
+                            if (nextDate && nextDate < today) return;
+                            const nowTime = localTimeString();
+                            const nextTime = nextDate === today && formData.checkin_time < nowTime ? nowTime : formData.checkin_time;
+                            setFormData({ ...formData, checkin_date: nextDate, checkin_time: nextTime });
+                          }}
                           style={{
                             flex: 2,
                             height: '42px',
@@ -1360,8 +1405,15 @@ export default function AdvanceBookingModal({
                         <input
                           type="time"
                           required
+                          min={formData.checkin_date === localDateString() ? localTimeString() : undefined}
                           value={formData.checkin_time}
-                          onChange={(e) => setFormData({ ...formData, checkin_time: e.target.value })}
+                          onChange={(e) => {
+                            const today = localDateString();
+                            const nowTime = localTimeString();
+                            const picked = e.target.value;
+                            const nextTime = formData.checkin_date === today && picked && picked < nowTime ? nowTime : picked;
+                            setFormData({ ...formData, checkin_time: nextTime });
+                          }}
                           style={{
                             flex: 1,
                             padding: '10px',
@@ -1458,7 +1510,8 @@ export default function AdvanceBookingModal({
                         />
                         <ThemedSelect
                           id="adv-booking-payment-select"
-                          value={formData.payment_mode}
+                          height={42}
+                          value={['cash', 'online', 'card'].includes(formData.payment_mode) ? formData.payment_mode : 'cash'}
                           onChange={(val) => setFormData({ ...formData, payment_mode: val })}
                           placeholder="Payment Mode"
                           colorTheme="emerald"
@@ -1466,10 +1519,9 @@ export default function AdvanceBookingModal({
                           options={[
                             { value: 'cash', label: 'Cash' },
                             { value: 'online', label: 'UPI / Online' },
-                            { value: 'card', label: 'Card' },
-                            { value: 'cheque', label: 'Cheque' }
+                            { value: 'card', label: 'Card' }
                           ]}
-                          style={{ flex: 1, minWidth: '135px' }}
+                          style={{ flex: '1 1 148px', minWidth: '148px', maxWidth: '180px' }}
                         />
                       </div>
                     </div>
