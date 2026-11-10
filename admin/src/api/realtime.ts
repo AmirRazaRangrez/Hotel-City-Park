@@ -152,8 +152,8 @@ function scheduleReconnect() {
   }, 4000);
 }
 
-// Single-document Firestore passive check (only when WS is not connected, at most once every 45s)
-// Uses a single document read instead of querying 4 collections with 30 docs each (stops 55K read spikes)
+// Single-document Firestore passive check (only when WS is not connected, at most once every 5 minutes)
+// Uses a single document read instead of querying collections (permanently prevents 50K read exhaustion)
 async function checkFirebasePassiveFallback() {
   if (wsConnected) return; // Zero reads while WebSocket is active!
   try {
@@ -161,9 +161,8 @@ async function checkFirebasePassiveFallback() {
     const ver = res?.fields?.version?.integerValue || res?.fields?.version?.doubleValue || 0;
     if (ver && Number(ver) !== lastVersion) {
       if (lastVersion > 0) {
+        invalidateFirestoreCache();
         dispatchEvent('active_occupancies', { eventType: 'UPDATE' });
-        dispatchEvent('room_charges_inbox', { eventType: 'UPDATE' });
-        dispatchEvent('store_bills', { eventType: 'UPDATE' });
       }
       lastVersion = Number(ver);
     }
@@ -177,7 +176,7 @@ function startRealtime() {
       if (AppState.currentState === 'active' && !wsConnected) {
         checkFirebasePassiveFallback().catch(() => {});
       }
-    }, 45000);
+    }, 300000); // 5 minutes passive fallback
   }
 }
 

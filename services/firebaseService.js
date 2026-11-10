@@ -840,6 +840,7 @@ async function syncAllActiveRoomsFromLocal(db) {
     const MAX_BATCH_OPS = 450; // Leave margin below 500
     let batchOps = 0;
     let batch = firestore.batch();
+    const snapshotOccupiedRooms = [];
 
     // 🧹 RECONCILE: Purge any stale / checked-out rooms currently lingering in Firestore
     try {
@@ -850,6 +851,25 @@ async function syncAllActiveRoomsFromLocal(db) {
           batch.delete(doc.ref);
           batch.delete(firestore.collection('room_charges_inbox').doc(`folio_${docRoom}`));
           batchOps += 2;
+        }
+      });
+    } catch (_) {}
+
+    // 🧹 PRUNE: Remove settled KOT / BOT older than 24h from room_charges_inbox to keep collection lean
+    try {
+      const yesterdayIso = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      const staleSnap = await withTimeout(
+        firestore.collection('room_charges_inbox')
+          .where('status', '==', 'settled')
+          .where('created_at', '<', yesterdayIso)
+          .limit(40)
+          .get(),
+        3000
+      );
+      staleSnap.forEach(doc => {
+        if (!doc.id.startsWith('folio_') && doc.id !== 'fb_live_state' && doc.id !== 'cloud_tunnel_url') {
+          batch.delete(doc.ref);
+          batchOps++;
         }
       });
     } catch (_) {}
@@ -1156,12 +1176,143 @@ async function syncAllActiveRoomsFromLocal(db) {
         updated_at: new Date().toISOString()
       }, { merge: true });
 
+      snapshotOccupiedRooms.push({
+        room: roomNum,
+        room_number: roomNum,
+        booking_id: room.booking_id,
+        voucher_number: room.voucher_number || `BK-${roomNum}`,
+        guest_name: room.guest_name || 'Guest',
+        mobile: room.guest_mobile || '',
+        email: room.guest_email || '',
+        address: room.guest_address || '',
+        dob: room.guest_dob || '',
+        doc_type: room.guest_doc_type || 'Aadhaar Card',
+        aadhar_number: room.guest_aadhar || '',
+        room_type: room.room_type || 'Standard',
+        adults: totalAdults,
+        adults_male: room.adults_male || 0,
+        adults_female: room.adults_female || 0,
+        children: room.children || 0,
+        meal_plan: room.meal_plan || 'without_breakfast',
+        booking_source: room.booking_source || 'Walk-in',
+        btc_company_name: room.btc_company_name || null,
+        checked_in_by: room.checked_in_by || 'Front Desk',
+        checkin_time: room.checkin_time || new Date().toISOString(),
+        approx_checkout_time: room.approx_checkout_time || '',
+        room_charge: roomTotal,
+        tariff_subtotal: Number(decBaseTariff + decExtraMattressCost + decBreakfastCost),
+        restaurant: foodTotal,
+        bar: barTotal,
+        extra: extraTotal,
+        total: grandTotal,
+        paid: paidTotal,
+        pending: pendingTotal,
+        stay_calc_declared: folioSummary.stayCalcDeclared || null,
+        stay_calc_now: folioSummary.stayCalcNow || null,
+        status: 'active'
+      });
+
       batchOps += 2; // occupancy + folio doc
       if (batchOps >= MAX_BATCH_OPS) {
         await withTimeout(batch.commit());
         batch = firestore.batch();
         batchOps = 0;
       }
+    }
+
+    // =========================================================================
+    // 3. ASSEMBLE UNIFIED 1-READ LIVE SNAPSHOT (sync_meta/live_snapshot)
+    // Stops Firebase 50k read quota exhaustion: Admin dashboard requires only 1 read!
+    // =========================================================================
+    try {
+      const hospRow = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE (booking_id IS NOT NULL OR payment_type = 'room_settlement' OR payment_type = 'advance') AND date(created_at) = date('now', 'localtime')").get();
+      const restRow = db.prepare("SELECT COALESCE(SUM(total), 0) as total FROM restaurant_orders WHERE is_paid = 1 AND date(created_at) = date('now', 'localtime')").get();
+      const barRow = db.prepare("SELECT COALESCE(SUM(total), 0) as total FROM bar_orders WHERE is_paid = 1 AND date(created_at) = date('now', 'localtime')").get();
+      const expRow = db.prepare("SELECT COALESCE(SUM(COALESCE(actual_used_amount, amount)), 0) as total FROM expenses WHERE date(created_at) = date('now', 'localtime')").get();
+      const cinRow = db.prepare("SELECT COUNT(*) as cnt FROM bookings WHERE date(checkin_time) = date('now', 'localtime')").get();
+      const coutRow = db.prepare("SELECT COUNT(*) as cnt FROM bookings WHERE date(actual_checkout_time) = date('now', 'localtime')").get();
+      const discRow = db.prepare("SELECT COALESCE(SUM(discount_amount), 0) as total FROM bookings WHERE date(checkin_time) = date('now', 'localtime') OR date(actual_checkout_time) = date('now', 'localtime')").get();
+      const btcRow = db.prepare("SELECT COALESCE(SUM(b.total_room_charge - b.total_paid), 0) as total FROM bookings b JOIN rooms r ON r.current_booking_id = b.id WHERE r.status = 'occupied' AND (b.booking_source = 'Corporate BTC' OR b.btc_company_name IS NOT NULL)").get();
+
+      let storeSummary = { total_pending: 0, red_count: 0, red_due: 0, yellow_count: 0, yellow_due: 0, live_bills_count: 0 };
+      try {
+        const storeBills = db.prepare("SELECT bill_date, pending_amount, status FROM store_bills WHERE status != 'FULL' AND pending_amount > 0").all();
+        const nowMs = Date.now();
+        storeBills.forEach(b => {
+          const pend = Number(b.pending_amount) || 0;
+          storeSummary.total_pending += pend;
+          storeSummary.live_bills_count += 1;
+          const billDate = b.bill_date ? new Date(b.bill_date).getTime() : nowMs;
+          const ageDays = Math.floor((nowMs - billDate) / (1000 * 60 * 60 * 24));
+          if (ageDays >= 25) {
+            storeSummary.red_count += 1;
+            storeSummary.red_due += pend;
+          } else if (ageDays >= 15) {
+            storeSummary.yellow_count += 1;
+            storeSummary.yellow_due += pend;
+          }
+        });
+      } catch (_) {}
+
+      let pendingApprovalsCount = 0;
+      try {
+        const appRow = db.prepare("SELECT COUNT(*) as cnt FROM room_charges_inbox WHERE department = 'discount_approval' AND UPPER(status) = 'PENDING'").get();
+        pendingApprovalsCount = appRow?.cnt || 0;
+      } catch (_) {}
+
+      const nowTimestamp = Date.now();
+      const nowIso = new Date().toISOString();
+
+      const snapshotData = {
+        version: nowTimestamp,
+        updated_at: nowIso,
+        rooms: {
+          total: 40,
+          occupied: activeRooms.length,
+          ready: Math.max(0, 40 - activeRooms.length),
+          maintenance: 0
+        },
+        today_stats: {
+          hospitality_revenue: hospRow?.total || 0,
+          restaurant_revenue: restRow?.total || 0,
+          bar_revenue: barRow?.total || 0,
+          today_revenue: (hospRow?.total || 0) + (restRow?.total || 0) + (barRow?.total || 0),
+          today_expenses: expRow?.total || 0,
+          today_checkins: cinRow?.cnt || 0,
+          today_checkouts: coutRow?.cnt || 0,
+          today_discounts: discRow?.total || 0,
+          btc_pending: btcRow?.total || 0
+        },
+        store_summary: storeSummary,
+        pending_approvals_count: pendingApprovalsCount,
+        occupied_rooms: snapshotOccupiedRooms
+      };
+
+      // 1. Write sync_meta/live_snapshot (single read manifest)
+      batch.set(firestore.collection('sync_meta').doc('live_snapshot'), {
+        version: nowTimestamp,
+        updated_at: nowIso,
+        data_json: JSON.stringify(snapshotData)
+      }, { merge: true });
+
+      // 2. Write sync_meta/live_state (versioning sentinel for WebSocket/passive polling)
+      batch.set(firestore.collection('sync_meta').doc('live_state'), {
+        version: nowTimestamp,
+        updated_at: nowIso,
+        occupied_count: activeRooms.length
+      }, { merge: true });
+
+      // 3. Write system_settings/live_stats (flat backward compatibility)
+      batch.set(firestore.collection('system_settings').doc('live_stats'), {
+        ...snapshotData.today_stats,
+        occupied_rooms: activeRooms.length,
+        total_rooms: 40,
+        updated_at: nowIso
+      }, { merge: true });
+
+      batchOps += 3;
+    } catch (snapErr) {
+      console.warn('[Firebase] Snapshot assemble error:', snapErr.message);
     }
 
     if (batchOps > 0) {

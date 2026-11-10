@@ -5440,27 +5440,41 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     const paisaGst = (base) => Number((((Number(base) || 0) * effectiveGstPct) / 100).toFixed(2));
     let nowBaseRoomTariff = nowDays * combinedBaseRate;
     let nowBaseRoomTariffGst = paisaGst(nowBaseRoomTariff);
-    if (isRateTaxInclusive && nowExtensionCharge === 0) {
+    let effNowExtensionCharge = nowExtensionCharge;
+    let nowExtensionGst = paisaGst(nowExtensionCharge);
+
+    if (isRateTaxInclusive) {
       nowBaseRoomTariff = Math.round((nowDays * combinedBaseRate) / (1 + effectiveGstPct / 100));
       nowBaseRoomTariffGst = (nowDays * combinedBaseRate) - nowBaseRoomTariff;
+      if (nowExtensionCharge > 0) {
+        effNowExtensionCharge = Math.round(nowExtensionCharge / (1 + effectiveGstPct / 100));
+        nowExtensionGst = nowExtensionCharge - effNowExtensionCharge;
+      }
     }
     const nowExtraMattressCost = nowDays * dailyExtraBedRate;
     const nowExtraMattressGst = paisaGst(nowExtraMattressCost);
     const nowBreakfastCost = nowDays * breakfastPax * breakfastDailyRate;
     const nowBreakfastGst = paisaGst(nowBreakfastCost);
-    const nowExtensionGst = paisaGst(nowExtensionCharge);
 
     const nowStayBasePreTax = nowBaseRoomTariff + nowExtraMattressCost + nowBreakfastCost;
-    const nowPreTaxGross = nowStayBasePreTax + nowExtensionCharge;
+    const nowPreTaxGross = nowStayBasePreTax + effNowExtensionCharge;
     const nowDiscountAmount = combinedDiscountPct > 0
       ? Math.round((nowStayBasePreTax * combinedDiscountPct) / 100)
       : (combinedDiscountAmount || 0);
-    const nowGrossGst = paisaGst(nowPreTaxGross);
-    const nowGrossTotal = nowPreTaxGross + nowGrossGst;
+    const nowGrossGst = isRateTaxInclusive
+      ? (nowBaseRoomTariffGst + nowExtraMattressGst + nowBreakfastGst + nowExtensionGst)
+      : paisaGst(nowPreTaxGross);
+    const nowGrossTotal = isRateTaxInclusive
+      ? (nowDays * combinedBaseRate + nowExtensionCharge)
+      : (nowPreTaxGross + nowGrossGst);
 
     const nowRoomPreTax = nowPreTaxGross - nowDiscountAmount;
-    const nowRoomGst = paisaGst(nowRoomPreTax);
-    const nowRoomChargeCalc = nowRoomPreTax + nowRoomGst;
+    const nowRoomGst = isRateTaxInclusive
+      ? Math.max(0, nowGrossGst - Math.round((nowDiscountAmount * effectiveGstPct) / 100))
+      : paisaGst(nowRoomPreTax);
+    const nowRoomChargeCalc = isRateTaxInclusive
+      ? (nowDays * combinedBaseRate + nowExtensionCharge - nowDiscountAmount)
+      : (nowRoomPreTax + nowRoomGst);
     const nowDiscountTotal = Math.max(0, nowGrossTotal - nowRoomChargeCalc);
     const nowDiscountGst = Math.max(0, nowDiscountTotal - nowDiscountAmount);
 
@@ -5524,7 +5538,11 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     const hasOverstayed = isPastDeclaredTime || (nowDays > decDays) || (nowExtensionCharge > 0 && nowDays >= decDays);
     const isCompletedStay = Boolean(room.booking_status === 'checked_out' || room.status === 'checked_out' || (room.status && room.status !== 'occupied') || room.actual_checkout_time);
     const shouldUseNowTotals = hasOverstayed || isCompletedStay || Boolean(stayCalc.isEarlyCheckout);
-    const targetRoomCharge = shouldUseNowTotals ? Math.max(isCompletedStay ? 0 : decRoomCharge, nowRoomCharge) : decRoomCharge;
+    const targetRoomCharge = isCompletedStay
+      ? 0
+      : (stayCalc.isEarlyCheckout
+        ? nowRoomCharge
+        : (hasOverstayed ? Math.max(decRoomCharge, nowRoomCharge) : decRoomCharge));
     const targetDiscountAmount = shouldUseNowTotals ? nowDiscountAmount : decDiscountAmount;
     const targetPreTaxRoom = shouldUseNowTotals ? nowRoomPreTax : decRoomPreTax;
     const targetGrossTariff = shouldUseNowTotals ? nowPreTaxGross : decPreTaxGross;
@@ -5587,8 +5605,8 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     const decRoundedGrandTotal = Math.round(decGrandTotal);
     const decRoundOff = Math.round((decRoundedGrandTotal - decGrandTotal) * 100) / 100;
 
-    const activeRoundedGrandTotal = hasOverstayed ? nowRoundedGrandTotal : decRoundedGrandTotal;
-    const activeRoundOff = hasOverstayed ? nowRoundOff : decRoundOff;
+    const activeRoundedGrandTotal = (hasOverstayed || stayCalc.isEarlyCheckout) ? nowRoundedGrandTotal : decRoundedGrandTotal;
+    const activeRoundOff = (hasOverstayed || stayCalc.isEarlyCheckout) ? nowRoundOff : decRoundOff;
     const activeBalanceDue = isOtaPrepaid
       ? Math.max(0, (hotelExtrasCharge + foodTotal + barTotal + expensesTotal) - effectivePaid)
       : Math.max(0, activeRoundedGrandTotal - effectivePaid);
@@ -6395,8 +6413,8 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
         SELECT b.id as booking_id, b.room_id, r.room_number, r.price 
         FROM bookings b
         JOIN rooms r ON b.room_id = r.id
-        WHERE b.guest_id = ? AND b.status = 'active' AND b.checkin_time = ?
-      `).all(primaryBooking.guest_id, primaryBooking.checkin_time);
+        WHERE b.id = ? OR (b.guest_id = ? AND b.status = 'active' AND b.checkin_time = ?)
+      `).all(primaryBooking.id, primaryBooking.guest_id, primaryBooking.checkin_time);
 
       for (const gb of activeGroupBookings) {
         await importCloudRoomChargesToSqlite(db, gb.room_number, gb.room_id, gb.booking_id, primaryBooking.guest_name);
@@ -6598,7 +6616,7 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
       const isRefundBooking = Boolean(isRefund || netRefund > 0);
       const refBillNo = primaryBooking.voucher_number ? String(primaryBooking.voucher_number).trim().replace(/\b20(\d{6}-\d+)\b/g, '$1') : '';
       const rrReceiptNo = isRefundBooking ? getNextRefundReceiptNumber() : null;
-      const refundVoucherNo = rrReceiptNo || (refBillNo || `DEB-${getNextMonthlyVoucherNumber('DEB')}`);
+      const refundVoucherNo = isRefundBooking ? `DEB-${getNextMonthlyVoucherNumber('DEB')}` : (refBillNo || `DEB-${getNextMonthlyVoucherNumber('DEB')}`);
       const baseVoucher = primaryBooking.voucher_number ? String(primaryBooking.voucher_number).trim().replace(/\b20(\d{6}-\d+)\b/g, '$1') : `RCP-${500 + primaryBooking.id}`;
       let finalReceiptNo = baseVoucher;
       const existingPmt = db.prepare('SELECT id FROM payments WHERE receipt_no = ?').get(finalReceiptNo);
@@ -6874,6 +6892,7 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
         refund_mode: return_mode,
         return_mode,
         refund_amount: netRefund,
+        netRefund: netRefund,
         companyName: checkoutCompanyName || primaryBooking.company_name,
         company_name: checkoutCompanyName || primaryBooking.company_name,
         gstNumber: checkoutGstNumber || primaryBooking.gst_number,

@@ -261,6 +261,9 @@ const derived = {
 const realApi={
  async login(baseUrl:string,username:string,password:string){const r=await axios.post(baseUrl.replace(/\/$/,'')+'/api/auth/login',{username,password},{timeout:15000});
   const u=r.data.user;if(!(u.role==='manager'||u.can_access_manager))throw new Error('This account does not have owner/manager access.');return r.data as {token:string;user:any}},
+ liveSnapshot: async () => {
+   return fb.fetchLiveSnapshot();
+ },
  stats: async () => {
    try {
      const res = await sget(ROUTES.stats);

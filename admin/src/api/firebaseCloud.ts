@@ -40,16 +40,66 @@ export function parseFirestoreDoc(doc: any): any {
 const collCache = new Map<string, { time: number; data: any[] }>();
 const collInflight = new Map<string, Promise<any[]>>();
 
-export function invalidateFirestoreCache(coll?: string) {
-  if (coll) collCache.delete(coll);
-  else collCache.clear();
+let liveSnapshotCache: { time: number; data: any } | null = null;
+let liveSnapshotInflight: Promise<any> | null = null;
+const SNAPSHOT_CACHE_TTL = 180000; // 3 minutes cache for 1-read snapshot
+
+export function invalidateLiveSnapshot() {
+  liveSnapshotCache = null;
 }
 
-export async function fetchFirestoreCollection(coll: string, forceFresh = false): Promise<any[]> {
+export function invalidateFirestoreCache(coll?: string) {
+  if (coll) collCache.delete(coll);
+  else {
+    collCache.clear();
+    liveSnapshotCache = null;
+  }
+}
+
+export async function fetchLiveSnapshot(forceFresh = false): Promise<any | null> {
+  const now = Date.now();
+  if (!forceFresh && liveSnapshotCache && (now - liveSnapshotCache.time) < SNAPSHOT_CACHE_TTL) {
+    return liveSnapshotCache.data;
+  }
+  if (liveSnapshotInflight) return liveSnapshotInflight;
+
+  liveSnapshotInflight = (async () => {
+    try {
+      const res = await fetch(`${FIREBASE_REST_URL}/sync_meta/live_snapshot?key=${FIREBASE_API_KEY}`)
+        .then(r => r.json())
+        .catch(() => null);
+
+      if (res?.fields) {
+        let snap: any = null;
+        if (res.fields.data_json?.stringValue) {
+          try {
+            snap = JSON.parse(res.fields.data_json.stringValue);
+          } catch (_) {}
+        }
+        if (!snap) {
+          snap = parseFirestoreDoc(res);
+        }
+        if (snap && snap.rooms) {
+          liveSnapshotCache = { time: Date.now(), data: snap };
+          return snap;
+        }
+      }
+    } catch (_) {}
+    return liveSnapshotCache?.data || null;
+  })();
+
+  try {
+    return await liveSnapshotInflight;
+  } finally {
+    liveSnapshotInflight = null;
+  }
+}
+
+export async function fetchFirestoreCollection(coll: string, forceFresh = false, pageSize = 30): Promise<any[]> {
   const now = Date.now();
   if (!forceFresh) {
     const cached = collCache.get(coll);
-    if (cached && (now - cached.time) < 90000) {
+    if (cached && (now - cached.time) < 300000) {
       return cached.data;
     }
     const inflight = collInflight.get(coll);
@@ -58,7 +108,8 @@ export async function fetchFirestoreCollection(coll: string, forceFresh = false)
 
   const p = (async () => {
     try {
-      const res = await fetch(`${FIREBASE_REST_URL}/${coll}?key=${FIREBASE_API_KEY}`).then(r => r.json()).catch(() => null);
+      const pSize = coll === 'active_occupancies' ? 45 : pageSize;
+      const res = await fetch(`${FIREBASE_REST_URL}/${coll}?pageSize=${pSize}&key=${FIREBASE_API_KEY}`).then(r => r.json()).catch(() => null);
       if (res?.documents && Array.isArray(res.documents)) {
         const parsed = res.documents.map(parseFirestoreDoc);
         collCache.set(coll, { time: Date.now(), data: parsed });
@@ -314,8 +365,17 @@ export async function recordStorePayment(body: any, sendPush: boolean = true) {
 }
 
 export async function fetchOccupiedStays() {
-  const occupancies = await fetchFirestoreCollection('active_occupancies');
-  const charges = await fetchFirestoreCollection('room_charges_inbox');
+  // 1. Check unified 1-read snapshot first (0 additional reads if cached, 1 read cold)
+  try {
+    const snap = await fetchLiveSnapshot();
+    if (snap && Array.isArray(snap.occupied_rooms) && snap.occupied_rooms.length > 0) {
+      return snap.occupied_rooms.map(toStay);
+    }
+  } catch (_) {}
+
+  // 2. Fallback to individual collections with bounded page size
+  const occupancies = await fetchFirestoreCollection('active_occupancies', false, 45);
+  const charges = await fetchFirestoreCollection('room_charges_inbox', false, 45);
   const folioDocs = charges.filter((c: any) => c.department === 'room_folio' && String(c.status || '').toLowerCase() !== 'checked_out');
   const folioMap = new Map<string, any>();
   folioDocs.forEach((f: any) => {
@@ -438,16 +498,17 @@ export async function fetchDailyAnalytics(startDate: string, endDate: string) {
 let approvalsCache: { time: number; data: { pending: any[]; history: any[] } } | null = null;
 let approvalsInflight: Promise<{ pending: any[]; history: any[] }> | null = null;
 
+export async function fetchApprovals(): Promise<{ pending: any[]; history: any[] }>;
 export async function fetchApprovals(forceFresh = false): Promise<{ pending: any[]; history: any[] }> {
   const now = Date.now();
-  if (!forceFresh && approvalsCache && (now - approvalsCache.time) < 15000) {
+  if (!forceFresh && approvalsCache && (now - approvalsCache.time) < 60000) {
     return approvalsCache.data;
   }
   if (approvalsInflight) return approvalsInflight;
 
   approvalsInflight = (async () => {
     try {
-      const res = await fetch(`${FIREBASE_REST_URL}/room_charges_inbox?pageSize=100&key=${FIREBASE_API_KEY}`);
+      const res = await fetch(`${FIREBASE_REST_URL}/room_charges_inbox?pageSize=30&key=${FIREBASE_API_KEY}`);
       const body = await res.json().catch(() => null);
       if (!res.ok || body?.error) {
         if (approvalsCache?.data) return approvalsCache.data;
@@ -458,8 +519,8 @@ export async function fetchApprovals(forceFresh = false): Promise<{ pending: any
       const charges = Array.isArray(body?.documents) ? body.documents.map(parseFirestoreDoc) : [];
       const approvalDocs = charges.filter((c: any) => c.department === 'discount_approval');
 
-      const pending: any[] = [];
-      const history: any[] = [];
+      const pendingList: any[] = [];
+      const historyList: any[] = [];
 
       for (const c of approvalDocs) {
         let meta: any = {};
@@ -506,36 +567,17 @@ export async function fetchApprovals(forceFresh = false): Promise<{ pending: any
         }
       }
 
-      const result = {
-        pending: pending.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
-        history: history.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 50)
-      };
+      const pending = pendingList.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const history = historyList.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 50);
 
-      approvalsCache = { time: Date.now(), data: result };
-      return result;
+      approvalsCache = { time: Date.now(), data: { pending, history } };
+      return { pending, history };
     } finally {
       approvalsInflight = null;
     }
   })();
 
   return approvalsInflight;
-}
-      action_by: c.settled_by || meta.action_by || null,
-      action_at: c.updated_at || meta.action_at || null,
-      metadata: meta.metadata || meta
-    };
-
-    if (st === 'PENDING') {
-      pending.push(item);
-    } else {
-      history.push(item);
-    }
-  }
-
-  pending.sort((a, b) => new Date(b.requested_at).getTime() - new Date(a.requested_at).getTime());
-  history.sort((a, b) => new Date(b.requested_at).getTime() - new Date(a.requested_at).getTime());
-
-  return { pending, history };
 }
 
 export async function actApproval(id: any, status: 'approved' | 'rejected') {
@@ -1290,7 +1332,28 @@ export async function sendTestPush(): Promise<{ success: boolean; error?: string
 
 export async function fetchStats(): Promise<any> {
   try {
-    // 1. Try reading the real-time live_stats document synced by backend
+    // 1. Try reading the unified single-read live snapshot (1 READ TOTAL!)
+    try {
+      const snap = await fetchLiveSnapshot();
+      if (snap && snap.rooms && snap.today_stats) {
+        return {
+          rooms: snap.rooms,
+          revenue: {
+            total: snap.today_stats.today_revenue,
+            hospitality: snap.today_stats.hospitality_revenue,
+            restaurant: snap.today_stats.restaurant_revenue,
+            bar: snap.today_stats.bar_revenue
+          },
+          todayExpenses: snap.today_stats.today_expenses,
+          todayCheckins: snap.today_stats.today_checkins,
+          todayCheckouts: snap.today_stats.today_checkouts,
+          todayDiscounts: snap.today_stats.today_discounts,
+          btcPending: snap.today_stats.btc_pending
+        };
+      }
+    } catch (_) {}
+
+    // 2. Try reading the real-time live_stats document synced by backend
     try {
       const liveRes = await fetch(`${FIREBASE_REST_URL}/system_settings/live_stats?key=${FIREBASE_API_KEY}`).then(r => r.json()).catch(() => null);
       if (liveRes?.fields) {

@@ -18,6 +18,10 @@ describe('Dynamic Early Checkout & Refund Settlement Test Suite', () => {
       can_access_manager: 1
     });
 
+    // Clean previous test data
+    db.prepare("DELETE FROM bookings WHERE guest_id IN (SELECT id FROM guests WHERE name LIKE 'Amit Verma%' OR name LIKE 'Rahul Sharma%')").run();
+    db.prepare("DELETE FROM guests WHERE name LIKE 'Amit Verma%' OR name LIKE 'Rahul Sharma%'").run();
+
     // Create or reset room 771 (₹2,000/night)
     let r1 = db.prepare("SELECT id FROM rooms WHERE room_number = '771'").get();
     if (!r1) {
@@ -74,6 +78,7 @@ describe('Dynamic Early Checkout & Refund Settlement Test Suite', () => {
     expect(summary.refundAmount).toBe(2000);
 
     // Clean up room
+    db.prepare("UPDATE bookings SET status = 'checked_out' WHERE id = ?").run(bookingId);
     db.prepare("UPDATE rooms SET status = 'ready', current_booking_id = NULL WHERE id = ?").run(testRoomId1);
   });
 

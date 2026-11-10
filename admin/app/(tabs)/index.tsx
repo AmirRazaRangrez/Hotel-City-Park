@@ -61,6 +61,38 @@ export default function Home() {
 
   const { data, err, busy, isRefreshing, at, reload } = useLoad(
     async () => {
+      // 1. Unified Single-Read Live Snapshot (Stops 50k read quota exhaustion: 1 read instead of 700+)
+      try {
+        const snapshot = typeof (api as any).liveSnapshot === 'function' ? await (api as any).liveSnapshot() : null;
+        if (snapshot && snapshot.rooms) {
+          const stats = {
+            rooms: snapshot.rooms,
+            revenue: {
+              total: Number(snapshot.today_stats?.today_revenue || 0),
+              hospitality: Number(snapshot.today_stats?.hospitality_revenue || 0),
+              restaurant: Number(snapshot.today_stats?.restaurant_revenue || 0),
+              bar: Number(snapshot.today_stats?.bar_revenue || 0)
+            },
+            todayExpenses: Number(snapshot.today_stats?.today_expenses || 0),
+            todayCheckins: Number(snapshot.today_stats?.today_checkins || 0),
+            todayCheckouts: Number(snapshot.today_stats?.today_checkouts || 0),
+            todayDiscounts: Number(snapshot.today_stats?.today_discounts || 0),
+            btcPending: Number(snapshot.today_stats?.btc_pending || 0)
+          };
+          return {
+            s: stats,
+            a: null,
+            ev: [],
+            exp: [],
+            occ: snapshot.occupied_rooms || [],
+            bills: [],
+            store: { bills: [] },
+            storeSummary: snapshot.store_summary || null
+          };
+        }
+      } catch (_) {}
+
+      // Fallback: individual queries
       const [s, a, ev, exp, occ, bills, store] = await Promise.all([
         api.stats().catch(() => null),
         api.analytics(day(), day()).catch(() => null),
@@ -118,15 +150,21 @@ export default function Home() {
 
   // Compute Store Bills Red & Yellow Aging Counts
   const storeBillsList: any[] = (data as any)?.store?.bills || [];
-  let redBillsCount = 0;
-  let redBillsDue = 0;
-  let yellowBillsCount = 0;
-  let yellowBillsDue = 0;
+  const ss = (data as any)?.storeSummary;
+  let redBillsCount = ss?.red_count || 0;
+  let redBillsDue = ss?.red_due || 0;
+  let yellowBillsCount = ss?.yellow_count || 0;
+  let yellowBillsDue = ss?.yellow_due || 0;
 
-  const now = new Date();
-  const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (storeBillsList.length > 0) {
+    redBillsCount = 0;
+    redBillsDue = 0;
+    yellowBillsCount = 0;
+    yellowBillsDue = 0;
+    const now = new Date();
+    const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  storeBillsList.forEach((b: any) => {
+    storeBillsList.forEach((b: any) => {
     const pending = Number(b.pending_amount) || 0;
     const isFullPaid = pending <= 0 || b.status === 'FULL' || b.status === 'PAID';
     if (!isFullPaid && pending > 0) {
@@ -154,6 +192,7 @@ export default function Home() {
       }
     }
   });
+  }
 
   const r = data?.s?.rooms;
   const v = data?.s?.revenue;
