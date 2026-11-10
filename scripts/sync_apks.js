@@ -61,6 +61,7 @@ console.log(`Destination Folder: ${APKS_DIR}\n`);
 
 // 1. Waiter APK
 syncApk('Waiter', 'HotelCityPark-Waiter.apk', [
+  'public/HotelCityPark-Waiter.apk',
   'release-electron/Hotel City Park CRM-win32-x64/waiter-pannel/android/app/build/outputs/apk/debug/app-debug.apk',
   'release-electron/Hotel City Park CRM-win32-x64/waiter-pannel/android/app/build/outputs/apk/release/app-release.apk',
   'Hotel-City-Park-Waiter.apk',
@@ -69,12 +70,15 @@ syncApk('Waiter', 'HotelCityPark-Waiter.apk', [
 
 // 2. Admin / Owner APK
 syncApk('Admin', 'HotelCityPark-Admin.apk', [
+  'public/HotelCityPark-Admin.apk',
   'admin/android/app/build/outputs/apk/release/app-release.apk',
   'admin/android/app/build/outputs/apk/debug/app-debug.apk',
   'admin/HotelCityPark-Owner.apk',
   'HotelCityPark-Owner.apk'
 ]);
 syncApk('Owner', 'HotelCityPark-Owner.apk', [
+  'public/HotelCityPark-Owner.apk',
+  'public/HotelCityPark-Owner-v2.apk',
   'admin/android/app/build/outputs/apk/release/app-release.apk',
   'admin/android/app/build/outputs/apk/debug/app-debug.apk',
   'admin/HotelCityPark-Owner.apk',

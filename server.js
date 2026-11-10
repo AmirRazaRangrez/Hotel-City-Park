@@ -5574,8 +5574,8 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
 
     // Pre-tax room charge (taxable amount before GST: amount / 1.05)
     const combinedPreTaxRoomCharge = (isOtaPrepaid || isOtaPayAtHotel)
-        ? Math.round((effectiveRoomCharge / 1.05) * 100) / 100
-        : targetPreTaxRoom;
+      ? Math.round((effectiveRoomCharge / 1.05) * 100) / 100
+      : targetPreTaxRoom;
 
     // Running totals
     const grandTotal = effectiveGrandTotal;
@@ -11630,7 +11630,7 @@ function getSafeAutoSaveDirectory(customDir) {
       if (row && row.value && row.value.trim()) {
         target = row.value.trim();
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   if (!target) {
@@ -11792,10 +11792,10 @@ app.post('/api/settings/section-passwords', (req, res) => {
       } catch (_) { }
     }
 
-res.json({ success: true, message: 'Section passwords updated successfully.' });
+    res.json({ success: true, message: 'Section passwords updated successfully.' });
   } catch (err) {
-  res.status(500).json({ success: false, error: err.message });
-}
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.post(['/api/save-invoice-pdf', '/api/auto-save-receipt'], async (req, res) => {
