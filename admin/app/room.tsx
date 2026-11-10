@@ -149,15 +149,25 @@ function buildCrmPayload(s: any, bills: any[]) {
   const voucherNo = s?.voucherNumber || r.voucher_number || r.voucher_no || (s?.id ? `260920-${s.id}` : '260920-001');
   const invoiceNo = formatTaxInvoiceNumber(voucherNo);
 
-  const roomCharge = Number(s?.roomCharge || r.total_room_charge || r.room_charge || 0);
+  const otaBill = Number(s?.otaBillAmount || s?.ota_bill_amount || r.ota_bill_amount || r.otaBillAmount || 0);
+  const isOtaPrepaid = Boolean(s?.isPrepaid || s?.is_prepaid || r.is_prepaid || (String(s?.source || r.booking_source || '').toUpperCase() === 'OTA' && otaBill > 0));
+
+  const roomCharge = Number(s?.roomCharge ?? r.total_room_charge ?? r.room_charge ?? 0);
   const foodTotal = restaurantOrders.reduce((sum: number, o: any) => sum + (Number(o.total || o.amount) || 0), 0) || Number(s?.restaurant || r.food_total || 0);
   const barTotal = barOrders.reduce((sum: number, o: any) => sum + (Number(o.total || o.amount) || 0), 0) || Number(s?.bar || r.bar_total || 0);
   const extraBedCharge = Number(s?.extra || r.extra_bed_charge || 0);
   const discountAmount = Number(s?.discount || r.discount_amount || 0);
   const taxAmount = Number(r.tax_amount || Math.round(roomCharge * 0.05));
-  const grandTotal = Number(s?.total || s?.grandTotal || r.grand_total || (roomCharge + foodTotal + barTotal + extraBedCharge));
-  const paid = Number(s?.paid || r.advance_amount || r.total_paid || 0);
-  const pending = Math.max(0, grandTotal - paid);
+  let grandTotal = Number(s?.total ?? s?.grandTotal ?? r.grand_total);
+  if (!grandTotal) {
+    const base = roomCharge + foodTotal + barTotal + extraBedCharge - discountAmount;
+    grandTotal = isOtaPrepaid && otaBill > 0 ? (otaBill + base) : Math.max(0, base);
+  }
+  let paid = Number(s?.paid ?? r.advance_amount ?? r.total_paid ?? 0);
+  if (isOtaPrepaid && otaBill > 0 && paid < otaBill) {
+    paid = otaBill + paid;
+  }
+  const pending = s?.pending !== undefined ? Number(s.pending) : Math.max(0, grandTotal - paid);
   const tariffSubtotal = Number(s?.tariffSubtotal || r.room_rate || (discountAmount > 0 ? (roomCharge + discountAmount) : roomCharge));
 
   const payments = Array.isArray(r.payments) && r.payments.length > 0
@@ -530,16 +540,31 @@ export default function RoomDetails() {
           ];
 
           const sc = fs.stayCalcDeclared || fs.stayCalcNow || null;
-          const roomCharge = Number(sc?.roomCharge ?? fs.roomCharge ?? fr.total_room_charge ?? (found?.roomCharge || 0));
+          const otaBill = Number(fs.otaBillAmount || fr.ota_bill_amount || fr.otaBillAmount || found?.otaBillAmount || 0);
+          const isPrepaid = Boolean(fs.isOtaPrepaid || fr.is_prepaid || (fr.booking_source === 'OTA' && otaBill > 0));
+
+          const deskExtras = Number(fs.hotelExtrasCharge ?? fs.extra ?? (found?.extra || 0));
           const foodTotal = Number(fs.foodTotal ?? sc?.fnbTotal ?? (found?.restaurant || 0));
           const barTotal = Number(fs.barTotal ?? (found?.bar || 0));
-          const extra = Number(fs.hotelExtrasCharge ?? fs.extra ?? (found?.extra || 0));
+          const roomCharge = Number(sc?.roomCharge ?? fs.roomCharge ?? fr.total_room_charge ?? (found?.roomCharge || 0));
           const discount = Number(sc?.discountAmount ?? fs.discountAmount ?? fs.discount ?? (found?.discount || 0));
           const tariffSubtotal = Number(sc?.baseRoomTotal ?? sc?.baseRoomTariff ?? (roomCharge + discount));
-          const total = Number(sc?.grandTotal ?? fs.grandTotal ?? (roomCharge + foodTotal + barTotal + extra - discount));
-          const paid = Number(fs.advancePaid ?? sc?.paid ?? fr.total_paid ?? (found?.paid || 0));
+
+          let total = Number(fs.grandTotal ?? sc?.grandTotal);
+          if (isPrepaid && otaBill > 0 && (!total || total < otaBill)) {
+            total = otaBill + deskExtras + foodTotal + barTotal;
+          } else if (!total) {
+            total = roomCharge + foodTotal + barTotal + deskExtras - discount;
+          }
+
+          let paid = Number(fs.advancePaid ?? sc?.paid ?? fr.total_paid ?? (found?.paid || 0));
+          if (isPrepaid && otaBill > 0 && paid < otaBill) {
+            const deskPaid = Number(fs.initialPaid ?? fr.advance_payment ?? fr.total_paid ?? 0);
+            paid = otaBill + deskPaid;
+          }
+
+          const pending = Number(fs.balanceDue ?? sc?.balanceDue ?? Math.max(0, total - paid));
           const refundDue = Number(sc?.refundDue ?? (paid > total ? paid - total : 0));
-          const pending = Number(sc?.balanceDue ?? fs.balanceDue ?? (total > paid ? total - paid : 0));
 
           return {
             isCheckout: isCheckoutParam,

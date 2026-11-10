@@ -1025,17 +1025,25 @@ async function syncAllActiveRoomsFromLocal(db) {
       const decRoomCharge = decPreTaxRoom + roomGst;
 
       const isOta = (room.booking_source || '').toUpperCase() === 'OTA';
+      const otaBill = Number(room.ota_bill_amount || 0);
+      const isOtaPrepaid = isOta && (room.is_prepaid === 1 || room.rate_type === 'prepaid' || (otaBill > 0 && room.booking_source === 'OTA'));
+
       let roomTotal = decRoomCharge > 0 ? decRoomCharge : Number(room.total_room_charge || 0);
       if (isOta && Number(room.total_room_charge || 0) > 0) {
         roomTotal = Number(room.total_room_charge);
       }
-      const grandTotal = Math.round(roomTotal + foodTotal + barTotal + extraTotal);
-      const paidTotal = Math.round(Number(room.total_paid || room.advance_payment || 0));
+      let grandTotal = Math.round(roomTotal + foodTotal + barTotal + extraTotal);
+      let paidTotal = Math.round(Number(room.total_paid || room.advance_payment || 0));
+
+      if (isOtaPrepaid && otaBill > 0) {
+        grandTotal = Math.round(otaBill + roomTotal + foodTotal + barTotal + extraTotal);
+        paidTotal = Math.round(otaBill + Number(room.total_paid || room.advance_payment || 0));
+      }
       const pendingTotal = Math.max(0, grandTotal - paidTotal);
 
       const folioSummary = {
-        roomCharge: roomTotal,
-        totalRoomCharge: roomTotal,
+        roomCharge: isOtaPrepaid && otaBill > 0 ? (otaBill + roomTotal) : roomTotal,
+        totalRoomCharge: isOtaPrepaid && otaBill > 0 ? (otaBill + roomTotal) : roomTotal,
         tariffSubtotal: Number(decBaseTariff + decExtraMattressCost + decBreakfastCost),
         restaurant: foodTotal,
         bar: barTotal,
@@ -1049,7 +1057,7 @@ async function syncAllActiveRoomsFromLocal(db) {
         pending: pendingTotal,
         balanceDue: pendingTotal,
         stayCalcDeclared: {
-          roomCharge: roomTotal,
+          roomCharge: isOtaPrepaid && otaBill > 0 ? (otaBill + roomTotal) : roomTotal,
           grandTotal,
           paid: paidTotal,
           balanceDue: pendingTotal,
@@ -1067,9 +1075,11 @@ async function syncAllActiveRoomsFromLocal(db) {
           const livePreTaxRoom = livePreTaxGross - liveDiscountAmt;
           const liveRoomGst = Math.round(livePreTaxRoom * 0.05);
           const liveRoomCharge = livePreTaxRoom + liveRoomGst;
-          const liveGrandTotal = liveRoomCharge + foodTotal + barTotal + extraTotal;
+          const liveGrandTotal = isOtaPrepaid && otaBill > 0
+            ? Math.round(otaBill + liveRoomCharge + foodTotal + barTotal + extraTotal)
+            : Math.round(liveRoomCharge + foodTotal + barTotal + extraTotal);
           return {
-            roomCharge: liveRoomCharge,
+            roomCharge: isOtaPrepaid && otaBill > 0 ? (otaBill + liveRoomCharge) : liveRoomCharge,
             grandTotal: liveGrandTotal,
             paid: paidTotal,
             balanceDue: Math.max(0, liveGrandTotal - paidTotal),
@@ -1199,14 +1209,28 @@ async function syncAllActiveRoomsFromLocal(db) {
         checked_in_by: room.checked_in_by || 'Front Desk',
         checkin_time: room.checkin_time || new Date().toISOString(),
         approx_checkout_time: room.approx_checkout_time || '',
-        room_charge: roomTotal,
+        room_charge: isOtaPrepaid && otaBill > 0 ? (otaBill + roomTotal) : roomTotal,
+        total_room_charge: isOtaPrepaid && otaBill > 0 ? (otaBill + roomTotal) : roomTotal,
         tariff_subtotal: Number(decBaseTariff + decExtraMattressCost + decBreakfastCost),
         restaurant: foodTotal,
+        food_total: foodTotal,
         bar: barTotal,
+        bar_total: barTotal,
         extra: extraTotal,
         total: grandTotal,
+        grand_total: grandTotal,
+        grandTotal: grandTotal,
         paid: paidTotal,
+        total_paid: paidTotal,
+        advance_payment: paidTotal,
+        advancePaid: paidTotal,
         pending: pendingTotal,
+        balance_due: pendingTotal,
+        balanceDue: pendingTotal,
+        ota_bill_amount: otaBill,
+        otaBillAmount: otaBill,
+        is_prepaid: isOtaPrepaid ? 1 : 0,
+        isPrepaid: isOtaPrepaid ? 1 : 0,
         stay_calc_declared: folioSummary.stayCalcDeclared || null,
         stay_calc_now: folioSummary.stayCalcNow || null,
         status: 'active'

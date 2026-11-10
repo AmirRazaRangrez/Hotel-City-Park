@@ -65,13 +65,27 @@ export const extraOf = (b: any) => {
 };
 
 export const toStay = (b: any): Stay => {
-  const roomCharge = n(b.total_room_charge || b.room_charge);
-  const restaurant = n(b.food_total || b.restaurant_total);
-  const bar = n(b.bar_total);
-  const extra = extraOf(b);
-  const discount = n(b.discount_amount);
-  const total = n(b.grand_total) || Math.max(roomCharge + restaurant + bar + extra - discount, 0);
-  const paid = n(b.total_paid || b.advance_payment);
+  const otaBill = n(b.ota_bill_amount ?? b.otaBillAmount);
+  const isPrepaid = Boolean(b.is_prepaid || b.isPrepaid || (b.booking_source && String(b.booking_source).toUpperCase() === 'OTA' && otaBill > 0));
+
+  const roomCharge = n(b.total_room_charge ?? b.room_charge ?? b.roomCharge);
+  const restaurant = n(b.food_total ?? b.restaurant_total ?? b.restaurant);
+  const bar = n(b.bar_total ?? b.bar);
+  const extra = extraOf(b) || n(b.extra);
+  const discount = n(b.discount_amount ?? b.discount);
+
+  let total = n(b.grand_total ?? b.grandTotal ?? b.total);
+  if (!total) {
+    const baseCalc = roomCharge + restaurant + bar + extra - discount;
+    total = isPrepaid && otaBill > 0 ? (otaBill + baseCalc) : Math.max(baseCalc, 0);
+  }
+
+  let paid = n(b.total_paid ?? b.paid ?? b.advance_payment ?? b.advancePaid);
+  if (isPrepaid && otaBill > 0 && paid < otaBill) {
+    paid = otaBill + paid;
+  }
+
+  const pending = b.pending !== undefined ? n(b.pending) : (b.balance_due !== undefined ? n(b.balance_due) : Math.max(total - paid, 0));
 
   const totalAdults = n(b.adults_male) + n(b.adults_female) + n(b.adults_other) || n(b.adults) || 1;
 
@@ -87,11 +101,12 @@ export const toStay = (b: any): Stay => {
   }
 
   return {
+    ...b,
     id: String(b.id ?? b.booking_id),
     status: b.status || (b.actual_checkout_time ? 'checked_out' : 'active'),
     room: String(b.room_number || b.room || (b.rooms || []).join(', ') || '-'),
     room_number: String(b.room_number || b.room || (b.rooms || []).join(', ') || '-'),
-    guest: b.guest_name || b.name || 'Guest',
+    guest: b.guest_name || b.name || b.guest || 'Guest',
     checkIn: checkIn,
     checkin_time: checkIn,
     checkOut: b.actual_checkout_time || b.checkout_time || approxCheckOut || '',
@@ -103,7 +118,7 @@ export const toStay = (b: any): Stay => {
     discount,
     total,
     paid,
-    pending: Math.max(total - paid, 0),
+    pending,
     mobile: b.mobile || b.phone || '',
     email: b.email || '',
     address: b.address || '',

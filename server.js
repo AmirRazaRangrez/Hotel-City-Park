@@ -5400,7 +5400,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     const otaBillAmount = parseFloat(room.ota_bill_amount) || 0;
     const hotelExtrasBase = groupExtraBedCharge + groupExtraRoomsCharge + groupExtraBreakfastCharge + (isOta ? groupEarlyCheckinCharge : 0);
     const hotelExtrasGst = Math.round(hotelExtrasBase * 0.05 * 100) / 100;
-    const hotelExtrasCharge = isOta ? (hotelExtrasBase + hotelExtrasGst) : hotelExtrasBase;
+    const hotelExtrasCharge = hotelExtrasBase;
 
     // Dynamic Early Checkout Recalculation (enforces 1-day min, calculates extra hours via room extension rates)
     const expectedStayNights = (room.approx_checkout_time && room.checkin_time)
@@ -5614,6 +5614,12 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
       ? 0
       : (activeRoundedGrandTotal < effectivePaid ? Math.round(effectivePaid - activeRoundedGrandTotal) : 0);
 
+    const otaVoucherVal = Number(otaBillAmount || 0);
+    const fullBookingGrandTotal = isOtaPrepaid ? (otaVoucherVal + activeRoundedGrandTotal) : activeRoundedGrandTotal;
+    const fullCollectedPaid = isOtaPrepaid ? (otaVoucherVal + effectivePaid) : effectivePaid;
+    const fullDecGrandTotal = isOtaPrepaid ? (otaVoucherVal + decRoundedGrandTotal) : decRoundedGrandTotal;
+    const fullNowGrandTotal = isOtaPrepaid ? (otaVoucherVal + nowRoundedGrandTotal) : nowRoundedGrandTotal;
+
     const diningLink = guestDiningService.getActiveDiningToken(room.booking_id);
 
     return res.json({
@@ -5685,10 +5691,12 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
           foodTotal,
           barTotal,
           fnbTotal: fnbCombinedTotal,
-          grandTotal: activeRoundedGrandTotal,
-          netTotalCharge: activeRoundedGrandTotal,
-          initialPaid: effectivePaid,
-          advancePaid: effectivePaid,
+          grandTotal: fullBookingGrandTotal,
+          netTotalCharge: fullBookingGrandTotal,
+          initialPaid: fullCollectedPaid,
+          advancePaid: fullCollectedPaid,
+          deskExtrasTotal: activeRoundedGrandTotal,
+          deskPaid: effectivePaid,
           balanceDue: activeBalanceDue,
           roundOff: activeRoundOff,
           refundAmount: activeRefundAmount,
@@ -5711,7 +5719,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
           visitorsCount: (visitors || []).length,
           stayCalcNow: {
             isEarlyCheckout: Boolean(stayCalc.isEarlyCheckout),
-            roomCharge: nowRoomCharge,
+            roomCharge: isOtaPrepaid ? (otaVoucherVal + nowRoomCharge) : nowRoomCharge,
             baseRoomTariff: finalNowBaseRoomTariff,
             baseRoomTariffGst: finalNowBaseRoomTariffGst,
             baseRoomTotal: finalNowBaseRoomTariff + finalNowBaseRoomTariffGst,
@@ -5740,17 +5748,17 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
             fnbTaxable,
             fnbGst,
             fnbTotal: fnbCombinedTotal,
-            grandTotal: nowRoundedGrandTotal,
-            paid: effectivePaid,
-            balanceDue: Math.max(0, nowRoundedGrandTotal - effectivePaid),
-            refundDue: Math.max(0, effectivePaid - nowRoundedGrandTotal),
+            grandTotal: fullNowGrandTotal,
+            paid: fullCollectedPaid,
+            balanceDue: activeBalanceDue,
+            refundDue: Math.max(0, fullCollectedPaid - fullNowGrandTotal),
             roundOff: nowRoundOff,
             stayDurationStr: stayCalc.stayDurationStr || '',
             chargedDays: nowDays,
             extraHours: nowExtraHours
           },
           stayCalcDeclared: {
-            roomCharge: decRoomCharge,
+            roomCharge: isOtaPrepaid ? (otaVoucherVal + hotelExtrasCharge) : decRoomCharge,
             baseRoomTariff: decBaseRoomTariff,
             baseRoomTariffGst: decBaseRoomTariffGst,
             baseRoomTotal: decBaseRoomTariff + decBaseRoomTariffGst,
@@ -5777,10 +5785,10 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
             fnbTaxable,
             fnbGst,
             fnbTotal: fnbCombinedTotal,
-            grandTotal: decRoundedGrandTotal,
-            paid: effectivePaid,
-            balanceDue: Math.max(0, decRoundedGrandTotal - effectivePaid),
-            refundDue: Math.max(0, effectivePaid - decRoundedGrandTotal),
+            grandTotal: fullDecGrandTotal,
+            paid: fullCollectedPaid,
+            balanceDue: activeBalanceDue,
+            refundDue: Math.max(0, fullCollectedPaid - fullDecGrandTotal),
             roundOff: decRoundOff,
             expectedNights: decDays
           }

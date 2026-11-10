@@ -47,9 +47,11 @@ export default function Occupied() {
         room: String(roomNum),
         bookingId: String(s.booking_id || s.id || ''),
         guest: String(s.guest || ''),
-        total: String(s.total || s.roomCharge || ''),
-        paid: String(s.paid || ''),
-        phone: String(s.mobile || '')
+        total: s.total !== undefined ? String(s.total) : (s.roomCharge !== undefined ? String(s.roomCharge) : ''),
+        paid: s.paid !== undefined ? String(s.paid) : '',
+        phone: String(s.mobile || ''),
+        isPrepaid: s.isPrepaid ? '1' : '0',
+        otaBillAmount: String(s.otaBillAmount || s.ota_bill_amount || '0')
       }
     });
   };
