@@ -84,4 +84,27 @@ describe('OTA Pre-Paid Payment History & Collections Breakdown', () => {
     expect(adminTemplate).toContain('payments.unshift');
     expect(adminTemplate).toContain('PREPAID');
   });
+
+  it('verifies Restaurant & Bar Orders and Extra Expenses are only shown when entries exist (clean view)', () => {
+    const folioSource = fs.readFileSync('src/pages/RoomFolioPage.jsx', 'utf8');
+    // Empty placeholders must NOT be in the source
+    expect(folioSource).not.toContain('No restaurant or bar orders billed to this stay.');
+    expect(folioSource).not.toContain('No extra expenses, damages, or incidental charges recorded for this stay.');
+    // Must be conditionally rendered only when count > 0
+    expect(folioSource).toContain('allFnbOrders.length > 0 &&');
+    expect(folioSource).toContain('allExtraExpenses.length > 0 &&');
+
+    // Admin room details must also only show bills when bills.length > 0
+    const adminRoomSource = fs.readFileSync('admin/app/room.tsx', 'utf8');
+    expect(adminRoomSource).not.toContain('No separate restaurant or bar bills charged to this room.');
+    expect(adminRoomSource).toContain('bills.length > 0 &&');
+  });
+
+  it('verifies OTA amount breakdowns and explicit remarks (Prepaid vs Paid at reception desk)', () => {
+    const folioSource = fs.readFileSync('src/pages/RoomFolioPage.jsx', 'utf8');
+    expect(folioSource).toContain('Prepaid (Online OTA Voucher Covered &amp; Realized in Advance)');
+    expect(folioSource).toContain('Paid at reception desk');
+    expect(folioSource).toContain('OTA Booking (Pay at Hotel)');
+    expect(folioSource).toContain('Pre-booked Tariff:');
+  });
 });

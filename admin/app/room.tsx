@@ -1907,21 +1907,17 @@ export default function RoomDetails() {
             </View>
           )}
 
-          {/* Section: F&B Itemized Bills */}
-          <View style={styles.sectionHeaderRow}>
-            <RestaurantIcon size={16} color={c.ink} />
-            <Text style={styles.sectionTitle}>Restaurant & Bar Orders ({bills.length})</Text>
-          </View>
-          {bills.length === 0 ? (
-            <Card>
-              <Text style={{ color: c.mute, textAlign: 'center', paddingVertical: 8 }}>
-                {ordersBusy ? 'Checking recent orders…' : 'No separate restaurant or bar bills charged to this room.'}
-              </Text>
-            </Card>
-          ) : (
-            bills.map((b: any) => (
-              <BillCard key={b.dept + b.id} o={b} onPress={() => setOpenBill(b)} />
-            ))
+          {/* Section: F&B Itemized Bills - Only shown if any order exists */}
+          {bills.length > 0 && (
+            <>
+              <View style={styles.sectionHeaderRow}>
+                <RestaurantIcon size={16} color={c.ink} />
+                <Text style={styles.sectionTitle}>Restaurant & Bar Orders ({bills.length})</Text>
+              </View>
+              {bills.map((b: any) => (
+                <BillCard key={b.dept + b.id} o={b} onPress={() => setOpenBill(b)} />
+              ))}
+            </>
           )}
         </>
       )) : null}

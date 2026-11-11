@@ -3065,7 +3065,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
           </div>
 
           <div id="folio-advance-payments-container">
-            {(displayAdvancePayments.length > 0 || (isOtaPrepaid && otaVoucherVal > 0)) ? (
+            {(displayAdvancePayments.length > 0 || (isOtaPrepaid && otaVoucherVal > 0) || (isOtaBooking && (otaVoucherVal > 0 || hotelExtrasChargeVal > 0))) ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' }}>
                 {/* Pre-Paid OTA Voucher (e.g. Goibibo / Agoda Pre-Paid Online) */}
                 {isOtaPrepaid && otaVoucherVal > 0 && (
@@ -3106,7 +3106,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                         <span>•</span>
                         <span>🌐 Platform: <strong style={{ color: '#0f172a' }}>{folioData.otaPlatform || folioData.room?.ota_platform || 'OTA'} (Pre-Paid)</strong></span>
                         <span>•</span>
-                        <span>📝 Remark: <strong style={{ color: '#0369a1' }}>Voucher Covered &amp; Realized in Advance</strong></span>
+                        <span>📝 Remark: <strong style={{ color: '#0369a1' }}>Prepaid (Online OTA Voucher Covered &amp; Realized in Advance)</strong></span>
                       </div>
                     </div>
 
@@ -3115,6 +3115,58 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                         <div style={{ fontSize: '0.70rem', color: '#64748b', fontWeight: 750, textTransform: 'uppercase' }}>Amount Paid</div>
                         <strong style={{ fontSize: '1.25rem', color: '#15803d', fontWeight: 950 }}>
                           {formatCurrency(otaVoucherVal)}
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* OTA Pay at Hotel Breakdown Banner (Pre-booked Tariff + Extras collected at desk) */}
+                {isOtaBooking && !isOtaPrepaid && (
+                  <div
+                    key="ota-pay-at-hotel-banner"
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '12px 18px',
+                      background: '#fffdf5',
+                      borderRadius: '12px',
+                      border: '1.5px solid #fde68a',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                      flexWrap: 'wrap',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 900, color: '#0f172a', fontSize: '1rem', letterSpacing: '0.2px' }}>
+                          OTA Booking (Pay at Hotel): {folioData.otaPlatform || folioData.room?.ota_platform || 'OTA'}
+                        </span>
+                        {(folioData.otaBookingId || folioData.room?.ota_booking_id) && (
+                          <span style={{ fontSize: '0.74rem', fontWeight: 800, background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', padding: '2px 8px', borderRadius: '6px' }}>
+                            #{folioData.otaBookingId || folioData.room?.ota_booking_id}
+                          </span>
+                        )}
+                        <span style={{ fontSize: '0.72rem', fontWeight: 800, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '2px 8px', borderRadius: '6px' }}>
+                          pay at hotel
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.80rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span>🌐 Platform: <strong style={{ color: '#0f172a' }}>{folioData.otaPlatform || folioData.room?.ota_platform || 'OTA'}</strong></span>
+                        <span>•</span>
+                        <span>Pre-booked Tariff: <strong style={{ color: '#0f172a' }}>{formatCurrency(otaVoucherVal || folioData.roomCharge || 0)}</strong></span>
+                        {hotelExtrasChargeVal > 0 && <span>• Hotel Extras: <strong style={{ color: '#b45309' }}>{formatCurrency(hotelExtrasChargeVal)}</strong></span>}
+                        <span>•</span>
+                        <span>📝 Remark: <strong style={{ color: '#b45309' }}>Pay at Hotel (Entire stay tariff &amp; incidentals collected at reception desk)</strong></span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '0.70rem', color: '#64748b', fontWeight: 750, textTransform: 'uppercase' }}>Total Booking Value</div>
+                        <strong style={{ fontSize: '1.25rem', color: '#0f172a', fontWeight: 950 }}>
+                          {formatCurrency((otaVoucherVal || folioData.roomCharge || 0) + hotelExtrasChargeVal)}
                         </strong>
                       </div>
                     </div>
@@ -3180,7 +3232,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                             Receipt: {pReceiptNo}
                           </span>
                           <span style={{ fontSize: '0.72rem', fontWeight: 800, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '2px 8px', borderRadius: '6px' }}>
-                            {p.purpose || (isPrebookPayment ? 'pre-booking advance' : (isCheckinPayment ? 'for check in' : 'advance deposit'))}
+                            {isBookingOta ? 'paid at reception desk' : (p.purpose || (isPrebookPayment ? 'pre-booking advance' : (isCheckinPayment ? 'for check in' : 'advance deposit')))}
                           </span>
                           <span style={{ fontSize: '0.72rem', fontWeight: 900, background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '6px' }}>
                             REALIZED
@@ -3195,6 +3247,8 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                           {p.cheque_no ? <span>• Chq: <strong>{p.cheque_no} {p.bank_name ? `(${p.bank_name})` : ''}</strong></span> : ''}
                           <span>•</span>
                           <span>👤 By: <strong>{staffName}</strong></span>
+                          <span>•</span>
+                          <span>📝 Remark: <strong style={{ color: '#15803d' }}>Paid at reception desk ({isPrebookPayment ? 'Advance Booking' : (isCheckinPayment ? 'Check-In Advance' : 'In-Stay Advance')})</strong></span>
                         </div>
                       </div>
 
@@ -3343,6 +3397,16 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                     <span style={{ fontSize: '0.86rem', fontWeight: 800, color: '#166534' }}>
                       Total Realized Payments ({displayAdvancePayments.length + (isOtaPrepaid && otaVoucherVal > 0 ? 1 : 0)}) • All Receipts Verified
                     </span>
+                    {isOtaPrepaid && otaVoucherVal > 0 && (
+                      <span style={{ fontSize: '0.76rem', color: '#166534', background: '#dcfce7', padding: '2px 8px', borderRadius: '6px', border: '1px solid #86efac', fontWeight: 800 }}>
+                        ₹{otaVoucherVal.toLocaleString('en-IN')} Prepaid Voucher + ₹{displayAdvancePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0).toLocaleString('en-IN')} Paid at Reception Desk
+                      </span>
+                    )}
+                    {isOtaBooking && !isOtaPrepaid && displayAdvancePayments.length > 0 && (
+                      <span style={{ fontSize: '0.76rem', color: '#166534', background: '#dcfce7', padding: '2px 8px', borderRadius: '6px', border: '1px solid #86efac', fontWeight: 800 }}>
+                        ₹{displayAdvancePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0).toLocaleString('en-IN')} Paid at Reception Desk
+                      </span>
+                    )}
                   </div>
                   <strong style={{ fontSize: '1.25rem', color: '#15803d', fontWeight: 950 }}>
                     {formatCurrency(displayAdvancePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) + (isOtaPrepaid && otaVoucherVal > 0 ? otaVoucherVal : 0))}
@@ -3546,8 +3610,9 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
 
           return (
             <React.Fragment>
-              {/* 1. Restaurant & Bar Orders Cards Section */}
-              <div className="folio-card" style={{ gridColumn: '1/-1', marginTop: '18px' }}>
+              {/* 1. Restaurant & Bar Orders Cards Section - Only shown if any order exists */}
+              {allFnbOrders.length > 0 && (
+                <div className="folio-card" style={{ gridColumn: '1/-1', marginTop: '18px' }}>
                 <div className="folio-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <span style={{ fontSize: '1.35rem' }}>🍽️</span>
@@ -3568,8 +3633,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                   </div>
                 </div>
 
-                {allFnbOrders.length > 0 ? (
-                  <div
+                <div
                     style={{
                       display: 'grid',
                       gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 460px))',
@@ -3902,33 +3966,12 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                       );
                     })}
                   </div>
-                ) : (
-                  <div
-                    style={{
-                      padding: '12px 18px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      color: '#64748b',
-                      background: '#f8fafc',
-                      borderRadius: '10px',
-                      border: '1px dashed #cbd5e1',
-                      marginTop: '12px',
-                      flexWrap: 'wrap',
-                      gap: '8px'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.86rem', fontWeight: 650 }}>
-                      <span style={{ fontSize: '1.15rem' }}>🍽️</span>
-                      <span>No restaurant or bar orders billed to this stay.</span>
-                    </div>
-                    <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 700 }}>0 Orders • Food: ₹0 • Bar: ₹0</span>
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
 
-              {/* Extra Expenses, Loss & Damages Section */}
-              <div className="folio-card" id="folio-extra-expenses-card" style={{ gridColumn: '1/-1', marginTop: '18px' }}>
+              {/* Extra Expenses, Loss & Damages Section - Only shown if any expense/damage exists */}
+              {allExtraExpenses.length > 0 && (
+                <div className="folio-card" id="folio-extra-expenses-card" style={{ gridColumn: '1/-1', marginTop: '18px' }}>
                 <div className="folio-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <span style={{ fontSize: '1.35rem' }}>🛡️</span>
@@ -3970,8 +4013,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                   </div>
                 </div>
 
-                {allExtraExpenses.length > 0 ? (
-                  <div
+                <div
                     style={{
                       display: 'grid',
                       gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
@@ -4077,30 +4119,8 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                       );
                     })}
                   </div>
-                ) : (
-                  <div
-                    style={{
-                      padding: '12px 18px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      color: '#64748b',
-                      background: '#f8fafc',
-                      borderRadius: '10px',
-                      border: '1px dashed #cbd5e1',
-                      marginTop: '12px',
-                      flexWrap: 'wrap',
-                      gap: '8px'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.86rem', fontWeight: 650 }}>
-                      <span style={{ fontSize: '1.15rem' }}>🛡️</span>
-                      <span>No extra expenses, damages, or incidental charges recorded for this stay.</span>
-                    </div>
-                    <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 700 }}>0 Extra Charges • ₹0 Total</span>
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Hospitality and restaurant bill cards removed from the folio */}
               {false && <div
