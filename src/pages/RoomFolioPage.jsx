@@ -3232,7 +3232,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                             Receipt: {pReceiptNo}
                           </span>
                           <span style={{ fontSize: '0.72rem', fontWeight: 800, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '2px 8px', borderRadius: '6px' }}>
-                            {isBookingOta ? 'paid at reception desk' : (p.purpose || (isPrebookPayment ? 'pre-booking advance' : (isCheckinPayment ? 'for check in' : 'advance deposit')))}
+                            {isOtaBooking ? 'paid at reception desk' : (p.purpose || (isPrebookPayment ? 'pre-booking advance' : (isCheckinPayment ? 'for check in' : 'advance deposit')))}
                           </span>
                           <span style={{ fontSize: '0.72rem', fontWeight: 900, background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '6px' }}>
                             REALIZED
