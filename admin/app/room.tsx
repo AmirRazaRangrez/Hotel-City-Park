@@ -783,8 +783,9 @@ export default function RoomDetails() {
       iframe.style.position = 'fixed';
       iframe.style.right = '0';
       iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
+      iframe.style.width = '1px';
+      iframe.style.height = '1px';
+      iframe.style.opacity = '0.01';
       iframe.style.border = '0';
       iframe.style.zIndex = '-9999';
       iframe.setAttribute('aria-hidden', 'true');
@@ -816,6 +817,16 @@ export default function RoomDetails() {
         iframe.contentWindow?.print();
       } catch (e) {
         console.warn('[Print iframe error]', e);
+        const printWin = window.open('', '_blank');
+        if (printWin) {
+          printWin.document.open();
+          printWin.document.write(fullHtml);
+          printWin.document.close();
+          printWin.focus();
+          setTimeout(() => {
+            printWin.print();
+          }, 500);
+        }
       }
     }, 400);
   };
@@ -910,7 +921,12 @@ export default function RoomDetails() {
         }
       }
     } catch (err: any) {
-      Alert.alert('Download Notice', 'Unable to generate PDF: ' + err.message);
+      console.error('[Download Doc Error]', err);
+      if (typeof window !== 'undefined' && window.alert) {
+        window.alert('Unable to generate PDF: ' + (err?.message || err));
+      } else {
+        Alert.alert('Download Notice', 'Unable to generate PDF: ' + (err?.message || err));
+      }
     } finally {
       setDownloading(null);
     }

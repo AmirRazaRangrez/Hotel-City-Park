@@ -216,4 +216,12 @@ describe('Activities Summary for Checked Out Stay and History', () => {
     expect(publicCss).toContain('.guest-activities-summary-sheet');
     expect(distCss).toContain('.guest-activities-summary-sheet');
   });
+
+  it('9. Verifies that admin crmPrintTemplates buildGuestActivitiesSummaryHTML defines roomType and does not throw ReferenceError', () => {
+    const fs = require('fs');
+    const adminTemplate = fs.readFileSync('admin/src/lib/crmPrintTemplates.ts', 'utf-8');
+    expect(adminTemplate).toContain('const roomType =');
+    expect(adminTemplate).toContain('export function buildGuestActivitiesSummaryHTML(');
+    expect(adminTemplate).toContain('${escapeHtml(roomType)}');
+  });
 });

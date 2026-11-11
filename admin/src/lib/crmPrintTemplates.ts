@@ -1611,6 +1611,18 @@ export function buildGuestActivitiesSummaryHTML(data) {
   const guestName = data.guest_name || data.guestName || r.guest_name || 'Guest';
   const mobile = data.mobile || data.phone || r.guest_phone || r.mobile || '-';
   const roomNo = data.room_numbers || data.room_number || r.room_number || '-';
+  const allTypesSet = new Set();
+  const addTypes = (val) => {
+    if (!val) return;
+    if (Array.isArray(val)) { val.forEach(v => addTypes(v)); return; }
+    String(val).split(',').forEach(item => { const clean = item.trim(); if (clean) allTypesSet.add(clean); });
+  };
+  addTypes(data.room_types);
+  addTypes(data.room_type);
+  addTypes(data.roomType);
+  addTypes(r.room_type);
+  addTypes(r.roomType);
+  const roomType = Array.from(allTypesSet).join(', ') || data.roomType || data.room_type || r.roomType || r.room_type || 'Executive Deluxe';
   const checkinTime = (data.checkin_time || data.checkinTime || r.checkin_time) ? formatDateTime(data.checkin_time || data.checkinTime || r.checkin_time) : '-';
   const rawCheckout = data.checkout_time || data.checkoutTime || data.actual_checkout_time || data.actualCheckoutTime || data.approx_checkout_time || data.approxCheckoutTime || r.checkout_time || r.approx_checkout_time;
   const checkoutTime = rawCheckout ? formatDateTime(rawCheckout) : '-';
