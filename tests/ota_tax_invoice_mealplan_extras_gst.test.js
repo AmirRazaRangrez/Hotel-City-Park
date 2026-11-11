@@ -137,7 +137,7 @@ describe('OTA Tax Invoice, Meal Plan & Extras GST Suite', () => {
     expect(invoiceHtml).toContain('2200.00');
   });
 
-  it('Requirement 3: Extra bookings (extra mattress, breakfast) calculate GST accurately on OTA bookings', () => {
+  it('Requirement 3: Extra bookings (extra mattress, breakfast) calculate GST accurately on OTA bookings without double GST inflation', () => {
     // Exactly matches user screenshot: Room 502, OTA entered ₹2,200, Extra Mattress ₹600, Breakfast ₹250
     const room = {
       id: 502,
@@ -164,25 +164,32 @@ describe('OTA Tax Invoice, Meal Plan & Extras GST Suite', () => {
       extraBreakfastCharge: 250
     }, {});
 
-    // Pre-tax base amounts:
-    // Room tariff: 2095.24
-    // Extra Mattress: 600.00
-    // Breakfast: 250.00
-    // Total taxable: 2095.24 + 600 + 250 = 2945.24
+    // Pre-tax base amounts (back-calculated from tax-inclusive rates):
+    // Room tariff: 2200 / 1.05 = 2095.24
+    // Extra Mattress: 600 / 1.05 = 571.43
+    // Breakfast: 250 / 1.05 = 238.10
+    // Total taxable: 2095.24 + 571.43 + 238.10 = 2904.77
     expect(invoiceHtml).toContain('2095.24');
-    expect(invoiceHtml).toContain('600.00');
-    expect(invoiceHtml).toContain('250.00');
+    expect(invoiceHtml).toContain('571.43');
+    expect(invoiceHtml).toContain('238.10');
 
-    // Taxable: 2945.24
-    // CGST @ 2.5%: 73.63
-    // SGST @ 2.5%: 73.63
-    // Total tax: 147.26
-    expect(invoiceHtml).toContain('73.63');
-    // Invoice total: 2945.24 + 147.26 = 3092.50 -> 3093.00
-    expect(invoiceHtml).toContain('3093.00');
+    // Taxable: 2904.77
+    // CGST @ 2.5%: 72.62
+    // SGST @ 2.5%: 72.62
+    // Total tax: 145.24
+    expect(invoiceHtml).toContain('72.62');
+    // Invoice total: 2904.77 + 145.24 = 3050.00
+    expect(invoiceHtml).toContain('3050.00');
+
+    // Requirement: "Breakfast Charge" should be ABOVE "Effective Tariff"
+    const bfIndex = invoiceHtml.indexOf('Breakfast Charge');
+    const effIndex = invoiceHtml.indexOf('Effective Tariff');
+    expect(bfIndex).toBeGreaterThan(-1);
+    expect(effIndex).toBeGreaterThan(-1);
+    expect(bfIndex).toBeLessThan(effIndex);
   });
 
-  it('Requirement 3 (Prepaid): OTA Prepaid with extra bookings charges only the hotel extras at desk', () => {
+  it('Requirement 3 (Prepaid): OTA Prepaid with extra bookings charges only the hotel extras at desk without tax inflation', () => {
     const room = {
       id: 502,
       room_number: '502',
@@ -210,7 +217,61 @@ describe('OTA Tax Invoice, Meal Plan & Extras GST Suite', () => {
     // Voucher covered is 2200
     expect(invoiceHtml).toContain('OTA Pre-Paid Voucher');
     expect(invoiceHtml).toContain('2200.00');
-    // Invoice total is 3093, net payable at desk is 3093 - 2200 = 893.00
-    expect(invoiceHtml).toContain('893.00');
+    // Invoice total is 3050, net payable at desk is 3050 - 2200 = 850.00 (exact mattress 600 + breakfast 250)
+    expect(invoiceHtml).toContain('850.00');
+  });
+
+  it('Room 403 User Case: EaseMyTrip Pay at Hotel (Total ₹2,350, Desk Advance ₹1,197, Balance Due ₹1,153)', () => {
+    const room = {
+      id: 403,
+      room_number: '403',
+      room_type: 'Executive Room',
+      price: 1500,
+      room_rate: 1500,
+      booking_source: 'OTA',
+      ota_platform: 'EaseMyTrip',
+      ota_bill_amount: 1500,
+      is_prepaid: 0,
+      rate_type: 'pay_at_hotel',
+      checkin_time: '2026-11-11T12:19:00.000Z',
+      approx_checkout_time: '2026-11-12T10:00:00.000Z',
+      stay_nights: 1,
+      extra_bed_charge: 600,
+      extra_breakfast_charge: 250,
+      extra_beds: 1,
+      meal_plan: 'with_breakfast',
+      total_paid: 1197
+    };
+
+    const invoiceHtml = buildFinalBillA4HTML(room, {
+      extraBedCharge: 600,
+      extraBreakfastCharge: 250
+    }, {
+      cash: 1197
+    });
+
+    // Room base: 1500 / 1.05 = 1428.57
+    expect(invoiceHtml).toContain('1428.57');
+    // Extra Mattress base: 600 / 1.05 = 571.43
+    expect(invoiceHtml).toContain('571.43');
+    // Extra Breakfast base: 250 / 1.05 = 238.10
+    expect(invoiceHtml).toContain('238.10');
+    // Effective Tariff: 1428.57 + 571.43 + 238.10 = 2238.10
+    expect(invoiceHtml).toContain('2238.10');
+    // CGST & SGST @ 2.5%: 55.95
+    expect(invoiceHtml).toContain('55.95');
+    // Total Invoice: 2350.00
+    expect(invoiceHtml).toContain('2350.00');
+    // Paid / Advance: 1197.00
+    expect(invoiceHtml).toContain('1197.00');
+    // Net Payable / Balance Due: 1153.00
+    expect(invoiceHtml).toContain('1153.00');
+
+    // Requirement: "Breakfast Charge" should be ABOVE "Effective Tariff"
+    const bfIndex = invoiceHtml.indexOf('Breakfast Charge');
+    const effIndex = invoiceHtml.indexOf('Effective Tariff');
+    expect(bfIndex).toBeGreaterThan(-1);
+    expect(effIndex).toBeGreaterThan(-1);
+    expect(bfIndex).toBeLessThan(effIndex);
   });
 });

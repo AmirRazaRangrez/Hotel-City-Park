@@ -5151,12 +5151,33 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
     baseRoomTariffTotal = baseRoomDailyRate * billableDays;
   }
 
+  const isRateTaxInclusive = Boolean(
+    isBookingOta ||
+    r.is_tax_inclusive ||
+    c.is_tax_inclusive ||
+    (c.summary && c.summary.isRateTaxInclusive)
+  );
+
+  const extraMattressPreTax = extraBedCharge > 0
+    ? (isRateTaxInclusive ? Math.round((extraBedCharge / 1.05) * 100) / 100 : extraBedCharge)
+    : 0;
+  const earlyCheckinPreTax = earlyCheckinCharge > 0
+    ? (isRateTaxInclusive ? Math.round((earlyCheckinCharge / 1.05) * 100) / 100 : earlyCheckinCharge)
+    : 0;
+  const extraRoomsPreTax = extraRoomsCharge > 0
+    ? (isRateTaxInclusive ? Math.round((extraRoomsCharge / 1.05) * 100) / 100 : extraRoomsCharge)
+    : 0;
+  const extraBreakfastPreTax = extraBreakfastCharge > 0
+    ? (isRateTaxInclusive ? Math.round((extraBreakfastCharge / 1.05) * 100) / 100 : extraBreakfastCharge)
+    : 0;
+  const otherExtrasPreTax = extraMattressPreTax + earlyCheckinPreTax + extraRoomsPreTax + extraBreakfastPreTax;
+
   // Total Undiscounted Base Package (Stay package subject to check-in trade discount; extension hours charges are fixed hourly fees and not discounted)
   const fullGrossPackage = Number((baseRoomTariffTotal + breakfastPlanTotal + extraBedCharge + earlyCheckinCharge + extraRoomsCharge + extraBreakfastCharge).toFixed(2));
 
   let baseGrossTariff = 0;
   if (isBookingOta && otaBillAmount > 0) {
-    baseGrossTariff = Number((baseRoomTariffTotal + extraBedCharge + earlyCheckinCharge + extraRoomsCharge + extraBreakfastCharge).toFixed(2));
+    baseGrossTariff = Number((baseRoomTariffTotal + extraMattressPreTax + earlyCheckinPreTax + extraRoomsPreTax + extraBreakfastPreTax).toFixed(2));
   } else {
     baseGrossTariff = fullGrossPackage;
   }
@@ -5275,12 +5296,6 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
       : Number((Number(r.total_paid || 0) - deskAdvance).toFixed(2));
   }
 
-    const extraMattressPreTax = extraBedCharge;
-    const earlyCheckinPreTax = earlyCheckinCharge;
-    const extraRoomsPreTax = extraRoomsCharge;
-    const extraBreakfastPreTax = extraBreakfastCharge;
-    const otherExtrasPreTax = extraMattressPreTax + earlyCheckinPreTax + extraRoomsPreTax + extraBreakfastPreTax;
-
     let extensionIgst = 0;
     let extensionCgst = 0;
     let extensionSgst = 0;
@@ -5314,7 +5329,7 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
     };
     const expensePreTax = Number(extraExpenseRows.reduce((sum, exp) => sum + expenseBaseOf(exp), 0).toFixed(2));
 
-    let effectiveTariff = Number(Math.max(0, (baseRoomTariffTotal + breakfastPlanTotal + extraBedCharge - totalDiscountAmt + expensePreTax)).toFixed(2));
+    let effectiveTariff = Number(Math.max(0, (baseRoomTariffTotal + breakfastPlanTotal + extraMattressPreTax + extraBreakfastPreTax - totalDiscountAmt + expensePreTax)).toFixed(2));
 
     const baseRoomPreTax = isBookingOta
       ? baseGrossTariff
@@ -5586,15 +5601,17 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
     };
 
     const dailyGrossTariffArr = splitAmountAcrossDays(baseRoomTariffTotal, numDays);
-    const extraMattressBaseVal = extraBedCharge;
+    const extraMattressBaseVal = extraMattressPreTax;
     const dailyExtraMattressArr = splitAmountAcrossDays(extraMattressBaseVal, numDays);
     const dailyBreakfastPlanArr = splitAmountAcrossDays(breakfastPlanTotal, numDays);
+    const extraBreakfastBaseVal = extraBreakfastPreTax;
+    const dailyExtraBreakfastArr = splitAmountAcrossDays(extraBreakfastBaseVal, numDays);
     const dailyCheckinDiscountArr = splitAmountAcrossDays(effectiveCheckinDiscAmt, numDays);
     const dailyCheckoutDiscountArr = splitAmountAcrossDays(effectiveCheckoutDiscAmt, numDays);
     const dailyDiscountArr = splitAmountAcrossDays(totalDiscountAmt, numDays);
     const dailyEffectiveArr = Array(numDays).fill(0);
     for (let i = 0; i < numDays; i++) {
-      const gross = (dailyGrossTariffArr[i] || 0) + (dailyExtraMattressArr[i] || 0) + (dailyBreakfastPlanArr[i] || 0);
+      const gross = (dailyGrossTariffArr[i] || 0) + (dailyExtraMattressArr[i] || 0) + (dailyBreakfastPlanArr[i] || 0) + (dailyExtraBreakfastArr[i] || 0);
       const disc = (dailyCheckinDiscountArr[i] || 0) + (dailyCheckoutDiscountArr[i] || 0);
       dailyEffectiveArr[i] = Number(Math.max(0, gross - disc).toFixed(2));
     }
@@ -5605,17 +5622,14 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
     }
 
     // Early check-in applies on check-in day (day 0)
-    const earlyCheckinBaseVal = earlyCheckinCharge;
+    const earlyCheckinBaseVal = earlyCheckinPreTax;
     const dailyEarlyCheckinArr = Array(numDays).fill(0);
     if (earlyCheckinBaseVal > 0) {
       dailyEarlyCheckinArr[0] = earlyCheckinBaseVal;
     }
 
-    const extraRoomsBaseVal = extraRoomsCharge;
+    const extraRoomsBaseVal = extraRoomsPreTax;
     const dailyExtraRoomsArr = splitAmountAcrossDays(extraRoomsBaseVal, numDays);
-
-    const extraBreakfastBaseVal = extraBreakfastCharge;
-    const dailyExtraBreakfastArr = splitAmountAcrossDays(extraBreakfastBaseVal, numDays);
 
     // Split room night taxes (total room taxes minus extension taxes)
     const roomNightIgst = Math.max(0, Number((igst - extensionIgst).toFixed(2)));
@@ -5630,7 +5644,7 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
     const dailyRoomBillTotalArr = Array(numDays).fill(0);
     for (let i = 0; i < numDays; i++) {
       const dayEffective = dailyEffectiveArr[i];
-      const dayExtras = (dailyEarlyCheckinArr[i] || 0) + (dailyExtraRoomsArr[i] || 0) + (dailyExtraBreakfastArr[i] || 0);
+      const dayExtras = (dailyEarlyCheckinArr[i] || 0) + (dailyExtraRoomsArr[i] || 0);
       const dayTax = isIgst ? (dailyIgstArr[i] || 0) : ((dailyCgstArr[i] || 0) + (dailySgstArr[i] || 0));
       dailyRoomBillTotalArr[i] = Number((dayEffective + dayExtras + dayTax).toFixed(2));
     }
@@ -5799,6 +5813,19 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
           </tr>
           ` : ''}
 
+          <!-- Breakfast Charge (Hotel Extra Breakfast) - Placed ABOVE Effective Tariff as requested -->
+          ${extraBreakfastCharge > 0 ? `
+          <tr style="background: transparent;">
+            <td style="padding: 2.2px 6px; font-weight: 400; color: #000; width: ${particularsWidth};">Breakfast Charge</td>
+            ${dates.map(d => {
+        const entry = entryMap[d];
+        const val = (entry && entry.isRoomNight && entry.dayIndex >= 0) ? dailyExtraBreakfastArr[entry.dayIndex] : 0;
+        return `<td style="padding: 2.2px 6px; text-align: left; font-weight: 400; color: #000; width: ${dateColWidth};">${val > 0 ? val.toFixed(2) : '-'}</td>`;
+      }).join('')}
+            <td style="padding: 2.2px 8px; text-align: right; font-weight: 400; color: #000; width: ${totalColWidth}; border-left: 1.5px dashed #000;">${blockExtraBreakfast.toFixed(2)}</td>
+          </tr>
+          ` : ''}
+
           <!-- Check-in Trade Discount ("Less Discount") if applied -->
           ${effectiveCheckinDiscAmt > 0 ? `
           <tr style="background: transparent;">
@@ -5897,18 +5924,7 @@ export function buildFinalBillA4HTML(room = {}, calc = {}, settlement = {}) {
           </tr>
           ` : ''}
 
-          <!-- Extra Breakfast if present -->
-          ${extraBreakfastCharge > 0 ? `
-          <tr style="background: transparent;">
-            <td style="padding: 2.2px 6px; font-weight: 400; color: #000; width: ${particularsWidth};">Breakfast Charge</td>
-            ${dates.map(d => {
-        const entry = entryMap[d];
-        const val = (entry && entry.isRoomNight && entry.dayIndex >= 0) ? dailyExtraBreakfastArr[entry.dayIndex] : 0;
-        return `<td style="padding: 2.2px 6px; text-align: left; font-weight: 400; color: #000; width: ${dateColWidth};">${val > 0 ? val.toFixed(2) : '-'}</td>`;
-      }).join('')}
-            <td style="padding: 2.2px 8px; text-align: right; font-weight: 400; color: #000; width: ${totalColWidth}; border-left: 1.5px dashed #000;">${blockExtraBreakfast.toFixed(2)}</td>
-          </tr>
-          ` : ''}
+
 
           <!-- Extra Hours / Stay Extension if present (ONLY if applicable, slots: 1–3 Hours, 3–6 Hours, 6–9 Hours) -->
           ${(extensionPreTax > 0 && blockExtension > 0 && !isExtensionOver9Hours) ? `
