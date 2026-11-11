@@ -102,4 +102,47 @@ describe('Room 504 Registration Card Verification', () => {
     expect(html).toContain('2,500');
     expect(html).toContain('350');
   });
+
+  it('correctly calculates Room 403 (EaseMyTrip Pay at Hotel) with clean breakdown and included GST', () => {
+    const booking403 = {
+      id: 24,
+      room_number: '403',
+      guest_name: 'Amir Raza Irfan Rangrez',
+      is_prepaid: 0,
+      booking_source: 'OTA',
+      ota_platform: 'EaseMyTrip',
+      ota_booking_id: 'hjkjhk85678',
+      ota_bill_amount: 1500,
+      extra_bed_charge: 600,
+      extra_breakfast_charge: 250,
+      hotelExtrasCharge: 850,
+      payments: [
+        {
+          id: 32,
+          receipt_no: 'CR28',
+          amount: 1197,
+          payment_mode: 'Cash',
+          purpose: 'paid while checkin : Cash',
+          cashier: 'Jaijeet sir'
+        }
+      ],
+      summary: {
+        hotelExtrasCharge: 850,
+        deskPaid: 1197,
+        advancePaid: 1197,
+        grandTotal: 2350,
+        balanceDue: 1153,
+        stayTax: 111.9
+      }
+    };
+
+    const html = buildGuestRegistrationHTML(booking403);
+    expect(html).not.toContain('Included in Voucher');
+    expect(html).toContain('(Included in Bill)');
+    expect(html).toContain('111.90');
+    expect(html).toContain('Breakfast: ₹250');
+    expect(html).toContain('2,350');
+    expect(html).toContain('1,197');
+    expect(html).toContain('1,153');
+  });
 });

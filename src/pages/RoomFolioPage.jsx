@@ -1433,7 +1433,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
 
   // Accurate Stay Details summary row calculations (full parity with bottom KPI tiles & APK)
   const summaryRoomTariff = isOtaBooking && otaVoucherVal > 0
-    ? Number(folioData.room?.room_rate || folioData.baseRoomTariff || Math.round((otaVoucherVal / 1.05) * 100) / 100)
+    ? otaVoucherVal
     : Number(folioData.roomCharge || folioData.room?.total_room_charge || folioData.room?.price || 0);
 
   const summaryTotalBill = isOtaPrepaid
@@ -2864,6 +2864,14 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                     {formatCurrency(summaryRoomTariff)}
                   </div>
                 </div>
+                {(hotelExtrasChargeVal > 0 || (isOtaBooking && Number(folioData.summary?.hotelExtrasCharge || 0) > 0)) && (
+                  <div>
+                    <div style={{ fontSize: '0.66rem', color: '#854d0e', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Hotel Extras</div>
+                    <div style={{ fontSize: '0.94rem', fontWeight: 900, color: '#b45309' }}>
+                      {formatCurrency(hotelExtrasChargeVal || Number(folioData.summary?.hotelExtrasCharge || 0))}
+                    </div>
+                  </div>
+                )}
                 <div>
                   <div style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Restaurant</div>
                   <div style={{ fontSize: '0.94rem', fontWeight: 900, color: '#0f172a' }}>
@@ -4147,11 +4155,13 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                          5. Remaining
                       */
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '4px 0' }}>
-                        {/* 1. Meal Plan (With / Without Breakfast) without amount */}
+                        {/* 1. Meal Plan (With / Without Breakfast) */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.90rem', padding: '10px 14px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
                           <span style={{ color: 'var(--text-secondary, #64748b)', fontWeight: 750 }}>Meal Plan:</span>
                           <span style={{ fontWeight: 850, color: (folioData.mealPlan || folioData.room?.meal_plan) === 'with_breakfast' ? '#166534' : '#334155', fontSize: '0.95rem' }}>
-                            {(folioData.mealPlan || folioData.room?.meal_plan) === 'with_breakfast' ? 'With Breakfast' : 'Without Breakfast'}
+                            {(folioData.mealPlan || folioData.room?.meal_plan) === 'with_breakfast'
+                              ? `With Breakfast${(Number(folioData.extraBreakfastCharge) > 0 || Number(folioData.room?.extra_breakfast_charge) > 0) ? ` (+${formatCurrency(folioData.extraBreakfastCharge || folioData.room?.extra_breakfast_charge)})` : ''}`
+                              : 'Without Breakfast'}
                           </span>
                         </div>
 
@@ -4159,7 +4169,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.90rem', padding: '10px 14px', background: '#fffbeb', borderRadius: '10px', border: '1px solid #fef3c7' }}>
                           <span style={{ color: '#92400e', fontWeight: 800 }}>GST (5%):</span>
                           <strong style={{ color: '#b45309', fontSize: '1.08rem', fontWeight: 900 }}>
-                            {formatCurrency(Math.round(entireBookingVal * 0.05 * 100) / 100)}
+                            {formatCurrency(Number(folioData.summary?.stayTax ?? folioData.taxAmount) || Math.round((entireBookingVal - (entireBookingVal / 1.05)) * 100) / 100)}
                           </strong>
                         </div>
 
@@ -5306,12 +5316,16 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                       <strong className="tile-val" style={{ fontSize: '1.05rem', color: (folioData.mealPlan || folioData.room?.meal_plan) === 'with_breakfast' ? '#166534' : '#334155' }}>
                         {(folioData.mealPlan || folioData.room?.meal_plan) === 'with_breakfast' ? 'With Breakfast' : 'Without Breakfast'}
                       </strong>
-                      <small>No Extra Charge</small>
+                      <small>
+                        {(Number(folioData.extraBreakfastCharge) > 0 || Number(folioData.room?.extra_breakfast_charge) > 0)
+                          ? `+${formatCurrency(folioData.extraBreakfastCharge || folioData.room?.extra_breakfast_charge)} Extra Breakfast`
+                          : ((folioData.mealPlan || folioData.room?.meal_plan) === 'with_breakfast' ? (isOtaPrepaidStay ? 'Included in Voucher' : 'Included in Tariff') : 'No Extra Charge')}
+                      </small>
                     </div>
                     <div className="financial-tile">
                       <span className="tile-label">GST (5%)</span>
                       <strong className="tile-val" style={{ color: '#b45309' }}>
-                        {formatCurrency(Math.round(entireBookingVal * 0.05 * 100) / 100)}
+                        {formatCurrency(Number(folioData.summary?.stayTax ?? folioData.taxAmount) || Math.round((entireBookingVal - (entireBookingVal / 1.05)) * 100) / 100)}
                       </strong>
                       <small>{isOtaPrepaidStay ? 'Included in Voucher' : 'Pay at Hotel (5% GST)'}</small>
                     </div>
