@@ -564,18 +564,37 @@ async function syncLiveFBStateToCloud(state) {
   }
 }
 
+let cachedPendingRoomCharges = [];
+let lastPendingRoomChargesFetch = 0;
+let firestoreQuotaExceededUntil = 0;
+
 async function fetchPendingRoomCharges() {
   if (!firestore) return [];
+  const now = Date.now();
+  if (now < firestoreQuotaExceededUntil) {
+    return cachedPendingRoomCharges;
+  }
+  if (now - lastPendingRoomChargesFetch < 15000 && cachedPendingRoomCharges.length > 0) {
+    return cachedPendingRoomCharges;
+  }
+
   try {
     const snap = await withTimeout(
       firestore.collection('room_charges_inbox').where('status', '==', 'pending').get()
     );
     const list = [];
     snap.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
+    cachedPendingRoomCharges = list;
+    lastPendingRoomChargesFetch = now;
     return list;
   } catch (err) {
+    if (err.message && (err.message.includes('RESOURCE_EXHAUSTED') || err.message.includes('Quota exceeded') || err.code === 8)) {
+      console.warn('[Firebase] Firestore read quota reached (50k daily limit). Throttling reads for 5 minutes.');
+      firestoreQuotaExceededUntil = now + 5 * 60 * 1000;
+      return cachedPendingRoomCharges;
+    }
     console.warn('[Firebase] fetchPendingRoomCharges error:', err.message);
-    return [];
+    return cachedPendingRoomCharges;
   }
 }
 

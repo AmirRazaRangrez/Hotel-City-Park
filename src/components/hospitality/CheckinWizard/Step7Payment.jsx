@@ -133,7 +133,10 @@ export default function Step7Payment({
   const upiThresh = surchargeSettings?.upi_tax_threshold !== undefined ? Number(surchargeSettings.upi_tax_threshold) : 2000;
 
   const minAdvancePct = Number(minCheckinAdvancePct !== undefined ? minCheckinAdvancePct : 50);
-  const isMinAdvanceEnforced = !isBtc && !isOtaPrepaid && minAdvancePct > 0 && netDueToday > 0;
+  // For standard stays, BTC has 0 advance policy.
+  // For OTA Pre-Paid stays with extras (netDueToday > 0), the minimum advance applies to the desk extras due!
+  // If OTA Pre-Paid has zero extras (netDueToday === 0), min advance is 0.
+  const isMinAdvanceEnforced = !isBtc && (!isOtaPrepaid || netDueToday > 0) && minAdvancePct > 0 && netDueToday > 0;
   const minRequiredAdvance = isMinAdvanceEnforced ? Math.ceil((netDueToday * minAdvancePct) / 100) : 0;
   const isAdvanceSufficient = !isMinAdvanceEnforced || totalPaid >= minRequiredAdvance;
 
@@ -458,16 +461,31 @@ export default function Step7Payment({
                   <div className="paybox-name">Cash</div>
                   <div className="paybox-desc">Direct Cash Collection</div>
                 </div>
-                {balanceDue > 0 && splitCash < netDueToday && (
-                  <button
-                    type="button"
-                    onClick={(e) => fillRemaining('splitCash', e)}
-                    style={{ fontSize: '0.72rem', padding: '2px 7px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', borderRadius: '6px', fontWeight: 800, cursor: 'pointer' }}
-                    title="Fill remaining balance into Cash"
-                  >
-                    + Fill ₹{balanceDue}
-                  </button>
-                )}
+                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                  {isMinAdvanceEnforced && totalPaid === 0 && minRequiredAdvance > 0 && minRequiredAdvance < balanceDue && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAmountChange('splitCash', minRequiredAdvance);
+                      }}
+                      style={{ fontSize: '0.72rem', padding: '2px 7px', background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', borderRadius: '6px', fontWeight: 800, cursor: 'pointer' }}
+                      title={`Fill 50% Minimum Advance (₹${minRequiredAdvance})`}
+                    >
+                      + 50% (₹{minRequiredAdvance})
+                    </button>
+                  )}
+                  {balanceDue > 0 && splitCash < netDueToday && (
+                    <button
+                      type="button"
+                      onClick={(e) => fillRemaining('splitCash', e)}
+                      style={{ fontSize: '0.72rem', padding: '2px 7px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', borderRadius: '6px', fontWeight: 800, cursor: 'pointer' }}
+                      title="Fill remaining balance into Cash"
+                    >
+                      + Fill ₹{balanceDue}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             <div className="paybox-input-group" onClick={(e) => e.stopPropagation()}>
@@ -500,16 +518,31 @@ export default function Step7Payment({
                   <div className="paybox-name">UPI / Online</div>
                   <div className="paybox-desc">GPay, PhonePe, QR</div>
                 </div>
-                {balanceDue > 0 && splitOnline < netDueToday && (
-                  <button
-                    type="button"
-                    onClick={(e) => fillRemaining('splitOnline', e)}
-                    style={{ fontSize: '0.72rem', padding: '2px 7px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', borderRadius: '6px', fontWeight: 800, cursor: 'pointer' }}
-                    title="Fill remaining balance into UPI"
-                  >
-                    + Fill ₹{balanceDue}
-                  </button>
-                )}
+                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                  {isMinAdvanceEnforced && totalPaid === 0 && minRequiredAdvance > 0 && minRequiredAdvance < balanceDue && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAmountChange('splitOnline', minRequiredAdvance);
+                      }}
+                      style={{ fontSize: '0.72rem', padding: '2px 7px', background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', borderRadius: '6px', fontWeight: 800, cursor: 'pointer' }}
+                      title={`Fill 50% Minimum Advance (₹${minRequiredAdvance})`}
+                    >
+                      + 50% (₹{minRequiredAdvance})
+                    </button>
+                  )}
+                  {balanceDue > 0 && splitOnline < netDueToday && (
+                    <button
+                      type="button"
+                      onClick={(e) => fillRemaining('splitOnline', e)}
+                      style={{ fontSize: '0.72rem', padding: '2px 7px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', borderRadius: '6px', fontWeight: 800, cursor: 'pointer' }}
+                      title="Fill remaining balance into UPI"
+                    >
+                      + Fill ₹{balanceDue}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             <div className="paybox-input-group" onClick={(e) => e.stopPropagation()}>
@@ -552,16 +585,31 @@ export default function Step7Payment({
                   <div className="paybox-name">Card</div>
                   <div className="paybox-desc">Debit / Credit POS</div>
                 </div>
-                {balanceDue > 0 && splitCard < netDueToday && (
-                  <button
-                    type="button"
-                    onClick={(e) => fillRemaining('splitCard', e)}
-                    style={{ fontSize: '0.72rem', padding: '2px 7px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', borderRadius: '6px', fontWeight: 800, cursor: 'pointer' }}
-                    title="Fill remaining balance into Card"
-                  >
-                    + Fill ₹{balanceDue}
-                  </button>
-                )}
+                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                  {isMinAdvanceEnforced && totalPaid === 0 && minRequiredAdvance > 0 && minRequiredAdvance < balanceDue && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAmountChange('splitCard', minRequiredAdvance);
+                      }}
+                      style={{ fontSize: '0.72rem', padding: '2px 7px', background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', borderRadius: '6px', fontWeight: 800, cursor: 'pointer' }}
+                      title={`Fill 50% Minimum Advance (₹${minRequiredAdvance})`}
+                    >
+                      + 50% (₹{minRequiredAdvance})
+                    </button>
+                  )}
+                  {balanceDue > 0 && splitCard < netDueToday && (
+                    <button
+                      type="button"
+                      onClick={(e) => fillRemaining('splitCard', e)}
+                      style={{ fontSize: '0.72rem', padding: '2px 7px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', borderRadius: '6px', fontWeight: 800, cursor: 'pointer' }}
+                      title="Fill remaining balance into Card"
+                    >
+                      + Fill ₹{balanceDue}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             <div className="paybox-input-group" onClick={(e) => e.stopPropagation()}>

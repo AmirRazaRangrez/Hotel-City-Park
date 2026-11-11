@@ -75,9 +75,13 @@ export const toStay = (b: any): Stay => {
   const discount = n(b.discount_amount ?? b.discount);
 
   let total = n(b.grand_total ?? b.grandTotal ?? b.total);
-  if (!total) {
+  if (isPrepaid && otaBill > 0) {
+    if (!total || total < otaBill) {
+      total = otaBill + total;
+    }
+  } else if (!total) {
     const baseCalc = roomCharge + restaurant + bar + extra - discount;
-    total = isPrepaid && otaBill > 0 ? (otaBill + baseCalc) : Math.max(baseCalc, 0);
+    total = Math.max(baseCalc, 0);
   }
 
   let paid = n(b.total_paid ?? b.paid ?? b.advance_payment ?? b.advancePaid);
@@ -155,6 +159,11 @@ export const toStay = (b: any): Stay => {
     splitOnline: n(b.split_online),
     splitCheque: n(b.split_cheque),
     stayDuration: b.stay_duration_str || b.expected_stay_str || '',
+    isPrepaid: isPrepaid ? 1 : 0,
+    is_prepaid: isPrepaid ? 1 : 0,
+    otaBillAmount: otaBill,
+    ota_bill_amount: otaBill,
+    hotelExtrasCharge: isPrepaid ? Math.max(0, total - otaBill) : 0,
     raw: b
   };
 };

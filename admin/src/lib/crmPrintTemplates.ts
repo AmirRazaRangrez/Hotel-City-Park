@@ -480,15 +480,26 @@ export function buildGuestRegistrationHTML(data, options = { includePhotos: fals
         ? data.early_checkin_charge
         : (isOta && isEarlyCheckin ? (data.room?.ota_early_checkin_price || 900) : 0))
   ) || 0;
-  const hotelDeskCollected = totalPaid;
+  const explicitHotelExtras = Number(
+    data.hotelExtrasCharge !== undefined ? data.hotelExtrasCharge :
+    (data.hotel_extras_charge !== undefined ? data.hotel_extras_charge :
+      (data.summary?.hotelExtrasCharge !== undefined ? data.summary.hotelExtrasCharge : 0))
+  );
+  const actualDeskPaid = Number(
+    data.deskPaid !== undefined ? data.deskPaid :
+    (data.summary?.deskPaid !== undefined ? data.summary.deskPaid :
+      (Array.isArray(data.payments) && data.payments.length > 0
+        ? data.payments.filter(p => String(p.payment_type || '').toLowerCase() !== 'refund').reduce((sum, p) => sum + (Number(p.amount || p.base_amount || 0)), 0)
+        : Math.min(totalPaid, Math.max(0, totalPaid - (isOtaPrepaid ? otaPrebookedAmount : 0)))))
+  );
+  const hotelDeskCollected = isOtaPrepaid ? actualDeskPaid : totalPaid;
 
   // Total Extra Booking done at Hotel (Extra Beds, F&B, Extension, Extra Rooms, Extra Breakfast, Early Check-In)
-  let hotelExtrasTotal = extraBedCharge + fnbTotal + extensionCharge + extraRoomsCharge + extraBreakfastCharge + (isOta && isEarlyCheckin ? earlyCheckinCharge : 0);
-  if (isOtaPrepaid && hotelDeskCollected > 0 && hotelExtrasTotal < hotelDeskCollected) {
-    hotelExtrasTotal = hotelDeskCollected;
-  }
+  let hotelExtrasTotal = explicitHotelExtras > 0
+    ? explicitHotelExtras
+    : (extraBedCharge + fnbTotal + extensionCharge + extraRoomsCharge + extraBreakfastCharge + (isOta && isEarlyCheckin ? earlyCheckinCharge : 0));
 
-  // Description of hotel extras
+  // Description of hotel extras (itemized cleanly without fabricated 'Other Extras')
   const hotelExtrasParts = [];
   if (extraBedCharge > 0) hotelExtrasParts.push(`Extra Mattress: ₹${extraBedCharge.toLocaleString('en-IN')}`);
   else if (hotelChargedBeds > 0) hotelExtrasParts.push(`Extra Mattress: ₹${(hotelChargedBeds * 500).toLocaleString('en-IN')}`);
@@ -497,10 +508,6 @@ export function buildGuestRegistrationHTML(data, options = { includePhotos: fals
   if (extensionCharge > 0) hotelExtrasParts.push(`Extension: ₹${extensionCharge.toLocaleString('en-IN')}`);
   if (extraRoomsCharge > 0) hotelExtrasParts.push(`Extra Room: ₹${extraRoomsCharge.toLocaleString('en-IN')}`);
   if (extraBreakfastCharge > 0) hotelExtrasParts.push(`Breakfast: ₹${extraBreakfastCharge.toLocaleString('en-IN')}`);
-  const explicitExtrasSum = (extraBedCharge || (hotelChargedBeds * 500)) + fnbTotal + extensionCharge + extraRoomsCharge + extraBreakfastCharge + (isOta && isEarlyCheckin ? earlyCheckinCharge : 0);
-  if (isOtaPrepaid && hotelDeskCollected > explicitExtrasSum) {
-    hotelExtrasParts.push(`Other Extras: ₹${(hotelDeskCollected - explicitExtrasSum).toLocaleString('en-IN')}`);
-  }
   if (hotelExtrasParts.length === 0 && hotelExtrasTotal > 0) hotelExtrasParts.push(`Hotel Extras: ₹${hotelExtrasTotal.toLocaleString('en-IN')}`);
   const hotelExtrasDesc = hotelExtrasParts.length > 0 ? hotelExtrasParts.join(' • ') : 'No Extra Charges';
 
@@ -1374,21 +1381,27 @@ export function buildGuestPaymentSummaryHTML(data) {
       purpose: data.particulars || 'paid while checkin : checkin',
       cashier: cashierName
     }];
-  } else if (isPrepaidSummary) {
-    payments = [{
-      id: data.id || 1,
-      receipt_no: 'PREPAID',
-      amount: 0,
-      payment_mode: `PREPAID (${data.ota_platform || 'OTA'})`,
+  }
+
+  const otaVoucherAmount = Number(data.ota_bill_amount || data.otaBillAmount || data.ota_amount || (isPrepaidSummary ? (data.room_rate || 0) : 0));
+  const otaPlatformName = data.ota_platform || data.otaPlatform || 'OTA';
+  const otaBookingRef = data.ota_booking_id || data.otaBookingId || data.ota_voucher_no || '';
+
+  if (isPrepaidSummary && otaVoucherAmount > 0 && !payments.some(p => String(p.receipt_no || '').startsWith('OTA-') || String(p.payment_mode || '').toUpperCase().includes('PREPAID'))) {
+    payments.unshift({
+      id: 'ota-voucher',
+      receipt_no: otaBookingRef ? `OTA-${otaBookingRef}` : (data.voucher_no ? `VCH-${data.voucher_no}` : 'OTA-PREPAID'),
+      amount: otaVoucherAmount,
+      payment_mode: `PREPAID (${otaPlatformName})`,
       cheque_no: '',
       bank_name: '',
       utr_number: '',
       card_surcharge: 0,
       upi_tax: 0,
       created_at: rawCheckIn || new Date(),
-      purpose: `Prepaid Online Stay (${data.ota_platform || 'OTA Voucher'})`,
-      cashier: cashierName
-    }];
+      purpose: `Prepaid Online Stay (${otaPlatformName} Voucher Covered & Realized)`,
+      cashier: data.checked_in_by || cashierName
+    });
   }
 
   // Calculate total settled

@@ -508,6 +508,8 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
         netTotalCharge,
         advancePaid,
         initialPaid: advancePaid,
+        deskPaid: summary.deskPaid !== undefined ? Number(summary.deskPaid) : (Array.isArray(raw.payments) ? raw.payments.filter(p => String(p.payment_type || '').toLowerCase() !== 'refund').reduce((s, p) => s + Number(p.amount || 0), 0) : undefined),
+        hotelExtrasCharge: summary.hotelExtrasCharge !== undefined ? Number(summary.hotelExtrasCharge) : undefined,
         balanceDue,
         foodTotal,
         barTotal,
@@ -1390,12 +1392,28 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
   const globalPendingBarTotal = pendingBarOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
   const globalFnbPending = globalPendingFoodTotal + globalPendingBarTotal;
   const globalAdvancePaid = Number(folioData.advancePaid || folioData.initialPaid || folioData.room?.initial_paid || folioData.room?.total_paid || 0);
+  const otaVoucherVal = Number(
+    folioData.otaBillAmount ||
+    folioData.ota_bill_amount ||
+    folioData.room?.ota_bill_amount ||
+    folioData.summary?.otaBillAmount ||
+    0
+  );
+  // For OTA Pre-Paid stays, hotel desk collection is strictly payments made at the desk (cash/card/UPI),
+  // NEVER including the pre-paid OTA voucher which is accounted for separately.
+  const actualDeskPaid = Number(
+    folioData.deskPaid !== undefined ? folioData.deskPaid :
+    (folioData.summary?.deskPaid !== undefined ? folioData.summary.deskPaid :
+      (Array.isArray(folioData.payments) && folioData.payments.length > 0
+        ? folioData.payments.filter(p => String(p.payment_type || '').toLowerCase() !== 'refund').reduce((s, p) => s + Number(p.amount || 0), 0)
+        : Math.min(globalAdvancePaid, Math.max(0, globalAdvancePaid - (isOtaPrepaid ? otaVoucherVal : 0)))))
+  );
   const otaEarlyFeeVal = (folioData.bookingSource === 'OTA' && folioData.isEarlyCheckin)
     ? Number(folioData.earlyCheckinCharge !== undefined && folioData.earlyCheckinCharge !== null ? folioData.earlyCheckinCharge : (folioData.ota_early_checkin_price || 900))
     : 0;
   const hotelExtrasChargeVal = Number(folioData.extraBedCharge || 0) + Number(folioData.extra_rooms_charge || 0) + Number(folioData.extra_breakfast_charge || 0) + otaEarlyFeeVal;
   const globalStayNet = isOtaPrepaid
-    ? (globalAdvancePaid > 0 ? Math.max(hotelExtrasChargeVal, globalAdvancePaid) : hotelExtrasChargeVal)
+    ? hotelExtrasChargeVal
     : Number(
         folioData.stayCalcNow?.roomCharge ??
         folioData.stayCalcNow?.grandTotal ??
@@ -1405,21 +1423,13 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
         0
       );
   const globalRawStayBalance = isOtaPrepaid
-    ? (hotelExtrasChargeVal - globalAdvancePaid)
+    ? (hotelExtrasChargeVal - actualDeskPaid)
     : (globalStayNet - globalAdvancePaid);
   const allExtraExpenses = folioData?.extraExpenses || [];
   const globalExpensesTotal = Number(folioData?.expensesTotal || allExtraExpenses.reduce((sum, e) => sum + Number(e.total || e.amount || 0), 0));
   const globalNetFolioBalance = globalRawStayBalance + globalFnbPending + globalExpensesTotal;
   const folioDueAmount = globalNetFolioBalance > 0.5 ? Math.round(globalNetFolioBalance) : 0;
   const folioRefundAmount = globalNetFolioBalance < -0.5 ? Math.round(Math.abs(globalNetFolioBalance)) : 0;
-
-  const otaVoucherVal = Number(
-    folioData.otaBillAmount ||
-    folioData.ota_bill_amount ||
-    folioData.room?.ota_bill_amount ||
-    folioData.summary?.otaBillAmount ||
-    0
-  );
 
   // Accurate Stay Details summary row calculations (full parity with bottom KPI tiles & APK)
   const summaryRoomTariff = isOtaBooking && otaVoucherVal > 0
@@ -1433,7 +1443,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
         : Number(folioData.grandTotal ?? folioData.netTotalCharge ?? folioData.summary?.grandTotal ?? ((folioData.roomCharge || 0) + globalPendingFoodTotal + globalPendingBarTotal + globalExpensesTotal)));
 
   const summaryTotalPaid = isOtaPrepaid
-    ? (otaVoucherVal + globalAdvancePaid)
+    ? (otaVoucherVal + actualDeskPaid)
     : globalAdvancePaid;
 
   const summaryBalanceDue = isOtaPrepaid
@@ -3018,10 +3028,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <span style={{ fontSize: '1.35rem' }}>💳</span>
               <div>
-                <h3 style={{ margin: 0, fontSize: '1.18rem', fontWeight: 850 }}>Payment History &amp; Collections ({displayAdvancePayments.length})</h3>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
-                  Advance payments, check-in receipts &amp; real-time collection history for this stay
-                </span>
+                <h3 style={{ margin: 0, fontSize: '1.18rem', fontWeight: 850 }}>Payment History &amp; Collections ({displayAdvancePayments.length + (isOtaPrepaid && otaVoucherVal > 0 ? 1 : 0)})</h3>
               </div>
             </div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -3050,8 +3057,61 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
           </div>
 
           <div id="folio-advance-payments-container">
-            {displayAdvancePayments.length > 0 ? (
+            {(displayAdvancePayments.length > 0 || (isOtaPrepaid && otaVoucherVal > 0)) ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' }}>
+                {/* Pre-Paid OTA Voucher (e.g. Goibibo / Agoda Pre-Paid Online) */}
+                {isOtaPrepaid && otaVoucherVal > 0 && (
+                  <div
+                    key="ota-prepaid-voucher"
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '14px 18px',
+                      background: '#ffffff',
+                      borderRadius: '12px',
+                      border: '1.5px solid #bfdbfe',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                      flexWrap: 'wrap',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 900, color: '#0f172a', fontSize: '1rem', letterSpacing: '0.2px' }}>
+                          Pre-Paid OTA Voucher: {folioData.otaPlatform || folioData.room?.ota_platform || 'OTA'}
+                        </span>
+                        {(folioData.otaBookingId || folioData.room?.ota_booking_id) && (
+                          <span style={{ fontSize: '0.74rem', fontWeight: 800, background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', padding: '2px 8px', borderRadius: '6px' }}>
+                            #{folioData.otaBookingId || folioData.room?.ota_booking_id}
+                          </span>
+                        )}
+                        <span style={{ fontSize: '0.72rem', fontWeight: 800, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '2px 8px', borderRadius: '6px' }}>
+                          prepaid voucher
+                        </span>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 900, background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '6px' }}>
+                          REALIZED
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.80rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span>📅 {formatDateTime(folioData.checkinTime || folioData.room?.checkin_time)}</span>
+                        <span>•</span>
+                        <span>🌐 Platform: <strong style={{ color: '#0f172a' }}>{folioData.otaPlatform || folioData.room?.ota_platform || 'OTA'} (Pre-Paid)</strong></span>
+                        <span>•</span>
+                        <span>📝 Remark: <strong style={{ color: '#0369a1' }}>Voucher Covered &amp; Realized in Advance</strong></span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '0.70rem', color: '#64748b', fontWeight: 750, textTransform: 'uppercase' }}>Amount Paid</div>
+                        <strong style={{ fontSize: '1.25rem', color: '#15803d', fontWeight: 950 }}>
+                          {formatCurrency(otaVoucherVal)}
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {displayAdvancePayments.map((p, pIdx) => {
                   const pMode = (p.payment_mode || 'Cash').toUpperCase();
                   const pReceiptNo = p.receipt_no || (p.mode === 'upi' || pMode.includes('UPI') ? 'UPI01' : (p.mode === 'card' || pMode.includes('CARD') ? 'POS01' : (p.mode === 'cheque' || pMode.includes('CHEQUE') ? 'CHQ01' : 'CR01')));
@@ -3273,11 +3333,11 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontSize: '1.1rem' }}>✅</span>
                     <span style={{ fontSize: '0.86rem', fontWeight: 800, color: '#166534' }}>
-                      Total Realized Payments ({displayAdvancePayments.length}) • All Receipts Verified
+                      Total Realized Payments ({displayAdvancePayments.length + (isOtaPrepaid && otaVoucherVal > 0 ? 1 : 0)}) • All Receipts Verified
                     </span>
                   </div>
                   <strong style={{ fontSize: '1.25rem', color: '#15803d', fontWeight: 950 }}>
-                    {formatCurrency(displayAdvancePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0))}
+                    {formatCurrency(displayAdvancePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) + (isOtaPrepaid && otaVoucherVal > 0 ? otaVoucherVal : 0))}
                   </strong>
                 </div>
               </div>
@@ -3396,14 +3456,22 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
           const decTotalRoomGst = Number(folioData.stayCalcDeclared?.roomGst ?? Math.round((decPreTaxRoom * effectiveGstPct) / 100));
           const decCalculatedRoomCharge = decPreTaxRoom + decTotalRoomGst;
 
+          const otaVoucherVal = Number(folioData.otaBillAmount || folioData.ota_bill_amount || 0);
+          const actualDeskPaidVal = Number(
+            folioData.deskPaid !== undefined ? folioData.deskPaid :
+            (folioData.summary?.deskPaid !== undefined ? folioData.summary.deskPaid :
+              (Array.isArray(folioData.payments) && folioData.payments.length > 0
+                ? folioData.payments.filter(p => String(p.payment_type || '').toLowerCase() !== 'refund').reduce((s, p) => s + Number(p.amount || 0), 0)
+                : Math.min(advancePaidVal, Math.max(0, advancePaidVal - (isOtaPrepaidStay ? otaVoucherVal : 0)))))
+          );
+
           const stayNetTotal = isOtaPrepaidStay
-            ? (advancePaidVal > 0 ? Math.max(hotelExtrasCharge, advancePaidVal) : hotelExtrasCharge)
+            ? hotelExtrasCharge
             : Number(folioData.stayCalcDeclared?.roomCharge ?? folioData.originalRoomCharge ?? decCalculatedRoomCharge ?? folioData.roomCharge ?? 0);
           const decRoomCharge = stayNetTotal;
 
-          const otaVoucherVal = Number(folioData.otaBillAmount || folioData.ota_bill_amount || 0);
-          const entireBookingVal = isOtaPrepaidStay ? (otaVoucherVal + stayNetTotal) : stayNetTotal;
-          const entireCollectedVal = isOtaPrepaidStay ? (otaVoucherVal + advancePaidVal) : advancePaidVal;
+          const entireBookingVal = isOtaPrepaidStay ? (otaVoucherVal + hotelExtrasCharge) : stayNetTotal;
+          const entireCollectedVal = isOtaPrepaidStay ? (otaVoucherVal + actualDeskPaidVal) : advancePaidVal;
           const isBookingOtaStay = isOtaPrepaidStay || isOtaPayAtHotel || folioData.bookingSource === 'OTA';
           const stayTaxable = isBookingOtaStay
             ? Math.round(stayNetTotal * 0.95 * 100) / 100
@@ -3412,7 +3480,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
           const stayDiscountVal = (isOtaPrepaidStay || isOtaPayAtHotel) ? 0 : decDiscountAmount;
           const stayPreTax = stayTaxable + stayDiscountVal;
           const rawStayBalance = isOtaPrepaidStay
-            ? (hotelExtrasCharge - advancePaidVal)
+            ? (hotelExtrasCharge - actualDeskPaidVal)
             : (stayNetTotal - advancePaidVal);
           const stayDueAmount = Math.max(0, rawStayBalance);
           const stayExcessAdvance = rawStayBalance < 0 ? Math.abs(rawStayBalance) : 0;
@@ -3434,7 +3502,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
           const decRoundedTotal = Math.round(decUnroundedTotal);
           const decRoundOff = Math.round((decRoundedTotal - decUnroundedTotal) * 100) / 100;
           const decFolioTotal = decRoundedTotal;
-          const decRawBal = decFolioTotal - advancePaidVal;
+          const decRawBal = isOtaPrepaidStay ? (decFolioTotal - actualDeskPaidVal) : (decFolioTotal - advancePaidVal);
           const decDue = Math.max(0, decRawBal);
           const decRefund = decRawBal < 0 ? Math.abs(decRawBal) : 0;
 
@@ -3464,7 +3532,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
           const nowRoundedTotal = Math.round(nowUnroundedTotal);
           const nowRoundOff = Math.round((nowRoundedTotal - nowUnroundedTotal) * 100) / 100;
           const nowFolioTotal = nowRoundedTotal;
-          const nowRawBal = nowFolioTotal - advancePaidVal;
+          const nowRawBal = isOtaPrepaidStay ? (nowFolioTotal - actualDeskPaidVal) : (nowFolioTotal - advancePaidVal);
           const nowDue = Math.max(0, nowRawBal);
           const nowRefund = nowRawBal < 0 ? Math.abs(nowRawBal) : 0;
 
@@ -4476,7 +4544,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                 const decRoundedTotal = Math.round(decUnroundedTotal);
                 const decRoundOff = Math.round((decRoundedTotal - decUnroundedTotal) * 100) / 100;
                 const decFolioTotal = decRoundedTotal;
-                const decRawBal = decFolioTotal - advancePaidVal;
+                const decRawBal = isOtaPrepaidStay ? (decFolioTotal - actualDeskPaidVal) : (decFolioTotal - advancePaidVal);
                 const decDue = Math.max(0, decRawBal);
                 const decRefund = decRawBal < 0 ? Math.abs(decRawBal) : 0;
                 const decDuration = (folioData.stayCalcDeclared?.expectedNights || stayNights) === 1
@@ -4866,7 +4934,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: '#64748b', fontWeight: 750 }}>Advance Paid:</span>
-                            <span style={{ color: '#16a34a', fontWeight: 850, fontSize: '1.05rem' }}>{formatCurrency(advancePaidVal)}</span>
+                            <span style={{ color: '#16a34a', fontWeight: 850, fontSize: '1.05rem' }}>{formatCurrency(isOtaPrepaidStay ? actualDeskPaidVal : advancePaidVal)}</span>
                           </div>
                           <div style={{ marginTop: '4px', paddingTop: '8px', borderTop: '1.5px dashed #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ fontWeight: 900, fontSize: '0.88rem', color: nowRefund > 0 ? '#166534' : '#b91c1c' }}>
@@ -5212,7 +5280,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: '#64748b', fontWeight: 750 }}>Advance Paid:</span>
-                            <span style={{ color: '#16a34a', fontWeight: 850, fontSize: '1.05rem' }}>{formatCurrency(advancePaidVal)}</span>
+                            <span style={{ color: '#16a34a', fontWeight: 850, fontSize: '1.05rem' }}>{formatCurrency(isOtaPrepaidStay ? actualDeskPaidVal : advancePaidVal)}</span>
                           </div>
                           <div style={{ marginTop: '4px', paddingTop: '8px', borderTop: '1.5px dashed #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ fontWeight: 900, fontSize: '0.88rem', color: decRefund > 0 ? '#166534' : '#b91c1c' }}>

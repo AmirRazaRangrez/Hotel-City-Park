@@ -5400,7 +5400,10 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     const otaBillAmount = parseFloat(room.ota_bill_amount) || 0;
     const hotelExtrasBase = groupExtraBedCharge + groupExtraRoomsCharge + groupExtraBreakfastCharge + (isOta ? groupEarlyCheckinCharge : 0);
     const hotelExtrasGst = Math.round(hotelExtrasBase * 0.05 * 100) / 100;
-    const hotelExtrasCharge = hotelExtrasBase;
+    const recordedDeskExtras = Number(room.total_room_charge || 0);
+    const hotelExtrasCharge = (isOtaPrepaid && recordedDeskExtras > 0 && Math.abs(recordedDeskExtras - hotelExtrasBase) <= (hotelExtrasGst + 5))
+      ? recordedDeskExtras
+      : hotelExtrasBase;
 
     // Dynamic Early Checkout Recalculation (enforces 1-day min, calculates extra hours via room extension rates)
     const expectedStayNights = (room.approx_checkout_time && room.checkin_time)

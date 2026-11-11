@@ -392,6 +392,8 @@ export async function fetchOccupiedStays() {
     if (!rNum) return;
     const folio = folioMap.get(rNum) || {};
     const totalAdults = Math.max(1, (o.adults_male || 0) + (o.adults_female || 0));
+    const otaBill = Number(o.ota_bill_amount || folio.otaBillAmount || folio.ota_bill_amount || 0);
+    const isPrepaid = Boolean(o.is_prepaid || folio.isPrepaid || folio.is_prepaid || (String(o.booking_source || '').toUpperCase() === 'OTA' && otaBill > 0));
     out.push({
       room: rNum,
       room_number: rNum,
@@ -411,6 +413,11 @@ export async function fetchOccupiedStays() {
       children: o.children || 0,
       meal_plan: o.meal_plan || 'without_breakfast',
       booking_source: o.booking_source || 'Walk-in',
+      ota_platform: o.ota_platform || folio.otaPlatform || folio.ota_platform || '',
+      is_prepaid: isPrepaid ? 1 : 0,
+      isPrepaid: isPrepaid ? 1 : 0,
+      ota_bill_amount: otaBill,
+      otaBillAmount: otaBill,
       checked_in_by: o.checked_in_by || 'Front Desk',
       checkin_time: o.checkin_time || new Date().toISOString(),
       approx_checkout_time: o.approx_checkout_time || '',

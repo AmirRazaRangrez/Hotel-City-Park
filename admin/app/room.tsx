@@ -47,6 +47,15 @@ function getPaymentStageNote(p: any, idx: number, checkInTime?: string): { label
   const type = String(p?.payment_type || p?.type || '').toLowerCase();
   const notes = String(p?.notes || p?.purpose || '').toLowerCase();
 
+  if (type === 'ota_prepaid' || p?.is_ota_prepaid || notes.includes('voucher') || notes.includes('prepaid')) {
+    return {
+      label: 'prepaid voucher',
+      bg: '#EFF6FF',
+      color: '#1D4ED8',
+      border: '#BFDBFE'
+    };
+  }
+
   if (
     type.includes('checkout') ||
     type.includes('settle') ||
@@ -159,9 +168,11 @@ function buildCrmPayload(s: any, bills: any[]) {
   const discountAmount = Number(s?.discount || r.discount_amount || 0);
   const taxAmount = Number(r.tax_amount || Math.round(roomCharge * 0.05));
   let grandTotal = Number(s?.total ?? s?.grandTotal ?? r.grand_total);
-  if (!grandTotal) {
+  if (isOtaPrepaid && otaBill > 0 && (!grandTotal || grandTotal < otaBill)) {
+    grandTotal = otaBill + grandTotal;
+  } else if (!grandTotal) {
     const base = roomCharge + foodTotal + barTotal + extraBedCharge - discountAmount;
-    grandTotal = isOtaPrepaid && otaBill > 0 ? (otaBill + base) : Math.max(0, base);
+    grandTotal = Math.max(0, base);
   }
   let paid = Number(s?.paid ?? r.advance_amount ?? r.total_paid ?? 0);
   if (isOtaPrepaid && otaBill > 0 && paid < otaBill) {
@@ -540,21 +551,22 @@ export default function RoomDetails() {
           ];
 
           const sc = fs.stayCalcDeclared || fs.stayCalcNow || null;
-          const otaBill = Number(fs.otaBillAmount || fr.ota_bill_amount || fr.otaBillAmount || found?.otaBillAmount || 0);
-          const isPrepaid = Boolean(fs.isOtaPrepaid || fr.is_prepaid || (fr.booking_source === 'OTA' && otaBill > 0));
+          const otaBill = Number(fs.otaBillAmount || fr.ota_bill_amount || fr.otaBillAmount || found?.otaBillAmount || (params as any).otaBillAmount || 0);
+          const isPrepaid = Boolean(fs.isOtaPrepaid || fr.is_prepaid || (params as any).isPrepaid === '1' || (params as any).isPrepaid === 'true' || (String(fr.booking_source || found?.source || '').toUpperCase() === 'OTA' && otaBill > 0));
 
-          const deskExtras = Number(fs.hotelExtrasCharge ?? fs.extra ?? (found?.extra || 0));
+          const deskExtras = Number(fs.hotelExtrasCharge ?? (isPrepaid ? (fr.total_room_charge || 0) : (fs.extra ?? (found?.extra || 0))));
+          const damagesExpenses = Number(fs.expensesTotal ?? (folio.extraExpenses || []).reduce((sum: number, e: any) => sum + Number(e.total_amount || e.amount || 0), 0));
           const foodTotal = Number(fs.foodTotal ?? sc?.fnbTotal ?? (found?.restaurant || 0));
           const barTotal = Number(fs.barTotal ?? (found?.bar || 0));
-          const roomCharge = Number(sc?.roomCharge ?? fs.roomCharge ?? fr.total_room_charge ?? (found?.roomCharge || 0));
+          const roomCharge = isPrepaid ? 0 : Number(sc?.roomCharge ?? fs.roomCharge ?? fr.total_room_charge ?? (found?.roomCharge || 0));
           const discount = Number(sc?.discountAmount ?? fs.discountAmount ?? fs.discount ?? (found?.discount || 0));
-          const tariffSubtotal = Number(sc?.baseRoomTotal ?? sc?.baseRoomTariff ?? (roomCharge + discount));
+          const tariffSubtotal = isPrepaid ? otaBill : Number(sc?.baseRoomTotal ?? sc?.baseRoomTariff ?? (roomCharge + discount));
 
           let total = Number(fs.grandTotal ?? sc?.grandTotal);
           if (isPrepaid && otaBill > 0 && (!total || total < otaBill)) {
-            total = otaBill + deskExtras + foodTotal + barTotal;
+            total = otaBill + deskExtras + foodTotal + barTotal + damagesExpenses;
           } else if (!total) {
-            total = roomCharge + foodTotal + barTotal + deskExtras - discount;
+            total = (isPrepaid ? otaBill : roomCharge) + foodTotal + barTotal + deskExtras + damagesExpenses - discount;
           }
 
           let paid = Number(fs.advancePaid ?? sc?.paid ?? fr.total_paid ?? (found?.paid || 0));
@@ -619,7 +631,9 @@ export default function RoomDetails() {
             })(),
             restaurant: foodTotal,
             bar: barTotal,
-            extra,
+            hotelExtrasCharge: deskExtras,
+            damagesExpenses,
+            extra: damagesExpenses > 0 ? damagesExpenses : (isPrepaid ? 0 : deskExtras),
             discount,
             total,
             tariffSubtotal,
@@ -630,10 +644,10 @@ export default function RoomDetails() {
             booking_source: fr.booking_source || found?.source || 'Walk-in',
             otaPlatform: fr.ota_platform || fr.otaPlatform || found?.otaPlatform || found?.ota_platform || '',
             ota_platform: fr.ota_platform || fr.otaPlatform || found?.otaPlatform || found?.ota_platform || '',
-            isPrepaid: fr.is_prepaid !== undefined ? fr.is_prepaid : (found?.isPrepaid !== undefined ? found.isPrepaid : found?.is_prepaid),
-            is_prepaid: fr.is_prepaid !== undefined ? fr.is_prepaid : (found?.isPrepaid !== undefined ? found.isPrepaid : found?.is_prepaid),
-            otaBillAmount: Number(fr.ota_bill_amount || fr.otaBillAmount || found?.otaBillAmount || 0),
-            ota_bill_amount: Number(fr.ota_bill_amount || fr.otaBillAmount || found?.otaBillAmount || 0),
+            isPrepaid: isPrepaid ? 1 : 0,
+            is_prepaid: isPrepaid ? 1 : 0,
+            otaBillAmount: otaBill,
+            ota_bill_amount: otaBill,
             otaBookingId: fr.ota_booking_id || fr.otaBookingId || found?.otaBookingId || '',
             ota_booking_id: fr.ota_booking_id || fr.otaBookingId || found?.otaBookingId || '',
             staffRoomRate: Number(fr.room_rate || fr.custom_tariff || found?.customTariff || found?.room_rate || 0),
@@ -683,8 +697,15 @@ export default function RoomDetails() {
 
     // 3. Fallback: query params passed from parent view
     if (params.guest || params.total || params.room || isCheckoutParam) {
-      const pTotal = Number(params.total || params.paid || 0);
-      const pPaid = Number(params.paid || pTotal);
+      const otaBill = Number((params as any).otaBillAmount || 0);
+      const isPrepaid = (params as any).isPrepaid === '1' || (params as any).isPrepaid === 'true';
+      let pTotal = Number(params.total || params.paid || 0);
+      let pPaid = Number(params.paid || pTotal);
+      if (isPrepaid && otaBill > 0) {
+        if (!pTotal || pTotal < otaBill) pTotal = otaBill + pTotal;
+        if (!pPaid || pPaid < otaBill) pPaid = otaBill + pPaid;
+      }
+      const hotelExtras = isPrepaid ? Math.max(0, pTotal - otaBill) : 0;
       return {
         isCheckout: isCheckoutParam,
         id: String(params.bookingId || id),
@@ -720,26 +741,32 @@ export default function RoomDetails() {
           return exp;
         })(),
         checkoutTime: (params as any).checkOut || (params as any).approxCheckOut || '',
-        roomCharge: pTotal,
+        roomCharge: isPrepaid ? 0 : pTotal,
+        hotelExtrasCharge: hotelExtras,
+        damagesExpenses: 0,
         restaurant: 0,
         bar: 0,
-        extra: 0,
+        extra: hotelExtras,
         discount: 0,
         total: pTotal,
         paid: pPaid,
         pending: isCheckoutParam ? 0 : Math.max(0, pTotal - pPaid),
-        source: 'Front Desk',
+        isPrepaid: isPrepaid ? 1 : 0,
+        is_prepaid: isPrepaid ? 1 : 0,
+        otaBillAmount: otaBill,
+        ota_bill_amount: otaBill,
+        source: isPrepaid ? 'OTA (Pre-Paid)' : 'Front Desk',
         checkedInBy: 'Front Desk',
         checkedOutBy: 'Staff',
-        mealPlan: 'Without Breakfast',
+        mealPlan: 'With Breakfast',
         voucherNumber: '',
         advanceReceiptNo: '',
-        paymentMode: 'Cash',
+        paymentMode: isPrepaid ? 'OTA Pre-Paid' : 'Cash',
         payments: pPaid > 0 ? [{
           amount: pPaid,
-          mode: 'Settled',
+          mode: isPrepaid ? 'OTA Pre-Paid' : 'Settled',
           date: new Date().toISOString(),
-          cashier: 'Staff'
+          cashier: 'Front Desk'
         }] : []
       };
     }
@@ -776,21 +803,21 @@ export default function RoomDetails() {
     if (typeof document === 'undefined') return;
     const fullHtml = wrapFullA4Html(htmlContent, title);
 
-    let iframe = document.getElementById('admin-print-iframe') as HTMLIFrameElement;
-    if (!iframe) {
-      iframe = document.createElement('iframe');
-      iframe.id = 'admin-print-iframe';
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '1px';
-      iframe.style.height = '1px';
-      iframe.style.opacity = '0.01';
-      iframe.style.border = '0';
-      iframe.style.zIndex = '-9999';
-      iframe.setAttribute('aria-hidden', 'true');
-      document.body.appendChild(iframe);
+    const oldIframe = document.getElementById('admin-print-iframe');
+    if (oldIframe) {
+      try { oldIframe.remove(); } catch {}
     }
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'admin-print-iframe';
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = 'none';
+    iframe.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(iframe);
 
     const iframeDoc = iframe.contentWindow?.document;
     if (!iframeDoc) {
@@ -981,11 +1008,16 @@ export default function RoomDetails() {
     return (raw || 'CASH').toUpperCase();
   };
 
+  const isOtaPrepaidStay = Boolean(s?.isPrepaid || s?.is_prepaid || s?.rateType === 'prepaid' || (s?.bookingSource === 'OTA' && s?.isPrepaid));
+  const otaVoucherVal = Number(s?.otaBillAmount || s?.ota_bill_amount || 0);
+  const otaPlatformName = s?.otaPlatform || s?.ota_platform || 'OTA';
+  const otaBookingRef = s?.otaBookingId || s?.ota_booking_id || s?.otaVoucherNo || '';
+
   const paymentsList: any[] = Array.isArray(s?.payments) && s.payments.length > 0
-    ? s.payments
+    ? [...s.payments]
     : (Array.isArray(s?.raw?.payments) && s.raw.payments.length > 0
-        ? s.raw.payments
-        : (Number(s?.paid || s?.total || 0) > 0 ? [{
+        ? [...s.raw.payments]
+        : (Number(s?.paid || s?.total || 0) > 0 && !isOtaPrepaidStay ? [{
             id: s?.id || 1,
             amount: Number(s?.paid || s?.total || 0),
             payment_mode: s?.paymentMode || s?.raw?.final_settlement_mode || s?.raw?.advance_payment_mode || 'Cash',
@@ -1003,6 +1035,27 @@ export default function RoomDetails() {
             split_card: s?.splitCard || 0,
             split_cheque: s?.splitCheque || 0
           }] : []));
+
+  if (isOtaPrepaidStay && otaVoucherVal > 0 && !paymentsList.some(p => String(p.payment_type || '').toLowerCase() === 'ota_prepaid' || String(p.receipt_no || '').startsWith('OTA-') || String(p.payment_mode || '').toUpperCase().includes('PREPAID'))) {
+    paymentsList.unshift({
+      id: 'ota-voucher',
+      receipt_no: otaBookingRef ? `OTA-${otaBookingRef}` : (s?.voucherNumber ? `VCH-${s?.voucherNumber}` : 'OTA-PREPAID'),
+      receiptNo: otaBookingRef ? `OTA-${otaBookingRef}` : (s?.voucherNumber ? `VCH-${s?.voucherNumber}` : 'OTA-PREPAID'),
+      amount: otaVoucherVal,
+      payment_mode: `PREPAID (${otaPlatformName})`,
+      mode: 'prepaid',
+      created_at: s?.checkIn || new Date().toISOString(),
+      date: s?.checkIn || new Date().toISOString(),
+      cashier_name: s?.checkedInBy || 'Front Desk',
+      cashier: s?.checkedInBy || 'Front Desk',
+      notes: 'Voucher Covered & Realized in Advance',
+      payment_type: 'ota_prepaid',
+      is_ota_prepaid: true,
+      platform: otaPlatformName,
+      booking_id: otaBookingRef
+    });
+  }
+
   const totalPaymentsPaid = paymentsList
     .filter((p: any) => !String(p.payment_type || p.type || '').toLowerCase().includes('refund'))
     .reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0) || Number(s?.paid || 0);
@@ -1727,7 +1780,23 @@ export default function RoomDetails() {
             <Text style={styles.sectionTitle}>Financial & Billing Summary</Text>
           </View>
           <Card>
-            {s.discount > 0 ? (
+            {s.isPrepaid && (s.otaBillAmount > 0 || s.ota_bill_amount > 0) ? (
+              <>
+                <DetailRow
+                  label={`Pre-Paid OTA Voucher (${s.otaPlatform || s.ota_platform || (String(s.source || '').includes('OTA') ? s.source : 'OTA')})`}
+                  value={money(s.otaBillAmount || s.ota_bill_amount)}
+                  color={c.ok}
+                  bold
+                />
+                {(s.hotelExtrasCharge > 0 || (!s.hotelExtrasCharge && s.roomCharge > 0)) ? (
+                  <DetailRow
+                    label="Hotel Stay Extras (Mattress/Meals)"
+                    value={money(s.hotelExtrasCharge || s.roomCharge)}
+                    bold
+                  />
+                ) : null}
+              </>
+            ) : s.discount > 0 ? (
               <>
                 <DetailRow label="Tariff Subtotal" value={money(s.tariffSubtotal || (s.roomCharge + s.discount))} />
                 <DetailRow label="Discount Applied" value={`− ${money(s.discount)}`} color={c.ok} bold />
@@ -1738,8 +1807,8 @@ export default function RoomDetails() {
             )}
             <DetailRow label="Restaurant Charges" value={money(s.restaurant)} />
             <DetailRow label="Bar Lounge Charges" value={money(s.bar)} />
-            {s.extra > 0 ? (
-              <DetailRow label="Extra Expense (Damages/Services)" value={money(s.extra)} color={c.bad} bold />
+            {(s.damagesExpenses > 0 || (!s.isPrepaid && s.extra > 0)) ? (
+              <DetailRow label="Extra Expense (Damages/Services)" value={money(s.damagesExpenses || s.extra)} color={c.bad} bold />
             ) : null}
 
             <View style={styles.rowDivider} />

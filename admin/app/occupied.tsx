@@ -36,9 +36,21 @@ export default function Occupied() {
   const handleOpenRoom = (s: any) => {
     const roomNum = getValidRoom(s);
     const roomId = String(roomNum || s.room || s.id);
+    const otaBill = Number(s.otaBillAmount || s.ota_bill_amount || 0);
+    const isPrepaid = Boolean(s.isPrepaid || s.is_prepaid || (String(s.source || '').toUpperCase().includes('OTA') && otaBill > 0));
+
+    let roomTotal = s.total !== undefined ? Number(s.total) : (s.roomCharge !== undefined ? Number(s.roomCharge) : 0);
+    if (isPrepaid && otaBill > 0 && roomTotal < otaBill) {
+      roomTotal = otaBill + roomTotal;
+    }
+    let roomPaid = s.paid !== undefined ? Number(s.paid) : 0;
+    if (isPrepaid && otaBill > 0 && roomPaid < otaBill) {
+      roomPaid = otaBill + roomPaid;
+    }
+
     // Prime in-memory cache with isPartial flag so room.tsx displays instantaneously with 0ms delay while triggering a fresh live fetch
     try {
-      memCache?.set('room:' + roomId, { d: { ...s, isPartial: true }, t: new Date(0).toISOString() });
+      memCache?.set('room:' + roomId, { d: { ...s, total: roomTotal, paid: roomPaid, isPrepaid: isPrepaid ? 1 : 0, otaBillAmount: otaBill, isPartial: true }, t: new Date(0).toISOString() });
     } catch (_) {}
     router.push({
       pathname: '/room',
@@ -47,11 +59,11 @@ export default function Occupied() {
         room: String(roomNum),
         bookingId: String(s.booking_id || s.id || ''),
         guest: String(s.guest || ''),
-        total: s.total !== undefined ? String(s.total) : (s.roomCharge !== undefined ? String(s.roomCharge) : ''),
-        paid: s.paid !== undefined ? String(s.paid) : '',
+        total: String(roomTotal),
+        paid: String(roomPaid),
         phone: String(s.mobile || ''),
-        isPrepaid: s.isPrepaid ? '1' : '0',
-        otaBillAmount: String(s.otaBillAmount || s.ota_bill_amount || '0')
+        isPrepaid: isPrepaid ? '1' : '0',
+        otaBillAmount: String(otaBill)
       }
     });
   };
