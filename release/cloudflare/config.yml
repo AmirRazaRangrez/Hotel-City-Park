@@ -1,0 +1,9 @@
+# Filled in by scripts/setup_named_tunnel.ps1 on the hotel PC.
+# Do not commit the credentials JSON. This file only names the tunnel.
+tunnel: TUNNEL_ID_HERE
+credentials-file: C:\Users\Administrator\.cloudflared\TUNNEL_ID_HERE.json
+
+ingress:
+  - hostname: crm.dominal.in
+    service: http://127.0.0.1:3000
+  - service: http_status:404

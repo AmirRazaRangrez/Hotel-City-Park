@@ -481,6 +481,34 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 10
   },
+  eventBodyWrap: {
+    marginTop: 10,
+    backgroundColor: '#F8FAF9',
+    padding: 10,
+    borderRadius: 10,
+    gap: 6
+  },
+  eventGuestName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: c.ink
+  },
+  eventMetaChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6
+  },
+  metaChip: {
+    backgroundColor: '#EAEFEA',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6
+  },
+  metaChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: c.text
+  },
   cardFooter: {
     marginTop: 10,
     paddingTop: 8,

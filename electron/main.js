@@ -10,7 +10,9 @@ app.commandLine.appendSwitch('enable-zero-copy');
 
 let mainWindow = null;
 let serverProcess = null;
+let tunnelProcess = null;
 const PORT = process.env.PORT || 3000;
+const { startNamedTunnel } = require('../services/namedTunnel');
 
 // Ensure only a single instance of the application runs
 const gotTheLock = app.requestSingleInstanceLock();
@@ -325,6 +327,7 @@ async function startServerAndNavigate() {
         mainWindow.loadURL(targetUrl, { extraHeaders: 'pragma: no-cache\ncache-control: no-cache\n' });
       }
       setupMenu();
+      ensurePublicDoor();
       return;
     } else {
       console.warn(`[Electron] Port ${PORT} is occupied by an unresponsive or outdated process. Terminating stale process...`);
@@ -355,7 +358,8 @@ async function startServerAndNavigate() {
         ...process.env,
         NODE_ENV: 'production',
         USE_APPDATA: '1',
-        PORT: String(PORT)
+        PORT: String(PORT),
+        NODE_PATH: path.join(rootDir, 'node_modules')
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true
@@ -411,6 +415,7 @@ async function startServerAndNavigate() {
         mainWindow.loadURL(targetUrl, { extraHeaders: 'pragma: no-cache\ncache-control: no-cache\n' });
       }
       setupMenu();
+      ensurePublicDoor();
       return;
     }
   }
@@ -420,6 +425,7 @@ async function startServerAndNavigate() {
     mainWindow.loadURL(targetUrl, { extraHeaders: 'pragma: no-cache\ncache-control: no-cache\n' });
   }
   setupMenu();
+  ensurePublicDoor();
 }
 
 function createMainWindow() {
@@ -671,7 +677,17 @@ ipcMain.on('open-external', (event, url) => {
   if (url) shell.openExternal(url);
 });
 
+function ensurePublicDoor() {
+  if (tunnelProcess && !tunnelProcess.killed) return;
+  const rootDir = path.resolve(__dirname, '..');
+  tunnelProcess = startNamedTunnel(rootDir);
+}
+
 function cleanupServer() {
+  if (tunnelProcess && !tunnelProcess.killed) {
+    try { tunnelProcess.kill(); } catch (e) {}
+    tunnelProcess = null;
+  }
   if (serverProcess && !serverProcess.killed) {
     try {
       if (process.platform === 'win32') {

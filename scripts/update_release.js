@@ -127,6 +127,13 @@ if (fs.existsSync(path.join(rootDir, 'firebase-service-account.json'))) {
   console.log('  ✓ release/firebase-service-account.json updated');
 }
 
+['store_index.html', 'store_admin_index.html'].forEach(htmlFile => {
+  if (fs.existsSync(path.join(rootDir, htmlFile))) {
+    fs.copyFileSync(path.join(rootDir, htmlFile), path.join(releaseDir, htmlFile));
+    console.log(`  ✓ release/${htmlFile} updated`);
+  }
+});
+
 // Compile latest HotelCityPark.exe launcher if csc is available
 const cscCandidates = [
   'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe',
@@ -224,6 +231,12 @@ if (fs.existsSync(electronAppDir)) {
   if (fs.existsSync(path.join(rootDir, 'firebase-service-account.json'))) {
     fs.copyFileSync(path.join(rootDir, 'firebase-service-account.json'), path.join(electronAppDir, 'firebase-service-account.json'));
   }
+  ['store_index.html', 'store_admin_index.html'].forEach(htmlFile => {
+    if (fs.existsSync(path.join(rootDir, htmlFile))) {
+      fs.copyFileSync(path.join(rootDir, htmlFile), path.join(electronAppDir, htmlFile));
+      console.log(`  ✓ release-electron/resources/app/${htmlFile} updated.`);
+    }
+  });
 
   // Sync admin/dist to electron app
   if (fs.existsSync(adminDistSrc)) {
@@ -269,19 +282,19 @@ if (fs.existsSync(electronAppDir)) {
     console.log('  ✓ release-electron/Clean_Start.bat synchronized.');
   }
 
+  // Ensure all runtime node_modules dependencies are synced
+  try {
+    require('./sync_production_modules');
+  } catch (err) {
+    console.warn('  ⚠️ Could not sync production node_modules:', err.message);
+  }
+
   // Bundle Visual C++ Redistributable DLLs
   try {
     require('./copy_vc_dlls');
     console.log('  ✓ Visual C++ Redistributable DLLs bundled.');
   } catch (err) {
     console.warn('  ⚠️ Could not bundle VC++ DLLs:', err.message);
-  }
-
-  // Ensure all runtime node_modules dependencies are synced
-  try {
-    require('./sync_production_modules');
-  } catch (err) {
-    console.warn('  ⚠️ Could not sync production node_modules:', err.message);
   }
 
   console.log('  ✓ release-electron desktop bundle updated.');
@@ -310,7 +323,7 @@ try {
   process.exit(1);
 }
 
-// Check syntax of electronAppDir server.js
+// Check syntax and runtime loading of electronAppDir server.js & database.js
 if (fs.existsSync(electronAppDir)) {
   try {
     execSync(`node -c "${path.join(electronAppDir, 'server.js')}"`, { cwd: rootDir, stdio: 'pipe' });
@@ -318,6 +331,19 @@ if (fs.existsSync(electronAppDir)) {
   } catch (e) {
     console.error('❌ Syntax error in release-electron/server.js:', e.message);
     process.exit(1);
+  }
+
+  const runtimeNode = path.join(electronRootDir, 'runtime', 'node.exe');
+  if (fs.existsSync(runtimeNode)) {
+    try {
+      const { execFileSync } = require('child_process');
+      const testCode = 'const b = require("better-sqlite3"); console.log("better-sqlite3 load ok"); process.exit(0);';
+      execFileSync(runtimeNode, ['-e', testCode], { cwd: electronAppDir, stdio: 'pipe' });
+      console.log('  ✓ release-electron runtime node.exe & better-sqlite3 load verified OK');
+    } catch (e) {
+      console.error('❌ Failed to load better-sqlite3 with bundled runtime node.exe:', e.message);
+      process.exit(1);
+    }
   }
 }
 

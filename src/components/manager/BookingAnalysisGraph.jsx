@@ -21,24 +21,31 @@ const OTA_CHANNELS = [
 export default function BookingAnalysisGraph() {
   const [fromDate, setFromDate] = useState(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 14); // Default to last 14 days
+    d.setDate(d.getDate() - 7); // Default to last 7 days (Week)
     return d.toISOString().slice(0, 10);
   });
   const [toDate, setToDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [activePreset, setActivePreset] = useState('week');
+  const [fromBillNo, setFromBillNo] = useState('');
+  const [toBillNo, setToBillNo] = useState('');
   const [selectedPlatform, setSelectedPlatform] = useState('all');
   const [isLoading, setIsLoading] = useState(false);
   const [analysisData, setAnalysisData] = useState(null);
-  const [hoveredBar, setHoveredBar] = useState(null);
+  const [hoveredPoint, setHoveredPoint] = useState(null);
   const [showTable, setShowTable] = useState(false);
 
-  const fetchData = useCallback(async (start, end, platform) => {
+  const fetchData = useCallback(async (start, end, platform, fBill = fromBillNo, tBill = toBillNo) => {
     setIsLoading(true);
     try {
-      const res = await api.getBookingAnalysis({
+      const params = {
         startDate: start,
         endDate: end,
         otaPlatform: platform
-      });
+      };
+      if (fBill && fBill.trim()) params.fromBillNo = fBill.trim();
+      if (tBill && tBill.trim()) params.toBillNo = tBill.trim();
+
+      const res = await api.getBookingAnalysis(params);
       if (res && res.success) {
         setAnalysisData(res);
       }
@@ -47,15 +54,96 @@ export default function BookingAnalysisGraph() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fromBillNo, toBillNo]);
 
   useEffect(() => {
-    fetchData(fromDate, toDate, selectedPlatform);
+    fetchData(fromDate, toDate, selectedPlatform, fromBillNo, toBillNo);
   }, [fromDate, toDate, selectedPlatform, fetchData]);
 
-  // Construct complete continuous daily series between fromDate and toDate
+  // Construct complete continuous series adapted to Day, Week, Month, Year
   const chartSeries = useMemo(() => {
     if (!fromDate || !toDate) return [];
+
+    // Case 1: Intra-day hourly breakdown when fromDate === toDate (e.g. Day preset)
+    if (fromDate === toDate) {
+      const timeSlots = [
+        { label: '00:00 - 04:00', startH: 0, endH: 4 },
+        { label: '04:00 - 08:00', startH: 4, endH: 8 },
+        { label: '08:00 - 12:00', startH: 8, endH: 12 },
+        { label: '12:00 - 16:00', startH: 12, endH: 16 },
+        { label: '16:00 - 20:00', startH: 16, endH: 20 },
+        { label: '20:00 - 24:00', startH: 20, endH: 24 }
+      ];
+
+      const slots = timeSlots.map(slot => ({
+        label: slot.label,
+        date: fromDate,
+        booking_count: 0,
+        rooms_count: 0,
+        total_revenue: 0
+      }));
+
+      (analysisData?.bookingsList || []).forEach(b => {
+        const timeStr = b.checkin_time || b.created_at;
+        let hour = 12; // default midday
+        if (timeStr) {
+          const d = new Date(timeStr);
+          if (!isNaN(d.getTime())) {
+            hour = d.getHours();
+          }
+        }
+        const slotIdx = Math.min(Math.floor(hour / 4), 5);
+        slots[slotIdx].booking_count += 1;
+        slots[slotIdx].rooms_count += 1;
+        slots[slotIdx].total_revenue += Number(b.total_room_charge || 0);
+      });
+
+      return slots;
+    }
+
+    const start = new Date(fromDate);
+    const end = new Date(toDate);
+    const diffDays = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
+
+    // Case 2: Multi-month / Year view (> 60 days): aggregate by month
+    if (diffDays > 60) {
+      const monthMap = {};
+      (analysisData?.dailyRecords || []).forEach(r => {
+        const mKey = r.date.slice(0, 7); // YYYY-MM
+        if (!monthMap[mKey]) {
+          monthMap[mKey] = {
+            mKey,
+            booking_count: 0,
+            rooms_count: 0,
+            total_revenue: 0
+          };
+        }
+        monthMap[mKey].booking_count += Number(r.booking_count || 0);
+        monthMap[mKey].rooms_count += Number(r.rooms_count || 0);
+        monthMap[mKey].total_revenue += Number(r.total_revenue || 0);
+      });
+
+      const series = [];
+      const currM = new Date(start.getFullYear(), start.getMonth(), 1);
+      const endM = new Date(end.getFullYear(), end.getMonth(), 1);
+
+      while (currM <= endM && series.length < 24) {
+        const mKey = currM.toISOString().slice(0, 7);
+        const monthName = currM.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+        const rec = monthMap[mKey] || { booking_count: 0, rooms_count: 0, total_revenue: 0 };
+        series.push({
+          label: monthName,
+          date: mKey,
+          booking_count: rec.booking_count,
+          rooms_count: rec.rooms_count,
+          total_revenue: rec.total_revenue
+        });
+        currM.setMonth(currM.getMonth() + 1);
+      }
+      return series;
+    }
+
+    // Case 3: Daily view (1 to 60 days, e.g. Week, Month)
     const map = {};
     (analysisData?.dailyRecords || []).forEach(r => {
       map[r.date] = r;
@@ -63,14 +151,18 @@ export default function BookingAnalysisGraph() {
 
     const series = [];
     const curr = new Date(fromDate);
-    const end = new Date(toDate);
-
-    // Limit to max 60 days to prevent chart overflow
     let daysCount = 0;
     while (curr <= end && daysCount < 60) {
       const dStr = curr.toISOString().slice(0, 10);
       const rec = map[dStr] || { date: dStr, booking_count: 0, rooms_count: 0, total_revenue: 0 };
-      series.push(rec);
+      const dateLabel = curr.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+      series.push({
+        label: dateLabel,
+        date: dStr,
+        booking_count: Number(rec.booking_count || 0),
+        rooms_count: Number(rec.rooms_count || 0),
+        total_revenue: Number(rec.total_revenue || 0)
+      });
       curr.setDate(curr.getDate() + 1);
       daysCount++;
     }
@@ -87,34 +179,62 @@ export default function BookingAnalysisGraph() {
   const channels = analysisData?.channelDistribution || [];
 
   const handlePreset = (type) => {
+    setActivePreset(type);
     const today = new Date();
     const todayStr = today.toISOString().slice(0, 10);
 
-    if (type === 'today') {
+    if (type === 'day') {
       setFromDate(todayStr);
       setToDate(todayStr);
-    } else if (type === 'yesterday') {
-      const y = new Date();
-      y.setDate(y.getDate() - 1);
-      const yStr = y.toISOString().slice(0, 10);
-      setFromDate(yStr);
-      setToDate(yStr);
-    } else if (type === '7days') {
+      fetchData(todayStr, todayStr, selectedPlatform, fromBillNo, toBillNo);
+    } else if (type === 'week') {
       const d = new Date();
       d.setDate(d.getDate() - 7);
-      setFromDate(d.toISOString().slice(0, 10));
+      const sStr = d.toISOString().slice(0, 10);
+      setFromDate(sStr);
       setToDate(todayStr);
-    } else if (type === '30days') {
-      const d = new Date();
-      d.setDate(d.getDate() - 30);
-      setFromDate(d.toISOString().slice(0, 10));
-      setToDate(todayStr);
+      fetchData(sStr, todayStr, selectedPlatform, fromBillNo, toBillNo);
     } else if (type === 'month') {
       const s = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
       setFromDate(s);
       setToDate(todayStr);
+      fetchData(s, todayStr, selectedPlatform, fromBillNo, toBillNo);
+    } else if (type === 'year') {
+      const s = new Date(today.getFullYear(), 0, 1).toISOString().slice(0, 10);
+      setFromDate(s);
+      setToDate(todayStr);
+      fetchData(s, todayStr, selectedPlatform, fromBillNo, toBillNo);
     }
   };
+
+  // SVG dimensions for Line Chart
+  const svgWidth = Math.max(chartSeries.length * 60, 620);
+  const svgHeight = 250;
+  const paddingLeft = 55;
+  const paddingRight = 45;
+  const paddingTop = 25;
+  const paddingBottom = 45;
+  const plotWidth = svgWidth - paddingLeft - paddingRight;
+  const plotHeight = svgHeight - paddingTop - paddingBottom;
+
+  // Calculate geometric (x, y) coordinates for each point
+  const points = useMemo(() => {
+    if (!chartSeries.length) return [];
+    return chartSeries.map((item, idx) => {
+      const x = chartSeries.length > 1
+        ? paddingLeft + (idx / (chartSeries.length - 1)) * plotWidth
+        : paddingLeft + plotWidth / 2;
+      const count = Number(item.booking_count || 0);
+      const y = paddingTop + plotHeight - (count / maxBookings) * plotHeight;
+      return { ...item, x, y };
+    });
+  }, [chartSeries, maxBookings, plotWidth, plotHeight, paddingLeft, paddingTop]);
+
+  // Connected SVG path string for the line
+  const linePath = useMemo(() => {
+    if (!points.length) return '';
+    return points.reduce((acc, pt, idx) => `${acc} ${idx === 0 ? 'M' : 'L'} ${pt.x.toFixed(2)} ${pt.y.toFixed(2)}`, '');
+  }, [points]);
 
   return (
     <div
@@ -148,7 +268,7 @@ export default function BookingAnalysisGraph() {
             </h3>
           </div>
           <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#64748b' }}>
-            Interactive time-series analysis graph filtered date-to-date with OTA booking platform breakdowns.
+            Interactive time-series line graph filtered by date, bill/invoice range, and OTA booking platform.
           </p>
         </div>
 
@@ -156,10 +276,13 @@ export default function BookingAnalysisGraph() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ fontSize: '0.80rem', fontWeight: 800, color: '#475569' }}>From:</span>
-            <div style={{ width: '140px' }}>
+            <div style={{ width: '135px' }}>
               <ThemedDatePicker
                 value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
+                onChange={(e) => {
+                  setFromDate(e.target.value);
+                  setActivePreset(null);
+                }}
                 style={{ height: '34px', fontSize: '0.82rem', fontWeight: 700 }}
               />
             </div>
@@ -167,49 +290,152 @@ export default function BookingAnalysisGraph() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ fontSize: '0.80rem', fontWeight: 800, color: '#475569' }}>To:</span>
-            <div style={{ width: '140px' }}>
+            <div style={{ width: '135px' }}>
               <ThemedDatePicker
                 value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
+                onChange={(e) => {
+                  setToDate(e.target.value);
+                  setActivePreset(null);
+                }}
                 style={{ height: '34px', fontSize: '0.82rem', fontWeight: 700 }}
               />
             </div>
           </div>
 
-          {/* Quick Presets */}
+          {/* Quick Presets: Day, Week, Month, Year */}
           <div style={{ display: 'flex', gap: '4px' }}>
             <button
               type="button"
-              className="btn-secondary"
-              onClick={() => handlePreset('today')}
-              style={{ padding: '0 9px', height: '34px', fontSize: '0.78rem', fontWeight: 750 }}
+              className={activePreset === 'day' ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => handlePreset('day')}
+              style={{
+                padding: '0 10px',
+                height: '34px',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                background: activePreset === 'day' ? '#0284c7' : undefined,
+                color: activePreset === 'day' ? '#ffffff' : undefined
+              }}
+              title="Today's hourly bookings breakdown"
             >
-              Today
+              Day
             </button>
             <button
               type="button"
-              className="btn-secondary"
-              onClick={() => handlePreset('7days')}
-              style={{ padding: '0 9px', height: '34px', fontSize: '0.78rem', fontWeight: 750 }}
+              className={activePreset === 'week' ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => handlePreset('week')}
+              style={{
+                padding: '0 10px',
+                height: '34px',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                background: activePreset === 'week' ? '#0284c7' : undefined,
+                color: activePreset === 'week' ? '#ffffff' : undefined
+              }}
+              title="Last 7 days (Week) trend"
             >
-              7 Days
+              Week
             </button>
             <button
               type="button"
-              className="btn-secondary"
-              onClick={() => handlePreset('30days')}
-              style={{ padding: '0 9px', height: '34px', fontSize: '0.78rem', fontWeight: 750 }}
-            >
-              30 Days
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
+              className={activePreset === 'month' ? 'btn-primary' : 'btn-secondary'}
               onClick={() => handlePreset('month')}
-              style={{ padding: '0 9px', height: '34px', fontSize: '0.78rem', fontWeight: 750 }}
+              style={{
+                padding: '0 10px',
+                height: '34px',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                background: activePreset === 'month' ? '#0284c7' : undefined,
+                color: activePreset === 'month' ? '#ffffff' : undefined
+              }}
+              title="Current month daily trend"
             >
               Month
             </button>
+            <button
+              type="button"
+              className={activePreset === 'year' ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => handlePreset('year')}
+              style={{
+                padding: '0 10px',
+                height: '34px',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                background: activePreset === 'year' ? '#0284c7' : undefined,
+                color: activePreset === 'year' ? '#ffffff' : undefined
+              }}
+              title="Yearly monthly trend"
+            >
+              Year
+            </button>
+          </div>
+
+          {/* Bill No / Invoice No Range Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ fontSize: '0.80rem', fontWeight: 800, color: '#475569' }}>Bill/Inv:</span>
+            <input
+              type="text"
+              placeholder="From #"
+              value={fromBillNo}
+              onChange={(e) => setFromBillNo(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') fetchData(fromDate, toDate, selectedPlatform, e.target.value, toBillNo);
+              }}
+              style={{
+                width: '85px',
+                height: '34px',
+                fontSize: '0.80rem',
+                padding: '0 8px',
+                borderRadius: '8px',
+                border: '1.5px solid #cbd5e1',
+                fontWeight: 700,
+                color: '#0f172a'
+              }}
+            />
+            <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>-</span>
+            <input
+              type="text"
+              placeholder="To #"
+              value={toBillNo}
+              onChange={(e) => setToBillNo(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') fetchData(fromDate, toDate, selectedPlatform, fromBillNo, e.target.value);
+              }}
+              style={{
+                width: '85px',
+                height: '34px',
+                fontSize: '0.80rem',
+                padding: '0 8px',
+                borderRadius: '8px',
+                border: '1.5px solid #cbd5e1',
+                fontWeight: 700,
+                color: '#0f172a'
+              }}
+            />
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => fetchData(fromDate, toDate, selectedPlatform, fromBillNo, toBillNo)}
+              style={{ height: '34px', padding: '0 10px', fontSize: '0.78rem', fontWeight: 800 }}
+              title="Apply bill/invoice number filter"
+            >
+              Apply
+            </button>
+            {(fromBillNo || toBillNo) && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setFromBillNo('');
+                  setToBillNo('');
+                  fetchData(fromDate, toDate, selectedPlatform, '', '');
+                }}
+                style={{ height: '34px', padding: '0 8px', fontSize: '0.78rem', fontWeight: 750 }}
+                title="Clear bill filter"
+              >
+                ✕
+              </button>
+            )}
           </div>
 
           {/* Channel / OTA Dropdown */}
@@ -256,7 +482,7 @@ export default function BookingAnalysisGraph() {
             {summary.totalBookings}
           </div>
           <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '2px' }}>
-            Across {chartSeries.length} calendar days
+            Across {chartSeries.length} intervals/points
           </div>
         </div>
 
@@ -297,31 +523,39 @@ export default function BookingAnalysisGraph() {
         </div>
       </div>
 
-      {/* Interactive Time Series SVG Graph */}
+      {/* Interactive Time Series SVG Line Graph */}
       <div style={{ position: 'relative', marginBottom: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
           <div style={{ fontSize: '0.86rem', fontWeight: 850, color: '#1e293b' }}>
-            📅 Daily Bookings Trend &amp; Volume ({fromDate} to {toDate})
+            📈 Bookings Volume Line Chart ({fromDate} to {toDate})
+            {(fromBillNo || toBillNo) && (
+              <span style={{ marginLeft: '8px', color: '#0284c7', fontSize: '0.78rem', fontWeight: 700 }}>
+                [Bills: {fromBillNo || 'Start'} → {toBillNo || 'End'}]
+              </span>
+            )}
           </div>
           <div style={{ fontSize: '0.78rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'linear-gradient(180deg, #38bdf8, #0284c7)' }} />
-              Bookings Count
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <svg width="24" height="12" viewBox="0 0 24 12" style={{ verticalAlign: 'middle' }}>
+                <line x1="0" y1="6" x2="24" y2="6" stroke="#06b6d4" strokeWidth="3" />
+                <circle cx="12" cy="6" r="4.5" fill="#ffffff" stroke="#06b6d4" strokeWidth="3" />
+              </svg>
+              Bookings Volume
             </span>
           </div>
         </div>
 
-        {/* SVG Graph Canvas */}
+        {/* SVG Graph Canvas with Orthogonal Gridlines & Line + Circular Node Markers */}
         <div
           style={{
-            background: '#fafafa',
+            background: '#ffffff',
             borderRadius: '12px',
-            border: '1px solid #e2e8f0',
-            padding: '20px 14px 10px',
+            border: '1.5px solid #e2e8f0',
+            padding: '16px 12px 10px',
             overflowX: 'auto',
-            minHeight: '260px',
+            minHeight: '270px',
             display: 'flex',
-            alignItems: 'flex-end',
+            alignItems: 'center',
             position: 'relative'
           }}
         >
@@ -331,133 +565,159 @@ export default function BookingAnalysisGraph() {
             </div>
           ) : chartSeries.length === 0 ? (
             <div style={{ width: '100%', height: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontWeight: 700 }}>
-              No bookings recorded in this date range.
+              No bookings recorded in this filter range.
             </div>
           ) : (
-            <div style={{ width: '100%', minWidth: `${Math.max(chartSeries.length * 48, 500)}px`, height: '220px', position: 'relative' }}>
-              {/* Horizontal Gridlines */}
-              {[0, 0.25, 0.5, 0.75, 1].map((pct, idx) => {
-                const val = Math.round(maxBookings * (1 - pct));
-                return (
-                  <div
-                    key={idx}
-                    style={{
-                      position: 'absolute',
-                      top: `${pct * 170}px`,
-                      left: 0,
-                      right: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      pointerEvents: 'none'
-                    }}
-                  >
-                    <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#94a3b8', width: '22px', textAlign: 'right' }}>
-                      {val}
-                    </span>
-                    <div style={{ flex: 1, borderBottom: '1px dashed #e2e8f0' }} />
-                  </div>
-                );
-              })}
-
-              {/* Bars Row */}
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '32px',
-                  right: 0,
-                  bottom: '24px',
-                  height: '170px',
-                  display: 'flex',
-                  alignItems: 'flex-end',
-                  justifyContent: 'space-around',
-                  gap: '6px'
-                }}
+            <div style={{ width: '100%', minWidth: `${svgWidth}px`, height: `${svgHeight}px`, position: 'relative' }}>
+              <svg
+                width={svgWidth}
+                height={svgHeight}
+                style={{ display: 'block', overflow: 'visible' }}
               >
-                {chartSeries.map((item, idx) => {
-                  const count = Number(item.booking_count || 0);
-                  const barHeightPct = Math.max((count / maxBookings) * 100, count > 0 ? 8 : 2);
-                  const isHovered = hoveredBar?.date === item.date;
-                  const dateLabel = new Date(item.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
-
+                {/* Horizontal Gridlines & Y-axis Labels */}
+                {[0, 0.25, 0.5, 0.75, 1].map((pct, idx) => {
+                  const yPos = paddingTop + plotHeight * pct;
+                  const tickVal = Math.round(maxBookings * (1 - pct));
                   return (
-                    <div
-                      key={idx}
-                      onMouseEnter={() => setHoveredBar(item)}
-                      onMouseLeave={() => setHoveredBar(null)}
-                      style={{
-                        flex: 1,
-                        maxWidth: '42px',
-                        height: '100%',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'flex-end',
-                        position: 'relative',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {/* Count Badge on top of Bar */}
-                      {count > 0 && (
-                        <span
-                          style={{
-                            fontSize: '0.70rem',
-                            fontWeight: 900,
-                            color: isHovered ? '#0284c7' : '#475569',
-                            marginBottom: '4px',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          {count}
-                        </span>
-                      )}
-
-                      {/* Bar Fill */}
-                      <div
-                        style={{
-                          width: '100%',
-                          height: `${barHeightPct}%`,
-                          borderRadius: '6px 6px 2px 2px',
-                          background: isHovered
-                            ? 'linear-gradient(180deg, #0284c7, #0369a1)'
-                            : count > 0
-                            ? 'linear-gradient(180deg, #38bdf8, #0284c7)'
-                            : '#e2e8f0',
-                          transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                          boxShadow: isHovered ? '0 4px 12px rgba(2,132,199,0.4)' : 'none',
-                          transform: isHovered ? 'scaleY(1.04)' : 'none',
-                          transformOrigin: 'bottom'
-                        }}
+                    <g key={`h-grid-${idx}`}>
+                      <line
+                        x1={paddingLeft}
+                        y1={yPos}
+                        x2={svgWidth - paddingRight}
+                        y2={yPos}
+                        stroke="#e2e8f0"
+                        strokeWidth="1.2"
                       />
-
-                      {/* X-axis Date Label */}
-                      <span
-                        style={{
-                          position: 'absolute',
-                          bottom: '-22px',
-                          fontSize: '0.66rem',
-                          fontWeight: isHovered ? 900 : 700,
-                          color: isHovered ? '#0284c7' : '#64748b',
-                          whiteSpace: 'nowrap'
-                        }}
+                      <text
+                        x={paddingLeft - 10}
+                        y={yPos + 4}
+                        textAnchor="end"
+                        fontSize="11"
+                        fontWeight="750"
+                        fill="#94a3b8"
                       >
-                        {dateLabel}
-                      </span>
-                    </div>
+                        {tickVal}
+                      </text>
+                    </g>
                   );
                 })}
-              </div>
+
+                {/* Vertical Gridlines & X-axis Labels */}
+                {points.map((pt, idx) => {
+                  const isHovered = hoveredPoint?.date === pt.date && hoveredPoint?.label === pt.label;
+                  return (
+                    <g key={`v-grid-${idx}`}>
+                      <line
+                        x1={pt.x}
+                        y1={paddingTop}
+                        x2={pt.x}
+                        y2={paddingTop + plotHeight}
+                        stroke="#e2e8f0"
+                        strokeWidth="1.2"
+                      />
+                      <text
+                        x={pt.x}
+                        y={paddingTop + plotHeight + 20}
+                        textAnchor="middle"
+                        fontSize="10.5"
+                        fontWeight={isHovered ? '850' : '650'}
+                        fill={isHovered ? '#0284c7' : '#64748b'}
+                      >
+                        {pt.label}
+                      </text>
+                    </g>
+                  );
+                })}
+
+                {/* Hover Vertical Guide Line */}
+                {hoveredPoint && (
+                  <line
+                    x1={hoveredPoint.x}
+                    y1={paddingTop}
+                    x2={hoveredPoint.x}
+                    y2={paddingTop + plotHeight}
+                    stroke="#0891b2"
+                    strokeWidth="1.5"
+                    strokeDasharray="4 4"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
+
+                {/* Connected Teal/Cyan Line */}
+                {linePath && (
+                  <path
+                    d={linePath}
+                    fill="none"
+                    stroke="#06b6d4"
+                    strokeWidth="3.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                )}
+
+                {/* Circular Node Markers (Matching user's reference image) */}
+                {points.map((pt, idx) => {
+                  const isHovered = hoveredPoint?.date === pt.date && hoveredPoint?.label === pt.label;
+                  const count = Number(pt.booking_count || 0);
+
+                  return (
+                    <g key={`node-${idx}`}>
+                      {/* Count badge above node if > 0 */}
+                      {count > 0 && (
+                        <text
+                          x={pt.x}
+                          y={pt.y - 10}
+                          textAnchor="middle"
+                          fontSize="10.5"
+                          fontWeight="850"
+                          fill={isHovered ? '#0284c7' : '#475569'}
+                        >
+                          {count}
+                        </text>
+                      )}
+
+                      {/* Circular Ring Marker */}
+                      <circle
+                        cx={pt.x}
+                        cy={pt.y}
+                        r={isHovered ? 7.5 : 5.5}
+                        fill="#ffffff"
+                        stroke={isHovered ? '#0891b2' : '#06b6d4'}
+                        strokeWidth={isHovered ? 4 : 3.5}
+                        style={{
+                          transition: 'all 0.18s cubic-bezier(0.4, 0, 0.2, 1)',
+                          filter: isHovered ? 'drop-shadow(0px 3px 6px rgba(6,182,212,0.5))' : 'none',
+                          cursor: 'pointer'
+                        }}
+                        onMouseEnter={() => setHoveredPoint(pt)}
+                        onMouseLeave={() => setHoveredPoint(null)}
+                      />
+
+                      {/* Invisible larger hover hit area */}
+                      <circle
+                        cx={pt.x}
+                        cy={pt.y}
+                        r="18"
+                        fill="transparent"
+                        style={{ cursor: 'pointer' }}
+                        onMouseEnter={() => setHoveredPoint(pt)}
+                        onMouseLeave={() => setHoveredPoint(null)}
+                      />
+                    </g>
+                  );
+                })}
+              </svg>
             </div>
           )}
         </div>
 
         {/* Hover Tooltip Card */}
-        {hoveredBar && (
+        {hoveredPoint && (
           <div
             style={{
               position: 'absolute',
-              top: '10px',
-              right: '20px',
+              top: '12px',
+              right: '24px',
               background: '#0f172a',
               color: '#ffffff',
               borderRadius: '10px',
@@ -466,23 +726,24 @@ export default function BookingAnalysisGraph() {
               boxShadow: '0 10px 25px rgba(0,0,0,0.35)',
               zIndex: 10,
               pointerEvents: 'none',
-              minWidth: '170px'
+              minWidth: '180px',
+              border: '1px solid #334155'
             }}
           >
             <div style={{ fontWeight: 850, borderBottom: '1px solid #334155', paddingBottom: '4px', marginBottom: '6px', color: '#38bdf8' }}>
-              📅 {new Date(hoveredBar.date).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
+              📅 {hoveredPoint.label} {hoveredPoint.date && hoveredPoint.date !== hoveredPoint.label ? `(${hoveredPoint.date})` : ''}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', margin: '2px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', margin: '3px 0' }}>
               <span style={{ color: '#94a3b8' }}>Bookings:</span>
-              <strong style={{ color: '#fff' }}>{hoveredBar.booking_count}</strong>
+              <strong style={{ color: '#ffffff' }}>{hoveredPoint.booking_count}</strong>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', margin: '2px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', margin: '3px 0' }}>
               <span style={{ color: '#94a3b8' }}>Rooms:</span>
-              <strong style={{ color: '#fff' }}>{hoveredBar.rooms_count}</strong>
+              <strong style={{ color: '#ffffff' }}>{hoveredPoint.rooms_count}</strong>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', margin: '2px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', margin: '3px 0' }}>
               <span style={{ color: '#94a3b8' }}>Revenue:</span>
-              <strong style={{ color: '#4ade80' }}>{formatCurrency(hoveredBar.total_revenue)}</strong>
+              <strong style={{ color: '#4ade80' }}>{formatCurrency(hoveredPoint.total_revenue)}</strong>
             </div>
           </div>
         )}
@@ -644,4 +905,3 @@ export default function BookingAnalysisGraph() {
     </div>
   );
 }
-

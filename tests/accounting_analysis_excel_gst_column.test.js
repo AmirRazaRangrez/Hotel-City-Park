@@ -2,40 +2,43 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
-describe('Accounting & Analysis: GST No of Customer Column Added After Invoice Number', () => {
+describe('Accounting & Analysis: Expenses (Base), Company and GST Columns', () => {
   const printServicePath = path.resolve(__dirname, '../src/services/printService.js');
   const printServiceCode = fs.readFileSync(printServicePath, 'utf-8');
 
   const managePagePath = path.resolve(__dirname, '../src/pages/ManagePage.jsx');
   const managePageCode = fs.readFileSync(managePagePath, 'utf-8');
 
-  it('1. Verifies exportAccountingAnalysisToExcel has "GST No of Customer" right after "Invoice number"', () => {
-    // Header check
-    expect(printServiceCode).toMatch(
-      /<Cell ss:StyleID="Header"><Data ss:Type="String">Invoice number<\/Data><\/Cell>\s*<Cell ss:StyleID="Header"><Data ss:Type="String">GST No of Customer<\/Data><\/Cell>/
-    );
+  it('1. Verifies exportAccountingAnalysisToExcel has Expenses (Base), Company and GST No columns', () => {
+    // Header check includes Expenses (Base) and Company / GST columns
+    expect(printServiceCode).toContain('<Data ss:Type="String">Expenses (Base)</Data>');
+    expect(printServiceCode).toContain('<Data ss:Type="String">Other Discount</Data>');
+    expect(printServiceCode).toContain('<Data ss:Type="String">Name Of Customer GST</Data>');
+    expect(printServiceCode).toContain('<Data ss:Type="String">GST No of Customer</Data>');
 
     // Data row check
     expect(printServiceCode).toMatch(
-      /\$\{escapeHtml\(r\.invoice_number \|\| '-'\)\}<\/Data><\/Cell>\s*<Cell ss:StyleID="DataCenter"><Data ss:Type="String">\$\{escapeHtml\(r\.gst_no_of_customer \|\| '-'\)\}/
+      /<Cell ss:StyleID="DataCenter"><Data ss:Type="String">\$\{escapeHtml\(r\.gst_no_of_customer \|\| '-'\)\}/
     );
   });
 
-  it('2. Verifies exportAccountingAnalysisToCsv has "GST No of Customer" right after "Invoice number"', () => {
+  it('2. Verifies exportAccountingAnalysisToCsv has Expenses (Base), Company and GST No columns', () => {
     // CSV headers check
-    expect(printServiceCode).toMatch(
-      /'Invoice number',\s*'GST No of Customer',\s*'Name of customer'/
-    );
+    expect(printServiceCode).toContain("'Expenses (Base)'");
+    expect(printServiceCode).toContain("'Other Discount'");
+    expect(printServiceCode).toContain("'Name Of Customer GST'");
+    expect(printServiceCode).toContain("'GST No of Customer'");
 
     // CSV data row check
     expect(printServiceCode).toMatch(
-      /escapeCsv\(r\.invoice_number \|\| '-'\),\s*escapeCsv\(r\.gst_no_of_customer \|\| '-'\),\s*escapeCsv\(r\.name_of_customer \|\| '-'\)/
+      /escapeCsv\(r\.gst_no_of_company \|\| r\.gst_no_of_customer \|\| '-'\)/
     );
   });
 
-  it('3. Verifies ManagePage Accounting table has "GST No of Customer" column right after "Invoice number"', () => {
-    expect(managePageCode).toMatch(
-      /<th[^>]*>Invoice number<\/th>\s*<th[^>]*>GST No of Customer<\/th>\s*<th[^>]*>Name of customer<\/th>/
-    );
+  it('3. Verifies ManagePage Accounting table has Expenses (Base), Company and GST No columns', () => {
+    expect(managePageCode).toContain('Expenses (Base)');
+    expect(managePageCode).toContain('Other Discount');
+    expect(managePageCode).toContain('Name Of Company');
+    expect(managePageCode).toContain('GST No of Company');
   });
 });

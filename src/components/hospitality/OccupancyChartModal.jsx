@@ -179,11 +179,10 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
   // Breakfast counts
   const breakfastStats = useMemo(() => {
     const occupied = chartData.filter((r) => r.is_occupied);
-    const withBreakfast = occupied.filter((r) => String(r.breakfast || '').trim().toLowerCase() === 'yes').length;
-    const withoutBreakfast = occupied.filter((r) => String(r.breakfast || '').trim().toLowerCase() !== 'yes').length;
+    const withBreakfast = occupied.filter((r) => (Number(r.breakfast_pax) > 0) || String(r.breakfast || '').trim().toLowerCase() === 'yes').length;
+    const withoutBreakfast = occupied.filter((r) => (Number(r.breakfast_pax) === 0) && String(r.breakfast || '').trim().toLowerCase() !== 'yes').length;
     const totalBreakfastPax = summary?.totalBreakfastPax ?? occupied
-      .filter((r) => String(r.breakfast || '').trim().toLowerCase() === 'yes')
-      .reduce((sum, r) => sum + (Number(r.breakfast_pax !== undefined ? r.breakfast_pax : (r.adults !== undefined ? r.adults : r.pax)) || 0), 0);
+      .reduce((sum, r) => sum + (Number(r.breakfast_pax !== undefined ? r.breakfast_pax : (String(r.breakfast || '').trim().toLowerCase() === 'yes' ? (r.adults !== undefined ? r.adults : r.pax) : 0)) || 0), 0);
     return { withBreakfast, withoutBreakfast, totalBreakfastPax };
   }, [chartData, summary]);
 
@@ -316,14 +315,24 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
     const occupancyPercentage = allTotal > 0 ? Math.round((occupiedTotal / allTotal) * 100) : 0;
     const totalGuestsPax = summary?.totalPax || rowsToPrint.filter((r) => r.is_occupied).reduce((sum, r) => sum + (Number(r.pax) || 0), 0);
     const totalBreakfastPax = summary?.totalBreakfastPax ?? rowsToPrint
-      .filter((r) => r.is_occupied && String(r.breakfast || '').trim().toLowerCase() === 'yes')
-      .reduce((sum, r) => sum + (Number(r.breakfast_pax !== undefined ? r.breakfast_pax : (r.adults !== undefined ? r.adults : r.pax)) || 0), 0);
+      .filter((r) => r.is_occupied)
+      .reduce((sum, r) => sum + (Number(r.breakfast_pax !== undefined ? r.breakfast_pax : (String(r.breakfast || '').trim().toLowerCase() === 'yes' ? (r.adults !== undefined ? r.adults : r.pax) : 0)) || 0), 0);
 
     const rowsHtml = rowsToPrint
       .map((r) => {
         if (r.is_occupied) {
           const arrFormatted = formatChartDateTime(r.checkin_time);
           const depFormatted = formatChartDateTime(r.approx_checkout_time);
+          const bPax = Number(r.breakfast_pax);
+          const hasB = (bPax > 0) || String(r.breakfast || '').trim().toLowerCase() === 'yes';
+          let bHtml = '<span style="color: #64748b; font-weight: 700;">No</span>';
+          if (hasB) {
+            const countLabel = bPax > 0 ? `(${bPax} Pax)` : '';
+            bHtml = `
+              <div style="font-weight: 800; color: #15803d;">Yes</div>
+              ${countLabel ? `<div style="font-size: 8.5px; color: #166534; font-weight: 800; line-height: 1.1;">${countLabel}</div>` : ''}
+            `;
+          }
           return `
             <tr>
               <td class="col-room">${r.room_number}</td>
@@ -332,7 +341,7 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
               <td class="col-company">${r.company || ''}</td>
               <td class="col-dis">${r.discount_pct || ''}</td>
               <td class="col-city">${r.city || ''}</td>
-              <td class="col-breakfast">${r.breakfast || 'No'}</td>
+              <td class="col-breakfast">${bHtml}</td>
               <td class="col-pax">${r.pax || '1'}</td>
               <td class="col-dates">
                 <div class="date-arr">${arrFormatted}</div>
@@ -1450,12 +1459,12 @@ export default function OccupancyChartModal({ isOpen, onClose }) {
                                     borderRadius: '12px',
                                     fontSize: '0.74rem',
                                     fontWeight: 800,
-                                    background: r.breakfast === 'Yes' ? '#dcfce7' : '#f1f5f9',
-                                    color: r.breakfast === 'Yes' ? '#15803d' : '#64748b',
-                                    border: r.breakfast === 'Yes' ? '1px solid #bbf7d0' : '1px solid #e2e8f0'
+                                    background: (r.breakfast_pax > 0 || r.breakfast === 'Yes') ? '#dcfce7' : '#f1f5f9',
+                                    color: (r.breakfast_pax > 0 || r.breakfast === 'Yes') ? '#15803d' : '#64748b',
+                                    border: (r.breakfast_pax > 0 || r.breakfast === 'Yes') ? '1px solid #bbf7d0' : '1px solid #e2e8f0'
                                   }}
                                 >
-                                  {r.breakfast || 'No'}
+                                  {r.breakfast_display || (Number(r.breakfast_pax) > 0 ? `Yes (${r.breakfast_pax} Pax)` : (r.breakfast || 'No'))}
                                 </span>
                               </td>
                               <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 800, borderRight: '1px solid var(--border-subtle, #e2e8f0)' }}>

@@ -115,27 +115,41 @@ export function cleanVoucherNumber(val) {
  * Formats a voucher or invoice reference into official Tax Invoice number (e.g. "260926-600" -> "HCP600")
  * Extracts the sequential bill number and prefixes with 'HCP' (Hotel City Park).
  */
-export function formatTaxInvoiceNumber(val) {
-  if (!val) return 'HCP1';
-  const str = String(val).trim();
-  // Already in HCP<digits> format (e.g. "HCP600", "HCP1573")
-  if (/^HCP\d+$/i.test(str)) {
-    return str.toUpperCase();
+export function formatTaxInvoiceNumber(val, fallbackVal = '') {
+  if (!val && !fallbackVal) return 'HCP1';
+
+  const tryFormat = (target) => {
+    if (!target) return null;
+    const str = String(target).trim();
+    // Already in HCP<digits> format (e.g. "HCP600", "HCP1573")
+    if (/^HCP\d+$/i.test(str)) {
+      return str.toUpperCase();
+    }
+    // Legacy L<digits> format (e.g. "L600" -> "HCP600")
+    if (/^L\d+$/i.test(str)) {
+      return `HCP${str.slice(1)}`;
+    }
+    // Has hyphen with sequential number (e.g. "260926-600", "20260926-600", "INV-600")
+    const match = str.match(/-(\d+)$/);
+    if (match) {
+      return `HCP${match[1]}`;
+    }
+    // Short bill number (e.g. "600", "1", "45")
+    if (/^\d{1,4}$/.test(str)) {
+      return `HCP${str}`;
+    }
+    return null;
+  };
+
+  const primary = tryFormat(val);
+  if (primary) return primary;
+
+  if (fallbackVal) {
+    const secondary = tryFormat(fallbackVal);
+    if (secondary) return secondary;
   }
-  // Legacy L<digits> format (e.g. "L600" -> "HCP600")
-  if (/^L\d+$/i.test(str)) {
-    return `HCP${str.slice(1)}`;
-  }
-  // Has hyphen with sequential number (e.g. "260926-600", "20260926-600", "INV-600")
-  const match = str.match(/-(\d+)$/);
-  if (match) {
-    return `HCP${match[1]}`;
-  }
-  // Short bill number (e.g. "600", "1", "45")
-  if (/^\d{1,4}$/.test(str)) {
-    return `HCP${str}`;
-  }
-  return str;
+
+  return String(val || fallbackVal || 'HCP1').trim();
 }
 
 /**

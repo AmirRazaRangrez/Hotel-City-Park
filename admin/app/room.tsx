@@ -562,21 +562,29 @@ export default function RoomDetails() {
           const discount = Number(sc?.discountAmount ?? fs.discountAmount ?? fs.discount ?? (found?.discount || 0));
           const tariffSubtotal = isPrepaid ? otaBill : Number(sc?.baseRoomTotal ?? sc?.baseRoomTariff ?? (roomCharge + discount));
 
-          let total = Number(fs.grandTotal ?? sc?.grandTotal);
+          let total = Number(fs.grandTotal ?? sc?.grandTotal ?? fr.total_room_charge ?? 0);
           if (isPrepaid && otaBill > 0 && (!total || total < otaBill)) {
             total = otaBill + deskExtras + foodTotal + barTotal + damagesExpenses;
-          } else if (!total) {
+          } else if (!total || total === 0) {
             total = (isPrepaid ? otaBill : roomCharge) + foodTotal + barTotal + deskExtras + damagesExpenses - discount;
           }
 
-          let paid = Number(fs.advancePaid ?? sc?.paid ?? fr.total_paid ?? (found?.paid || 0));
+          let paid = Number(fs.advancePaid ?? sc?.paid ?? fr.total_paid ?? fr.advance_payment ?? (found?.paid || 0));
           if (isPrepaid && otaBill > 0 && paid < otaBill) {
             const deskPaid = Number(fs.initialPaid ?? fr.advance_payment ?? fr.total_paid ?? 0);
             paid = otaBill + deskPaid;
           }
 
+          if (total === 0 && paid > 0) {
+            total = paid; // Protect against 0 total causing false refund
+          }
+
           const pending = Number(fs.balanceDue ?? sc?.balanceDue ?? Math.max(0, total - paid));
-          const refundDue = Number(sc?.refundDue ?? (paid > total ? paid - total : 0));
+          const refundDue = Number(
+            (total > 0 && paid > total && (!sc || sc.refundDue !== undefined))
+              ? (sc?.refundDue ?? (paid - total))
+              : 0
+          );
 
           return {
             isCheckout: isCheckoutParam,
@@ -640,6 +648,9 @@ export default function RoomDetails() {
             paid,
             pending,
             refundDue,
+            stayDuration: sc?.stayDurationStr || (found?.stayDuration) || '1 Day',
+            advanceReceiptNo: fr.advance_receipt_no || fs.advanceReceiptNo || found?.advanceReceiptNo || '',
+            paymentMode: fr.advance_payment_mode || fs.paymentMode || found?.paymentMode || 'Cash',
             source: fr.booking_source || found?.source || 'Walk-in',
             booking_source: fr.booking_source || found?.source || 'Walk-in',
             otaPlatform: fr.ota_platform || fr.otaPlatform || found?.otaPlatform || found?.ota_platform || '',
@@ -657,8 +668,6 @@ export default function RoomDetails() {
             checkedInBy: fr.checked_in_by || found?.checkedInBy || 'Front Desk',
             mealPlan: fr.meal_plan || found?.mealPlan || 'EP (Room Only)',
             voucherNumber: fr.voucher_number || found?.voucherNumber || '',
-            advanceReceiptNo: fr.advance_receipt_no || found?.advanceReceiptNo || '',
-            paymentMode: fr.advance_payment_mode || found?.paymentMode || 'Cash',
             folioRestaurantOrders: folio.restaurantOrders || [],
             folioBarOrders: folio.barOrders || [],
             folioOrders: mergedOrders,
@@ -995,17 +1004,40 @@ export default function RoomDetails() {
     if (sOnline > 0 && sCash === 0 && sCard === 0 && sCheque === 0) return 'UPI';
     if (sCard > 0 && sCash === 0 && sOnline === 0 && sCheque === 0) return 'CARD';
     if (sCheque > 0 && sCash === 0 && sOnline === 0 && sCard === 0) return 'CHEQUE';
-    if (sCash > 0 && (sOnline > 0 || sCard > 0 || sCheque > 0)) return 'SPLIT';
+    if (sCash > 0 && (sOnline > 0 || sCard > 0 || sCheque > 0)) {
+      const parts = ['CASH'];
+      if (sOnline > 0) parts.push('UPI');
+      if (sCard > 0) parts.push('CARD');
+      if (sCheque > 0) parts.push('CHEQUE');
+      return `SPLIT (${parts.join(' + ')})`;
+    }
     if (p.utr_number || p.utr || (p.notes && /upi|online|gpay|phonepe/i.test(p.notes))) return 'UPI';
     if (p.card_digits || (p.notes && /pos|card|swipe/i.test(p.notes))) return 'CARD';
     if (Number(p.card_surcharge || 0) > 0) return 'CARD';
     if (Number(p.upi_tax || 0) > 0) return 'UPI';
     let raw = String(p.payment_mode || p.mode || '').trim();
-    if (raw && raw.toLowerCase() !== 'cash') return raw.toUpperCase();
-    if (s?.paymentMode && s.paymentMode.toLowerCase() !== 'cash') return s.paymentMode.toUpperCase();
+    if (raw) {
+      const low = raw.toLowerCase();
+      if (low === 'cash') return 'CASH';
+      if (low === 'upi' || low === 'online' || low === 'gpay' || low === 'phonepe') return 'UPI';
+      if (low === 'card' || low === 'pos' || low === 'debit' || low === 'credit') return 'CARD';
+      if (low === 'cheque' || low === 'check') return 'CHEQUE';
+      if (low === 'btc' || low.includes('company')) return 'BILL TO COMPANY (BTC)';
+      if (low.includes('prepaid')) return raw.toUpperCase();
+      return raw.toUpperCase();
+    }
+    if (s?.paymentMode) {
+      const low = s.paymentMode.toLowerCase();
+      if (low === 'cash') return 'CASH';
+      if (low === 'upi' || low === 'online') return 'UPI';
+      if (low === 'card' || low === 'pos') return 'CARD';
+      if (low === 'cheque') return 'CHEQUE';
+      if (low === 'btc' || low.includes('company')) return 'BILL TO COMPANY (BTC)';
+      return s.paymentMode.toUpperCase();
+    }
     if (sOnline > 0) return 'UPI';
     if (sCard > 0) return 'CARD';
-    return (raw || 'CASH').toUpperCase();
+    return 'CASH';
   };
 
   const isOtaPrepaidStay = Boolean(s?.isPrepaid || s?.is_prepaid || s?.rateType === 'prepaid' || (s?.bookingSource === 'OTA' && s?.isPrepaid));
@@ -1018,21 +1050,21 @@ export default function RoomDetails() {
     : (Array.isArray(s?.raw?.payments) && s.raw.payments.length > 0
         ? [...s.raw.payments]
         : (Number(s?.paid || s?.total || 0) > 0 && !isOtaPrepaidStay ? [{
-            id: s?.id || 1,
+            id: s?.advanceReceiptNo || s?.raw?.advance_receipt_no || s?.id || 1,
             amount: Number(s?.paid || s?.total || 0),
-            payment_mode: s?.paymentMode || s?.raw?.final_settlement_mode || s?.raw?.advance_payment_mode || 'Cash',
-            mode: s?.paymentMode || s?.raw?.final_settlement_mode || s?.raw?.advance_payment_mode || 'Cash',
+            payment_mode: s?.paymentMode || s?.raw?.advance_payment_mode || s?.raw?.final_settlement_mode || 'Cash',
+            mode: s?.paymentMode || s?.raw?.advance_payment_mode || s?.raw?.final_settlement_mode || 'Cash',
             created_at: s?.checkIn || new Date().toISOString(),
             date: s?.checkIn || new Date().toISOString(),
             cashier_name: s?.checkedInBy || s?.checkedOutBy || 'Front Desk Staff',
             cashier: s?.checkedInBy || s?.checkedOutBy || 'Front Desk Staff',
-            receipt_no: s?.advanceReceiptNo || s?.raw?.final_receipt_no || ('RCP-' + (s?.id || '001')),
-            receiptNo: s?.advanceReceiptNo || s?.raw?.final_receipt_no || ('RCP-' + (s?.id || '001')),
-            notes: 'paid while checkin : ' + (s?.paymentMode || 'Cash'),
+            receipt_no: s?.advanceReceiptNo || s?.raw?.advance_receipt_no || s?.raw?.final_receipt_no || (s?.id ? ('CR' + s.id) : 'CR01'),
+            receiptNo: s?.advanceReceiptNo || s?.raw?.advance_receipt_no || s?.raw?.final_receipt_no || (s?.id ? ('CR' + s.id) : 'CR01'),
+            notes: 'Paid at reception desk (Check-In Advance)',
             payment_type: 'advance',
-            split_cash: s?.splitCash || 0,
-            split_online: s?.splitOnline || 0,
-            split_card: s?.splitCard || 0,
+            split_cash: s?.splitCash || (String(s?.paymentMode || '').toLowerCase() === 'cash' ? Number(s?.paid || 0) : 0),
+            split_online: s?.splitOnline || (String(s?.paymentMode || '').toLowerCase() === 'upi' ? Number(s?.paid || 0) : 0),
+            split_card: s?.splitCard || (String(s?.paymentMode || '').toLowerCase() === 'card' ? Number(s?.paid || 0) : 0),
             split_cheque: s?.splitCheque || 0
           }] : []));
 
@@ -1384,8 +1416,16 @@ export default function RoomDetails() {
                 </View>
               </View>
               <Badge
-                text={s.refundDue > 0 ? `REFUND ${money(s.refundDue)}` : (s.pending > 0 ? `DUE ${money(s.pending)}` : 'SETTLED / PAID')}
-                color={s.refundDue > 0 ? c.ok : (s.pending > 0 ? c.warn : c.ok)}
+                text={
+                  (s.refundDue > 0.5 && s.total > 0 && s.paid > s.total)
+                    ? `REFUND ${money(s.refundDue)}`
+                    : (s.pending > 0.5 ? `DUE ${money(s.pending)}` : 'SETTLED / PAID (₹0 Due)')
+                }
+                color={
+                  (s.refundDue > 0.5 && s.total > 0 && s.paid > s.total)
+                    ? c.ok
+                    : (s.pending > 0.5 ? c.warn : c.ok)
+                }
               />
             </View>
             <View style={styles.heroDivider} />
@@ -1399,9 +1439,11 @@ export default function RoomDetails() {
                 <Text style={[styles.heroStatVal, { color: c.ok }]}>{money(s.paid)}</Text>
               </View>
               <View style={styles.heroStatItem}>
-                <Text style={styles.heroStatLabel}>{s.refundDue > 0 ? 'Refund Due' : 'Due Balance'}</Text>
-                <Text style={[styles.heroStatVal, { color: s.refundDue > 0 ? c.ok : (s.pending > 0 ? c.bad : c.ok) }]}>
-                  {money(s.refundDue > 0 ? s.refundDue : s.pending)}
+                <Text style={styles.heroStatLabel}>
+                  {(s.refundDue > 0.5 && s.total > 0 && s.paid > s.total) ? 'Refund Due' : 'Due Balance'}
+                </Text>
+                <Text style={[styles.heroStatVal, { color: (s.refundDue > 0.5 && s.total > 0 && s.paid > s.total) ? c.ok : (s.pending > 0.5 ? c.bad : c.ok) }]}>
+                  {money((s.refundDue > 0.5 && s.total > 0 && s.paid > s.total) ? s.refundDue : s.pending)}
                 </Text>
               </View>
             </View>
@@ -1594,7 +1636,9 @@ export default function RoomDetails() {
                 ) : null}
               </>
             ) : null}
-            <DetailRow label="Meal Plan" value={s.mealPlan} />
+            <DetailRow label="Meal Plan" value={mealPlanDisplay} />
+            <DetailRow label="Advance Receipt" value={s.advanceReceiptNo || s.raw?.advance_receipt_no || (s.id ? ('CR' + s.id) : '-')} bold />
+            <DetailRow label="Payment Mode" value={resolveItemPaymentMode({ payment_mode: s.paymentMode || s.raw?.advance_payment_mode })} bold />
             <DetailRow label="Checked-in By" value={s.checkedInBy || 'Front Desk Staff'} />
             {s.voucherNumber ? <DetailRow label="Bill No" value={s.voucherNumber} bold /> : null}
           </Card>

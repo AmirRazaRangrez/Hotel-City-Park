@@ -1,6 +1,16 @@
-const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+
+let Database;
+try {
+  Database = require('better-sqlite3');
+} catch (e) {
+  try {
+    Database = require(path.join(__dirname, 'node_modules', 'better-sqlite3'));
+  } catch (_) {
+    throw e;
+  }
+}
 
 // Automatically load .env configuration if present
 const envPath = path.join(__dirname, '.env');
@@ -430,12 +440,13 @@ const seedDefaultMenus = () => {
   try {
     // Restaurant categories
     const restCats = [
-      { name: 'Starters & Tandoor', sort_order: 2 },
-      { name: 'Main Course - Veg', sort_order: 3 },
-      { name: 'Main Course - Non-Veg', sort_order: 4 },
-      { name: 'Biryani & Rice', sort_order: 5 },
-      { name: 'Roti & Breads', sort_order: 6 },
-      { name: 'Desserts & Beverages', sort_order: 7 }
+      { name: 'Breakfast & Hot/Cold Drinks', sort_order: 1 },
+      { name: 'Snacks', sort_order: 2 },
+      { name: 'Chinese', sort_order: 3 },
+      { name: 'Roti', sort_order: 4 },
+      { name: 'Main Course', sort_order: 5 },
+      { name: 'Rice', sort_order: 6 },
+      { name: 'Beverages', sort_order: 7 }
     ];
     for (const cat of restCats) {
       db.prepare(`
@@ -461,46 +472,84 @@ const seedDefaultMenus = () => {
 
     // Restaurant menu items
     const restDishes = [
-      { category: 'Starters & Tandoor', name: 'Paneer Tikka', price: 240, shortcode: '102', is_veg: 1, desc: 'Cottage cheese marinated in spices and grilled in tandoor' },
-      { category: 'Starters & Tandoor', name: 'Veg Crispy', price: 180, shortcode: '103', is_veg: 1, desc: 'Crispy fried vegetables tossed in spicy sweet sauce' },
-      { category: 'Starters & Tandoor', name: 'Crispy Corn', price: 190, shortcode: '104', is_veg: 1, desc: 'Golden fried sweet corn with onions and chili' },
-      { category: 'Starters & Tandoor', name: 'Hara Bhara Kebab', price: 200, shortcode: '105', is_veg: 1, desc: 'Spiced spinach and green pea patties' },
-      { category: 'Starters & Tandoor', name: 'Chicken Tikka', price: 280, shortcode: '106', is_veg: 0, desc: 'Boneless chicken cubes grilled with tandoori spices' },
-      { category: 'Starters & Tandoor', name: 'Chicken Tandoori (Half)', price: 290, shortcode: '107', is_veg: 0, desc: 'Traditional bone-in chicken roasted in clay oven' },
-      { category: 'Starters & Tandoor', name: 'Chicken 65', price: 250, shortcode: '108', is_veg: 0, desc: 'Deep-fried spicy chicken with curry leaves' },
-      { category: 'Starters & Tandoor', name: 'Mutton Seekh Kebab', price: 340, shortcode: '109', is_veg: 0, desc: 'Minced mutton skewers seasoned with Indian spices' },
+      // Breakfast & Hot/Cold Drinks
+      { category: 'Breakfast & Hot/Cold Drinks', name: 'Buffet Breakfast', price: 250, shortcode: '101', is_veg: 1, desc: 'Buffet breakfast spread' },
+      { category: 'Breakfast & Hot/Cold Drinks', name: 'Tea', price: 40, shortcode: '102', is_veg: 1, desc: 'Hot brewed tea' },
+      { category: 'Breakfast & Hot/Cold Drinks', name: 'Coffee', price: 50, shortcode: '103', is_veg: 1, desc: 'Hot fresh coffee' },
+      { category: 'Breakfast & Hot/Cold Drinks', name: 'Milk (Cold/Hot)', price: 65, shortcode: '104', is_veg: 1, desc: 'Fresh cold or hot milk' },
+      { category: 'Breakfast & Hot/Cold Drinks', name: 'Bournvita', price: 70, shortcode: '105', is_veg: 1, desc: 'Hot malt chocolate beverage' },
+      { category: 'Breakfast & Hot/Cold Drinks', name: 'Boost / Horlicks', price: 70, shortcode: '106', is_veg: 1, desc: 'Health drink beverage' },
+      { category: 'Breakfast & Hot/Cold Drinks', name: 'Limbu Sharbat', price: 40, shortcode: '107', is_veg: 1, desc: 'Refreshing lemon cooler' },
+      { category: 'Breakfast & Hot/Cold Drinks', name: 'Rose Sharbat', price: 50, shortcode: '108', is_veg: 1, desc: 'Sweet aromatic rose cooler' },
+      { category: 'Breakfast & Hot/Cold Drinks', name: 'Fresh Lime Soda (Salted/Sweet)', price: 50, shortcode: '109', is_veg: 1, desc: 'Chilled soda with fresh lime juice' },
 
-      { category: 'Main Course - Veg', name: 'Paneer Butter Masala', price: 260, shortcode: '110', is_veg: 1, desc: 'Rich tomato gravy with soft paneer cubes and butter' },
-      { category: 'Main Course - Veg', name: 'Kaju Curry', price: 290, shortcode: '111', is_veg: 1, desc: 'Roasted cashews simmered in luscious makhani gravy' },
-      { category: 'Main Course - Veg', name: 'Veg Kolhapuri', price: 220, shortcode: '112', is_veg: 1, desc: 'Spicy mixed vegetables cooked in Kolhapuri masala' },
-      { category: 'Main Course - Veg', name: 'Dal Tadka', price: 170, shortcode: '113', is_veg: 1, desc: 'Yellow lentils tempered with cumin, garlic and ghee' },
-      { category: 'Main Course - Veg', name: 'Dal Makhani', price: 210, shortcode: '114', is_veg: 1, desc: 'Slow-cooked black lentils with cream and butter' },
-      { category: 'Main Course - Veg', name: 'Mix Veg Handi', price: 230, shortcode: '115', is_veg: 1, desc: 'Seasonal vegetables in mild fragrant curry' },
+      // Snacks
+      { category: 'Snacks', name: 'Boiled Peanuts', price: 70, shortcode: '110', is_veg: 1, desc: 'Warm seasoned boiled peanuts' },
+      { category: 'Snacks', name: 'Masala Peanuts', price: 55, shortcode: '111', is_veg: 1, desc: 'Spiced crispy peanuts' },
+      { category: 'Snacks', name: 'Papad Roasted', price: 30, shortcode: '112', is_veg: 1, desc: 'Crispy roasted papad' },
+      { category: 'Snacks', name: 'Papad Fried', price: 40, shortcode: '113', is_veg: 1, desc: 'Crisp deep fried papad' },
+      { category: 'Snacks', name: 'Masala Papad', price: 60, shortcode: '114', is_veg: 1, desc: 'Papad topped with spiced onions and tomatoes' },
+      { category: 'Snacks', name: 'Mix Pakoda', price: 150, shortcode: '115', is_veg: 1, desc: 'Assorted crispy vegetable fritters' },
+      { category: 'Snacks', name: 'Pakoda Kanda', price: 140, shortcode: '116', is_veg: 1, desc: 'Crispy spiced onion fritters' },
+      { category: 'Snacks', name: 'Pakoda Mirchi', price: 140, shortcode: '117', is_veg: 1, desc: 'Stuffed spicy green chili fritters' },
+      { category: 'Snacks', name: 'Pakoda Disco', price: 130, shortcode: '118', is_veg: 1, desc: 'Special hotel crunchy disco pakoda' },
+      { category: 'Snacks', name: 'Pakoda Cheese', price: 160, shortcode: '119', is_veg: 1, desc: 'Golden cheese stuffed fritters' },
+      { category: 'Snacks', name: 'Finger Chips', price: 150, shortcode: '120', is_veg: 1, desc: 'Golden crispy French fries' },
+      { category: 'Snacks', name: 'Egg Fry Masala', price: 130, shortcode: '121', is_veg: 0, desc: 'Pan-fried spiced eggs' },
+      { category: 'Snacks', name: 'Egg Boiled (2 eggs)', price: 60, shortcode: '122', is_veg: 0, desc: 'Two hard-boiled eggs with salt & pepper' },
+      { category: 'Snacks', name: 'Egg Omelette (2 eggs) (Plain/Masala)', price: 90, shortcode: '123', is_veg: 0, desc: 'Fluffy two-egg plain or masala omelette' },
+      { category: 'Snacks', name: 'Egg Bhurji', price: 180, shortcode: '124', is_veg: 0, desc: 'Spiced scrambled eggs with onions and coriander' },
 
-      { category: 'Main Course - Non-Veg', name: 'Butter Chicken', price: 320, shortcode: '116', is_veg: 0, desc: 'Tender chicken pieces in rich creamy tomato butter sauce' },
-      { category: 'Main Course - Non-Veg', name: 'Chicken Kolhapuri', price: 290, shortcode: '117', is_veg: 0, desc: 'Fiery chicken curry infused with roasted spices' },
-      { category: 'Main Course - Non-Veg', name: 'Chicken Handi', price: 310, shortcode: '118', is_veg: 0, desc: 'Chicken cooked in clay handi with rich onion gravy' },
-      { category: 'Main Course - Non-Veg', name: 'Mutton Rogan Josh', price: 380, shortcode: '119', is_veg: 0, desc: 'Traditional aromatic mutton stew with Kashmiri chilies' },
-      { category: 'Main Course - Non-Veg', name: 'Mutton Sukka', price: 360, shortcode: '120', is_veg: 0, desc: 'Dry spiced mutton roasted with grated coconut' },
-      { category: 'Main Course - Non-Veg', name: 'Egg Curry', price: 190, shortcode: '121', is_veg: 0, desc: 'Hard-boiled eggs cooked in flavorful onion gravy' },
+      // Chinese
+      { category: 'Chinese', name: 'Veg Manchurian', price: 230, shortcode: '125', is_veg: 1, desc: 'Vegetable dumplings in tangy Manchurian gravy/dry' },
+      { category: 'Chinese', name: 'Veg Crispy', price: 260, shortcode: '126', is_veg: 1, desc: 'Crispy battered vegetables tossed in savory sauce' },
+      { category: 'Chinese', name: 'Paneer Chilly', price: 270, shortcode: '127', is_veg: 1, desc: 'Cottage cheese cubes tossed with bell peppers and chili' },
+      { category: 'Chinese', name: 'Chicken Manchurian', price: 290, shortcode: '128', is_veg: 0, desc: 'Chicken balls tossed in spicy garlic soy sauce' },
+      { category: 'Chinese', name: 'Chicken Chilly', price: 290, shortcode: '129', is_veg: 0, desc: 'Crispy chicken tossed with green chilies and soya sauce' },
+      { category: 'Chinese', name: 'Chicken Crispy Fry', price: 250, shortcode: '130', is_veg: 0, desc: 'Deep-fried crispy shredded chicken' },
+      { category: 'Chinese', name: 'Chicken 65', price: 290, shortcode: '131', is_veg: 0, desc: 'Spicy South Indian style fried chicken' },
 
-      { category: 'Biryani & Rice', name: 'Chicken Dum Biryani', price: 280, shortcode: '122', is_veg: 0, desc: 'Layered basmati rice and marinated chicken cooked on dum' },
-      { category: 'Biryani & Rice', name: 'Mutton Dum Biryani', price: 360, shortcode: '123', is_veg: 0, desc: 'Tender mutton layered with aromatic basmati rice' },
-      { category: 'Biryani & Rice', name: 'Veg Hyderabadi Biryani', price: 220, shortcode: '124', is_veg: 1, desc: 'Fragrant rice with fresh vegetables and fried onions' },
-      { category: 'Biryani & Rice', name: 'Jeera Rice', price: 150, shortcode: '125', is_veg: 1, desc: 'Basmati rice tempered with roasted cumin seeds' },
-      { category: 'Biryani & Rice', name: 'Steamed Basmati Rice', price: 120, shortcode: '126', is_veg: 1, desc: 'Long grain fluffy steamed rice' },
-      { category: 'Biryani & Rice', name: 'Dal Khichdi', price: 180, shortcode: '127', is_veg: 1, desc: 'Comforting rice and lentil pot tempered with ghee' },
+      // Roti
+      { category: 'Roti', name: 'Chapati', price: 30, shortcode: '132', is_veg: 1, desc: 'Fresh soft whole wheat chapati' },
+      { category: 'Roti', name: 'Bhakari Jowar', price: 35, shortcode: '133', is_veg: 1, desc: 'Traditional Maharashtrian jowar roti' },
+      { category: 'Roti', name: 'Kadak Bhakari', price: 35, shortcode: '134', is_veg: 1, desc: 'Crisp roasted jowar bhakari' },
 
-      { category: 'Roti & Breads', name: 'Butter Naan', price: 50, shortcode: '128', is_veg: 1, desc: 'Soft leavened flatbread brushed with butter' },
-      { category: 'Roti & Breads', name: 'Garlic Naan', price: 65, shortcode: '129', is_veg: 1, desc: 'Tandoori naan topped with minced roasted garlic' },
-      { category: 'Roti & Breads', name: 'Tandoori Roti', price: 25, shortcode: '130', is_veg: 1, desc: 'Crisp whole wheat flatbread from tandoor' },
-      { category: 'Roti & Breads', name: 'Butter Roti', price: 30, shortcode: '131', is_veg: 1, desc: 'Tandoori roti with generous butter spread' },
-      { category: 'Roti & Breads', name: 'Laccha Paratha', price: 55, shortcode: '132', is_veg: 1, desc: 'Multi-layered flaky whole wheat paratha' },
+      // Main Course
+      { category: 'Main Course', name: 'Veg Kolhapuri', price: 220, shortcode: '135', is_veg: 1, desc: 'Spicy mixed vegetables in fiery Kolhapuri gravy' },
+      { category: 'Main Course', name: 'Palak Masala', price: 230, shortcode: '136', is_veg: 1, desc: 'Spinach puree cooked with aromatic ground spices' },
+      { category: 'Main Course', name: 'Mix Veg', price: 210, shortcode: '137', is_veg: 1, desc: 'Assorted seasonal vegetables in onion-tomato gravy' },
+      { category: 'Main Course', name: 'Pithla Zunka', price: 200, shortcode: '138', is_veg: 1, desc: 'Authentic gram flour delicacy with garlic and chilies' },
+      { category: 'Main Course', name: 'Paneer Masala', price: 260, shortcode: '139', is_veg: 1, desc: 'Cottage cheese simmered in spiced tomato gravy' },
+      { category: 'Main Course', name: 'Paneer Palak', price: 270, shortcode: '140', is_veg: 1, desc: 'Cottage cheese cubes in rich spiced spinach sauce' },
+      { category: 'Main Course', name: 'Paneer Kolhapuri', price: 260, shortcode: '141', is_veg: 1, desc: 'Paneer cooked in red spicy Kolhapuri masala' },
+      { category: 'Main Course', name: 'Chicken Masala', price: 300, shortcode: '142', is_veg: 0, desc: 'Chicken simmered in traditional onion-tomato gravy' },
+      { category: 'Main Course', name: 'Chicken Handi Half', price: 580, shortcode: '143', is_veg: 0, desc: 'Half handi slow-cooked country chicken' },
+      { category: 'Main Course', name: 'Chicken Handi Full', price: 1100, shortcode: '144', is_veg: 0, desc: 'Full handi slow-cooked country chicken' },
+      { category: 'Main Course', name: 'Chicken Kolhapuri', price: 300, shortcode: '145', is_veg: 0, desc: 'Special fiery Kolhapuri chicken curry' },
+      { category: 'Main Course', name: 'Chicken Butter', price: 300, shortcode: '146', is_veg: 0, desc: 'Boneless chicken in velvety butter and cream gravy' },
+      { category: 'Main Course', name: 'Mutton Masala', price: 330, shortcode: '147', is_veg: 0, desc: 'Tender mutton cooked in homestyle spiced gravy' },
+      { category: 'Main Course', name: 'Mutton Gauti Half', price: 700, shortcode: '148', is_veg: 0, desc: 'Half portion traditional village-style mutton curry' },
+      { category: 'Main Course', name: 'Mutton Gauti Full', price: 1400, shortcode: '149', is_veg: 0, desc: 'Full portion traditional village-style mutton curry' },
+      { category: 'Main Course', name: 'Kaju Paneer Masala', price: 280, shortcode: '150', is_veg: 1, desc: 'Roasted cashews and paneer in rich royal gravy' },
 
-      { category: 'Desserts & Beverages', name: 'Gulab Jamun (2 pcs)', price: 80, shortcode: '133', is_veg: 1, desc: 'Warm milk dumplings soaked in cardamom sugar syrup' },
-      { category: 'Desserts & Beverages', name: 'Masala Chaas', price: 50, shortcode: '134', is_veg: 1, desc: 'Spiced churned buttermilk with roasted cumin' },
-      { category: 'Desserts & Beverages', name: 'Fresh Lime Soda', price: 60, shortcode: '135', is_veg: 1, desc: 'Sweet, salted or mixed chilled soda with lemon' },
-      { category: 'Desserts & Beverages', name: 'Mineral Water (1L)', price: 20, shortcode: '136', is_veg: 1, desc: 'Packaged drinking water bottle' }
+      // Rice
+      { category: 'Rice', name: 'Steam Rice', price: 120, shortcode: '151', is_veg: 1, desc: 'Fluffy steamed basmati rice' },
+      { category: 'Rice', name: 'Jeera Rice', price: 160, shortcode: '152', is_veg: 1, desc: 'Fragrant basmati rice tempered with cumin seeds' },
+      { category: 'Rice', name: 'Dal Khichdi', price: 220, shortcode: '153', is_veg: 1, desc: 'Wholesome rice and yellow lentils tempered with ghee' },
+      { category: 'Rice', name: 'Masala Rice', price: 150, shortcode: '154', is_veg: 1, desc: 'Spiced seasoned rice with vegetables and herbs' },
+      { category: 'Rice', name: 'Wangi Rice', price: 160, shortcode: '155', is_veg: 1, desc: 'Traditional spiced brinjal rice' },
+      { category: 'Rice', name: 'Veg Rice', price: 240, shortcode: '156', is_veg: 1, desc: 'Fragrant fried rice tossed with garden vegetables' },
+      { category: 'Rice', name: 'Egg Rice', price: 270, shortcode: '157', is_veg: 0, desc: 'Fried rice tossed with scrambled egg and spices' },
+      { category: 'Rice', name: 'Chicken Rice', price: 350, shortcode: '158', is_veg: 0, desc: 'Aromatic fried rice with spiced chicken pieces' },
+      { category: 'Rice', name: 'Mutton Rice', price: 390, shortcode: '159', is_veg: 0, desc: 'Flavorful rice tossed with tender mutton chunks' },
+
+      // Beverages
+      { category: 'Beverages', name: 'Mineral Water Bottle 1 Ltr', price: 30, shortcode: '160', is_veg: 1, desc: 'Packaged drinking water 1 Litre' },
+      { category: 'Beverages', name: 'Mineral Water Bottle 500ml', price: 15, shortcode: '161', is_veg: 1, desc: 'Packaged drinking water 500ml' },
+      { category: 'Beverages', name: 'Mineral Water Bottle 300/250ml', price: 10, shortcode: '162', is_veg: 1, desc: 'Packaged drinking water 300/250ml' },
+      { category: 'Beverages', name: 'Soda', price: 35, shortcode: '163', is_veg: 1, desc: 'Chilled club soda bottle' },
+      { category: 'Beverages', name: '7Up / Sprite', price: 35, shortcode: '164', is_veg: 1, desc: 'Chilled lemon-lime soft drink' },
+      { category: 'Beverages', name: 'Coca Cola / Thums Up', price: 35, shortcode: '165', is_veg: 1, desc: 'Chilled cola soft drink' }
     ];
 
     const insertRestDish = db.prepare(`

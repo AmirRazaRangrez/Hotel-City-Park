@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import bcrypt from 'bcryptjs';
 
-export const CLOUD_TUNNEL_URL = 'https://lender-lean-tables-patent.trycloudflare.com';
+export const CLOUD_TUNNEL_URL = 'https://crm.dominal.in';
 export const LOCAL_WIFI_IP = (typeof window !== 'undefined' && window.location?.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
   ? window.location.hostname
   : '10.160.83.195';
@@ -36,97 +36,20 @@ if (cachedTunnelUrl && cachedTunnelUrl.includes('blond-ethnic')) {
   try { localStorage.removeItem('hcp_cached_tunnel_url'); } catch (e) {}
 }
 
-// Fetch latest active tunnel URL from Firebase cloud sync
-export const fetchCloudTunnelUrl = async (force = false) => {
-  if (!force && cachedTunnelUrl && !cachedTunnelUrl.includes('blond-ethnic')) return cachedTunnelUrl;
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(
-      'https://firestore.googleapis.com/v1/projects/hotelcitypark-crm/databases/(default)/documents/room_charges_inbox/cloud_tunnel_url?key=AIzaSyCtZnkdk1_q8rWrISnD8P2Rhi-jcPn1QTI',
-      { signal: controller.signal }
-    );
-    clearTimeout(timer);
-    if (res.ok) {
-      const data = await res.json();
-      const fresh = data?.fields?.items_summary?.stringValue?.replace(/\/+$/, '');
-      if (fresh && fresh.includes('trycloudflare.com')) {
-        cachedTunnelUrl = fresh;
-        try { localStorage.setItem('hcp_cached_tunnel_url', fresh); } catch (e) {}
-        return fresh;
-      }
-    }
-  } catch (e) {
-    console.warn('[WaiterAPI] Could not fetch tunnel from Firebase:', e.message);
-  }
-  return (cachedTunnelUrl && !cachedTunnelUrl.includes('blond-ethnic')) ? cachedTunnelUrl : CLOUD_TUNNEL_URL;
-};
-
-// Eagerly resolve active cloud tunnel in background on web/pwa load
-if (typeof window !== 'undefined') {
-  fetchCloudTunnelUrl(true).catch(() => {});
-}
+// The hotel door address does not change. No Firebase read is required to find it.
+export const fetchCloudTunnelUrl = async () => CLOUD_TUNNEL_URL;
 
 export const getBaseUrl = () => {
-  // 1. If running inside a standard Web Browser on HTTPS or Netlify/Vercel
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname || '';
-    const isHttps = window.location.protocol === 'https:';
-
-    // When deployed on Netlify, Vercel, or loaded over HTTPS:
-    if (isHttps || hostname.includes('netlify.app') || hostname.includes('vercel.app')) {
-      try {
-        const stored = localStorage.getItem('hcp_waiter_server_host');
-        if (stored && (stored.includes('trycloudflare.com') || stored.includes('hudson-universal'))) {
-          localStorage.removeItem('hcp_waiter_server_host');
-        }
-        const cached = localStorage.getItem('hcp_cached_tunnel_url');
-        if (cached && (cached.includes('blond-ethnic') || cached.includes('hudson-universal') || !cached.includes('trycloudflare.com'))) {
-          localStorage.removeItem('hcp_cached_tunnel_url');
-          cachedTunnelUrl = null;
-        }
-      } catch (e) {}
-
-      const tunnel = (cachedTunnelUrl && !cachedTunnelUrl.includes('blond-ethnic') && !cachedTunnelUrl.includes('hudson-universal')) ? cachedTunnelUrl : null;
-      if (tunnel) return `${tunnel}/api`;
+    if (hostname === 'crm.dominal.in' || window.location.port === '3000') {
       return '/api';
     }
-
-    // Check if user/app cached a custom server address for local dev
-    const customHost = localStorage.getItem('hcp_waiter_server_host');
-    if (customHost && customHost.trim() && !customHost.includes('trycloudflare.com')) {
-      let clean = customHost.trim().replace(/\/+$/, '');
-      if (!clean.endsWith('/api')) clean += '/api';
-      return clean;
-    }
-
-    // If on localhost (PC desktop dev browser)
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      if (window.location.port === '3000') {
-        return '/api';
-      }
       return 'http://localhost:3000/api';
     }
-
-    // If on local Wi-Fi IP in mobile browser (e.g. http://10.160.83.195:5174)
-    if (window.location.port === '3000') {
-      return '/api';
-    }
-    return `http://${hostname || LOCAL_WIFI_IP}:3000/api`;
   }
-
-  // 2. If running inside the Android APK (Native Mobile)
-  if (isNativePlatform()) {
-    const customHost = typeof localStorage !== 'undefined' ? localStorage.getItem('hcp_waiter_server_host') : null;
-    if (customHost && customHost.trim()) {
-      let clean = customHost.trim().replace(/\/+$/, '');
-      if (!clean.endsWith('/api')) clean += '/api';
-      return clean;
-    }
-    return `http://${LOCAL_WIFI_IP}:3000/api`;
-  }
-
-  return `http://${LOCAL_WIFI_IP}:3000/api`;
+  return `${CLOUD_TUNNEL_URL}/api`;
 };
 
 export const getWsUrl = () => {
@@ -221,37 +144,15 @@ export const request = async (endpoint, options = {}) => {
       lastLocalFailure = Date.now();
       console.warn(`[WaiterAPI] Primary endpoint ${primaryUrl} failed. Trying fallback...`);
 
-      // Determine alternate fallback URL
-      let fallbackBase = null;
-      if (isNativePlatform() && base.includes(LOCAL_WIFI_IP)) {
-        // Native Android was trying local Wi-Fi, fall back to Cloudflare HTTPS tunnel
-        fallbackBase = `${cachedTunnelUrl || CLOUD_TUNNEL_URL}/api`;
-      } else if (!base.includes(LOCAL_WIFI_IP) && typeof window !== 'undefined' && window.location.protocol === 'http:') {
-        // Was trying cloud tunnel on HTTP, fall back to local Wi-Fi
-        fallbackBase = `http://${LOCAL_WIFI_IP}:3000/api`;
-      } else {
-        // Primary tunnel failed (e.g. ERR_NAME_NOT_RESOLVED). Invalidate cache and fetch fresh from Supabase!
-        cachedTunnelUrl = null;
-        try { localStorage.removeItem('hcp_cached_tunnel_url'); } catch (e) {}
-        const freshTunnel = await fetchCloudTunnelUrl(true);
-        if (freshTunnel && !base.includes(freshTunnel)) {
-          fallbackBase = `${freshTunnel}/api`;
-        } else if (!base.includes(CLOUD_TUNNEL_URL)) {
-          fallbackBase = `${CLOUD_TUNNEL_URL}/api`;
-        }
-      }
-
-      if (fallbackBase && fallbackBase !== base) {
+      const fallbackBase = `${CLOUD_TUNNEL_URL}/api`;
+      if (fallbackBase !== base) {
         try {
           const fallbackUrl = `${fallbackBase}${normEndpoint}`;
-          const res = await doFetch(fallbackUrl, options, options.timeout || 8000);
-          console.log(`[WaiterAPI] Fallback to ${fallbackBase} succeeded!`);
-          if (!fallbackBase.includes('trycloudflare.com')) {
-            localStorage.setItem('hcp_waiter_server_host', fallbackBase);
-          }
+          const res = await doFetch(fallbackUrl, options, options.timeout || 15000);
+          console.log(`[WaiterAPI] Reached the hotel CRM at ${fallbackBase}`);
           return res;
         } catch (fallbackErr) {
-          console.warn(`[WaiterAPI] Fallback also failed:`, fallbackErr.message);
+          console.warn(`[WaiterAPI] Hotel CRM door also failed:`, fallbackErr.message);
         }
       }
     }
@@ -283,7 +184,7 @@ let lastCloudPkgFetch = 0;
 // Eagerly fetch and cache the entire live waiter package from Firebase Firestore
 export const fetchCloudWaiterPackage = async (force = false) => {
   const now = Date.now();
-  if (!force && inMemoryCloudPkg && (now - lastCloudPkgFetch < 30000)) return inMemoryCloudPkg;
+  if (!force && inMemoryCloudPkg && (now - lastCloudPkgFetch < 60000)) return inMemoryCloudPkg;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6000);
@@ -711,7 +612,7 @@ export const api = {
             notes: notes || '',
             timestamp: new Date().toISOString()
           },
-          timeout: 1200
+          timeout: 15000
         });
       } else if (destination_type === 'room') {
         const roomNum = String(orderData.room_number || destination_label || '').match(/\d+/)?.[0] || String(destination_id);
@@ -728,7 +629,7 @@ export const api = {
             room_id: destination_id,
             special_notes: `Room ${roomNum} (${guestName})`
           },
-          timeout: 1200
+          timeout: 15000
         });
 
         const tableId = tblRes?.tableId || tblRes?.table?.id;
@@ -752,7 +653,7 @@ export const api = {
               notes: notes || `Room Service for Room ${roomNum}`,
               timestamp: new Date().toISOString()
             },
-            timeout: 1200
+            timeout: 15000
           });
         }
       } else if (destination_type === 'parcel') {
@@ -770,7 +671,7 @@ export const api = {
             capacity: 1,
             special_notes: `Takeaway Parcel #${cleanParcelNum}`
           },
-          timeout: 1200
+          timeout: 15000
         });
 
         const tableId = tblRes?.tableId || tblRes?.table?.id;
@@ -795,261 +696,49 @@ export const api = {
               notes: notes || `Takeaway Parcel #${cleanParcelNum}`,
               timestamp: new Date().toISOString()
             },
-            timeout: 1200
+            timeout: 15000
           });
         }
       }
     } catch (locErr) {
-      console.log('[WaiterAPI] Local CRM not reachable, dispatching order via Cloud Sync...', locErr.message);
+      const detail = locErr && locErr.message ? locErr.message : 'Hotel CRM is not reachable';
+      throw new Error('Could not send this order to the hotel computer. Open the CRM exe and check the internet. ' + detail);
     }
   }
-
-    // 2. Direct Firebase Cloud Order Placement (Works on 4G/5G, Netlify link, remote Wi-Fi!)
-    try {
-      const cloudRes = await pushWaiterOrderToCloud({
-        department: department || 'restaurant',
-        destination_type: destination_type || 'table',
-        destination_id: destination_id,
-        destination_label: destination_label || `Table ${destination_id}`,
-        room_number: orderData.room_number || (destination_type === 'room' ? String(destination_label || destination_id || '').match(/\d+/)?.[0] : undefined),
-        items: items.map(it => ({
-          id: it.id,
-          name: it.name,
-          price: it.price,
-          qty: it.quantity || it.qty || 1,
-          quantity: it.quantity || it.qty || 1,
-          is_parcel: Boolean(it.is_parcel || destination_type === 'parcel'),
-          notes: it.notes || ''
-        })),
-        waiter_id,
-        waiter_name,
-        customer_name: orderData.customer_name || '',
-        customer_phone: orderData.guest_phone || orderData.customer_phone || '',
-        notes: notes || '',
-        subtotal,
-        gst: gstAmount,
-        grand_total: grandTotal,
-        timestamp: new Date().toISOString()
-      });
-
-      return {
-        success: true,
-        cloud: true,
-        kotNumber: cloudRes?.id ? String(cloudRes.id).slice(-4) : 'OK',
-        tokenNumber: '1',
-        message: 'Order dispatched via Cloud Sync'
-      };
-    } catch (cloudErr) {
-      console.error('[WaiterAPI] Cloud order dispatch error:', cloudErr);
-      throw cloudErr;
-    }
+  throw new Error('Could not send this order to the hotel computer. Open the CRM exe and check the internet.');
   },
 
   // Settle or Request Bill
-  requestBillPrint: (department, destinationId, tableObj = null) => {
-    const isRemoteHosted = typeof window !== 'undefined' && 
-      (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('netlify.app'));
-
-    if (isRemoteHosted || !isLocalHealthy()) {
-      return pushWaiterOrderToCloud({
-        department: department || 'restaurant',
-        destination_type: 'table',
-        destination_id: destinationId,
-        destination_label: tableObj?.table_number || `Table ${destinationId}`,
-        waiter_name: 'Captain',
-        notes: 'PREBILL_REQUEST',
-        items: []
-      });
-    }
-
+  requestBillPrint: (department, destinationId) => {
     const endpoint = department === 'bar'
       ? `/bar/tables/${destinationId}/prebill`
       : `/restaurant/tables/${destinationId}/prebill`;
-    return request(endpoint, { method: 'POST', timeout: 1500 }).catch(async () => {
-      // Fallback: enqueue prebill in cloud
-      return pushWaiterOrderToCloud({
-        department: department || 'restaurant',
-        destination_type: 'table',
-        destination_id: destinationId,
-        destination_label: tableObj?.table_number || `Table ${destinationId}`,
-        waiter_name: 'Captain',
-        notes: 'PREBILL_REQUEST',
-        items: []
-      });
-    });
+    return request(endpoint, { method: 'POST', timeout: 15000 });
   },
 
-  settleTable: async (department, destinationId, paymentData, tableObj = null) => {
-    const isRemoteHosted = typeof window !== 'undefined' && 
-      (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('netlify.app'));
-
+  settleTable: async (department, destinationId, paymentData) => {
     const fullPayload = {
       ...paymentData,
       source: 'waiter_panel',
       enqueue_print: true
     };
-
-    if (!isRemoteHosted && isLocalHealthy()) {
-      try {
-        const endpoint = department === 'bar'
-          ? `/bar/tables/${destinationId}/settle`
-          : `/restaurant/tables/${destinationId}/settle`;
-        const res = await request(endpoint, { method: 'POST', body: fullPayload, timeout: 1500 });
-        if (res && res.success) return res;
-      } catch (locErr) {
-        console.warn('[WaiterAPI] Local settleTable failed, falling back to Firebase Cloud:', locErr.message);
-      }
-    }
-
-    // Remote Netlify / Cloud Settlement via Supabase room_charges_inbox
-    try {
-      const roomNum = String(paymentData.room_number || tableObj?.table_number || destinationId || '').replace(/^RS-/i, '').replace(/^Room\s*/i, '').replace(/•.*$/, '').trim();
-
-      // Extract item list reliably
-      let itemsList = Array.isArray(paymentData.items) && paymentData.items.length > 0 ? paymentData.items : [];
-      if (itemsList.length === 0 && tableObj) {
-        if (Array.isArray(tableObj.cart) && tableObj.cart.length > 0) itemsList = tableObj.cart;
-        else if (Array.isArray(tableObj.items) && tableObj.items.length > 0) itemsList = tableObj.items;
-        else if (typeof tableObj.active_cart_json === 'string') {
-          try { const p = JSON.parse(tableObj.active_cart_json); if (Array.isArray(p)) itemsList = p; } catch (_) {}
-        }
-        if (itemsList.length === 0 && typeof tableObj.printed_cart_json === 'string') {
-          try { const p = JSON.parse(tableObj.printed_cart_json); if (Array.isArray(p)) itemsList = p; } catch (_) {}
-        }
-      }
-
-      const subtotalAmt = Number(paymentData.subtotal) || itemsList.reduce((s, it) => s + ((Number(it.price) || 0) * (Number(it.qty || it.quantity) || 1)), 0);
-      const gstAmt = Number(paymentData.gst) || Math.round((subtotalAmt * 5) / 100);
-      const grandAmt = Number(paymentData.grand_total || paymentData.total || paymentData.amount || tableObj?.total_amount || (subtotalAmt + gstAmt)) || (subtotalAmt + gstAmt);
-
-      const payload = {
-        room_number: roomNum,
-        room_id: paymentData.room_id || 0,
-        department: department === 'bar' ? 'bar' : 'restaurant',
-        order_id: 0,
-        bill_no: 'SETTLE-' + Date.now().toString().slice(-4),
-        subtotal: subtotalAmt,
-        gst: gstAmt,
-        grand_total: grandAmt,
-        settled_by: paymentData.waiter_name || 'Captain',
-        items_summary: JSON.stringify({
-          ...paymentData,
-          items: itemsList,
-          subtotal: subtotalAmt,
-          gst: gstAmt,
-          grand_total: grandAmt,
-          destinationId,
-          table_number: tableObj?.table_number || `RS-${roomNum}`,
-          settled_at: new Date().toISOString()
-        }),
-        status: 'pending',
-        created_at: new Date().toISOString()
-      };
-
-      const fbPayload = {
-        fields: {
-          room_number: { stringValue: String(tableObj?.table_number || `RS-${roomNum}`) },
-          room_id: { integerValue: String(paymentData.room_id || 0) },
-          department: { stringValue: department === 'bar' ? 'bar' : 'restaurant' },
-          order_id: { integerValue: '0' },
-          bill_no: { stringValue: payload.bill_no },
-          subtotal: { doubleValue: Number(subtotalAmt) },
-          gst: { doubleValue: Number(gstAmt) },
-          grand_total: { doubleValue: Number(grandAmt) },
-          settled_by: { stringValue: String(paymentData.waiter_name || 'Captain') },
-          payment_mode: { stringValue: String(paymentData.payment_mode || paymentData.payment_method || 'cash') },
-          is_paid: { integerValue: String(paymentData.is_paid !== undefined ? paymentData.is_paid : 1) },
-          status: { stringValue: paymentData.is_paid === 0 ? 'pending' : 'completed' },
-          items_summary: { stringValue: payload.items_summary },
-          created_at: { stringValue: payload.created_at }
-        }
-      };
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 7000);
-      await fetch(`${FIRESTORE_BASE}/room_charges_inbox?key=${FIREBASE_API_KEY}`, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fbPayload)
-      });
-      clearTimeout(timer);
-
-      return { success: true, message: 'Settlement dispatched to Firebase Cloud successfully' };
-    } catch (cErr) {
-      console.error('[WaiterAPI] Cloud settlement failed:', cErr);
-      throw cErr;
-    }
+    const endpoint = department === 'bar'
+      ? `/bar/tables/${destinationId}/settle`
+      : `/restaurant/tables/${destinationId}/settle`;
+    return request(endpoint, { method: 'POST', body: fullPayload, timeout: 15000 });
   },
 
   getRestaurantOrders: async () => {
-    try {
-      const res = await request('/restaurant/orders', { timeout: 3000 });
-      if (res && (res.orders || res.data || Array.isArray(res))) return res;
-    } catch (_) {}
-    return fetchCloudRecentOrders('restaurant');
+    return request('/restaurant/orders', { timeout: 15000 });
   },
 
   getBarOrders: async () => {
-    try {
-      const res = await request('/bar/orders', { timeout: 3000 });
-      if (res && (res.orders || res.data || Array.isArray(res))) return res;
-    } catch (_) {}
-    return fetchCloudRecentOrders('bar');
+    return request('/bar/orders', { timeout: 15000 });
   },
 
   cancelTable: async (department, tableId, tableObj = null) => {
-    const isRemoteHosted = typeof window !== 'undefined' && 
-      (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('netlify.app'));
-
-    if (!isRemoteHosted && isLocalHealthy()) {
-      try {
-        const endpoint = department === 'bar' ? `/bar/tables/${tableId}/cancel` : `/restaurant/tables/${tableId}/cancel`;
-        const res = await request(endpoint, { method: 'POST', timeout: 1500 });
-        if (res && res.success) return res;
-      } catch (err) {
-        console.warn('[WaiterAPI] Local cancelTable attempt failed, falling back to Firebase Cloud void:', err.message);
-      }
-    }
-
-    // Firebase Cloud Cancellation
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 6000);
-      const tableNumberStr = tableObj?.table_number || String(tableId);
-
-      const fbPayload = {
-        fields: {
-          room_number: { stringValue: String(tableNumberStr) },
-          room_id: { integerValue: String(tableId || 0) },
-          department: { stringValue: 'waiter_kot_cancel' },
-          order_id: { integerValue: '0' },
-          bill_no: { stringValue: 'VOID' },
-          subtotal: { doubleValue: 0 },
-          gst: { doubleValue: 0 },
-          grand_total: { doubleValue: 0 },
-          settled_by: { stringValue: 'Waiter Void' },
-          items_summary: { stringValue: JSON.stringify({
-            action: 'cancel_table',
-            department: department || 'restaurant',
-            table_id: tableId,
-            table_number: tableNumberStr
-          }) },
-          status: { stringValue: 'pending' },
-          created_at: { stringValue: new Date().toISOString() }
-        }
-      };
-
-      await fetch(`${FIRESTORE_BASE}/room_charges_inbox?key=${FIREBASE_API_KEY}`, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fbPayload)
-      });
-      clearTimeout(timer);
-    } catch (e) {
-      console.warn('[WaiterAPI] Firebase cloud cancel notice:', e.message);
-    }
+    const endpoint = department === 'bar' ? `/bar/tables/${tableId}/cancel` : `/restaurant/tables/${tableId}/cancel`;
+    const res = await request(endpoint, { method: 'POST', timeout: 15000 });
 
     // Clean up local cached table status immediately in localStorage and inMemoryCloudPkg
     try {
@@ -1120,56 +809,9 @@ export const api = {
     return { success: true, message: 'Table order cancelled and voided successfully' };
   },
 
-  cancelOrder: async (department, orderId, orderObj = null) => {
-    const isRemoteHosted = typeof window !== 'undefined' && 
-      (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('netlify.app'));
-
-    if (!isRemoteHosted) {
-      try {
-        const endpoint = department === 'bar' ? `/bar/orders/${orderId}` : `/restaurant/orders/${orderId}`;
-        const res = await request(endpoint, { method: 'DELETE', timeout: 2500 });
-        if (res && res.success) return res;
-      } catch (err) {
-        console.warn('[WaiterAPI] Local cancelOrder attempt failed, falling back to Supabase Cloud void:', err.message);
-      }
-    }
-
-    // Cancel in Firebase Firestore
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 6000);
-      const fbPayload = {
-        fields: {
-          room_number: { stringValue: String(orderObj?.table_number || orderId) },
-          room_id: { integerValue: '0' },
-          department: { stringValue: 'waiter_kot_cancel' },
-          order_id: { integerValue: String(orderId || 0) },
-          bill_no: { stringValue: 'VOID' },
-          subtotal: { doubleValue: 0 },
-          gst: { doubleValue: 0 },
-          grand_total: { doubleValue: 0 },
-          settled_by: { stringValue: 'Waiter Void' },
-          items_summary: { stringValue: JSON.stringify({
-            action: 'cancel_order',
-            department: department || 'restaurant',
-            order_id: orderId,
-            cancelled_at: new Date().toISOString()
-          }) },
-          status: { stringValue: 'pending' },
-          created_at: { stringValue: new Date().toISOString() }
-        }
-      };
-
-      await fetch(`${FIRESTORE_BASE}/room_charges_inbox?key=${FIREBASE_API_KEY}`, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fbPayload)
-      });
-      clearTimeout(timer);
-    } catch (_) {}
-
-    return { success: true, message: 'Order cancelled successfully' };
+  cancelOrder: async (department, orderId) => {
+    const endpoint = department === 'bar' ? `/bar/orders/${orderId}` : `/restaurant/orders/${orderId}`;
+    return request(endpoint, { method: 'DELETE', timeout: 15000 });
   },
 
   getSettledBills: (department) => {

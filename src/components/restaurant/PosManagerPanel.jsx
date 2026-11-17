@@ -16,7 +16,8 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
     showConfirm,
     isManagerUnlocked,
     openManagerLock,
-    lockManager
+    lockManager,
+    refreshSurcharges
   } = useApp();
 
   // Automatically popup lock if not unlocked
@@ -42,7 +43,9 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
   const [settings, setSettings] = useState({
     restaurant_gst_pct: 5,
     bar_gst_pct: 5,
-    bar_pax_charge: 0
+    bar_pax_charge: 0,
+    restaurant_upi_mdr_pct: 0,
+    restaurant_card_surcharge_pct: 0
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -562,7 +565,10 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
   const handleSaveSettings = async () => {
     try {
       await api.savePosSettings(settings);
-      showToast(`${department === 'bar' ? 'Tax & VAT' : 'Tax & GST'} settings saved successfully!`, 'green');
+      if (typeof refreshSurcharges === 'function') {
+        await refreshSurcharges();
+      }
+      showToast(`${department === 'bar' ? 'Tax & VAT' : 'Tax & POS MDR'} settings saved successfully!`, 'green');
     } catch (err) {
       showToast('Error saving settings: ' + err.message, 'red');
     }
@@ -2049,21 +2055,74 @@ export default function PosManagerPanel({ department = 'restaurant', onMenuChang
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {department === 'restaurant' && (
-              <div>
-                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
-                  Restaurant GST (%)
-                </label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input
-                    type="number"
-                    className="form-input"
-                    value={settings.restaurant_gst_pct}
-                    onChange={(e) => setSettings({ ...settings, restaurant_gst_pct: parseFloat(e.target.value) || 0 })}
-                    style={{ width: '120px', padding: '8px 12px', fontSize: '0.90rem', borderRadius: '10px' }}
-                  />
-                  <span style={{ fontWeight: 800, color: '#64748b' }}>% (Current default: 5%)</span>
+              <>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    Restaurant GST (%)
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <input
+                      type="number"
+                      step="0.1"
+                      className="form-input"
+                      value={settings.restaurant_gst_pct ?? 5}
+                      onChange={(e) => setSettings({ ...settings, restaurant_gst_pct: parseFloat(e.target.value) || 0 })}
+                      style={{ width: '120px', padding: '8px 12px', fontSize: '0.90rem', borderRadius: '10px' }}
+                    />
+                    <span style={{ fontWeight: 800, color: '#64748b' }}>% (Current default: 5%)</span>
+                  </div>
                 </div>
-              </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    📱 UPI Payment MDR Fee (%)
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      className="form-input"
+                      value={settings.restaurant_upi_mdr_pct ?? settings.upi_tax_pct ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setSettings({ ...settings, restaurant_upi_mdr_pct: val, upi_tax_pct: val });
+                      }}
+                      style={{ width: '120px', padding: '8px 12px', fontSize: '0.90rem', borderRadius: '10px' }}
+                    />
+                    <span style={{ fontWeight: 800, color: '#64748b' }}>% applied to dining UPI settlements</span>
+                  </div>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: '#64748b' }}>
+                    Calculates MDR surcharge when guest settles bill via UPI QR / Online transfer. Set 0 to disable.
+                  </p>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    💳 POS / Card Swipe Surcharge Charge (%)
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      className="form-input"
+                      value={settings.restaurant_card_surcharge_pct ?? settings.card_surcharge_pct ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setSettings({ ...settings, restaurant_card_surcharge_pct: val, card_surcharge_pct: val });
+                      }}
+                      style={{ width: '120px', padding: '8px 12px', fontSize: '0.90rem', borderRadius: '10px' }}
+                    />
+                    <span style={{ fontWeight: 800, color: '#64748b' }}>% applied to EDC Card swipe settlements</span>
+                  </div>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: '#64748b' }}>
+                    Calculates card swipe processing surcharge when guest settles bill via Card POS EDC machine. Set 0 to disable.
+                  </p>
+                </div>
+              </>
             )}
 
             {department === 'bar' && (

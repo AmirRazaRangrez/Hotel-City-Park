@@ -195,17 +195,33 @@ export default function FolioSettlementModal({
   const recognizedPaid = Math.max(Number(activeStayCalc?.paid || 0), Number(folioData?.advancePaid || 0));
   const extraCollected = Math.max(0, ledgerAdvancePaid - recognizedPaid);
 
-  const effectiveRoomTariff = isOtaPrepaid
+  const breakfastPlanVal = !isOtaPrepaid
+    ? Number(
+        activeStayCalc?.breakfastCost ??
+        folioData?.stayCalcNow?.breakfastCost ??
+        folioData?.stayCalcDeclared?.breakfastCost ??
+        folioData?.breakfastCost ??
+        room?.breakfast_cost ??
+        0
+      )
+    : 0;
+
+  const effectiveBaseRoomTariff = isOtaPrepaid
     ? 0
     : Number(
-        activeStayCalc?.roomSubtotalPreTax ||
-        activeStayCalc?.baseRoomTariff ||
-        folioData?.roomTaxable ||
-        folioData?.stayTaxable ||
-        folioData?.roomGrossTariff ||
-        (folioData?.grossTariff && effectiveFnbTotal > 0 ? Math.max(0, Number(folioData?.grossTariff || 0) - effectiveFnbTotal) : folioData?.grossTariff) ||
+        activeStayCalc?.baseRoomTariff ??
+        folioData?.stayCalcNow?.baseRoomTariff ??
+        folioData?.baseRoomTariff ??
+        (activeStayCalc?.roomSubtotalPreTax
+          ? Math.max(0, Number(activeStayCalc.roomSubtotalPreTax) - Number(activeStayCalc.extraMattressCost || 0) - Number(activeStayCalc.breakfastCost || 0))
+          : undefined) ??
+        folioData?.roomTaxable ??
+        folioData?.stayTaxable ??
+        folioData?.roomGrossTariff ??
+        (folioData?.grossTariff && effectiveFnbTotal > 0 ? Math.max(0, Number(folioData?.grossTariff || 0) - effectiveFnbTotal) : folioData?.grossTariff) ??
         0
       );
+  const effectiveRoomTariff = effectiveBaseRoomTariff;
   const effectiveStayTax = isOtaPrepaid
     ? 0
     : Number(
@@ -225,8 +241,9 @@ export default function FolioSettlementModal({
   const extraExpensesVal = Number(folioData?.expensesTotal || folioData?.extraExpensesTotal || 0);
   const otaPrepaidBalanceDue = Math.max(0, (hotelExtrasChargeVal + extensionChargeVal + fnbPendingTotal + extraExpensesVal) - effectiveAdvancePaid);
 
-  const computedRoomNet = effectiveRoomTariff + effectiveStayTax;
-  const stayExtrasTotal = !isOtaPrepaid ? (hotelExtrasChargeVal + extensionChargeVal) : 0;
+  const roundOffVal = Number(activeStayCalc?.roundOff ?? folioData?.stayCalcNow?.roundOff ?? folioData?.roundOff ?? 0);
+  const computedRoomNet = effectiveRoomTariff + effectiveStayTax + roundOffVal;
+  const stayExtrasTotal = !isOtaPrepaid ? (hotelExtrasChargeVal + breakfastPlanVal + extensionChargeVal) : 0;
   const computedStayBal = (computedRoomNet + stayExtrasTotal + effectiveFnbTotal + extraExpensesVal) - effectiveAdvancePaid;
 
   const summaryRefund = Number(folioData?.summary?.refundAmount || folioData?.refundAmount || 0);
@@ -237,34 +254,39 @@ export default function FolioSettlementModal({
       : (folioData?.balanceDue !== undefined ? folioData.balanceDue : computedStayBal)
   );
 
-  const dynamicRefundDue = !isOtaPrepaid && (
+  const isServerSettledZero = (activeStayCalc?.balanceDue === 0 || folioData?.balanceDue === 0) && (stayCalcRefundDue <= 0.5);
+
+  const dynamicRefundDue = !isOtaPrepaid && !isServerSettledZero && (
     stayCalcRefundDue > 0.5
       ? Math.round(stayCalcRefundDue)
       : (summaryRefund > 0.5
           ? Math.round(summaryRefund)
-          : (computedStayBal < -0.5 ? Math.round(Math.abs(computedStayBal)) : (rawBalDue < -0.5 ? Math.round(Math.abs(rawBalDue)) : 0)))
+          : (rawBalDue < -0.5 ? Math.round(Math.abs(rawBalDue)) : (computedStayBal < -0.5 ? Math.round(Math.abs(computedStayBal)) : 0)))
   );
   const isRefund = !isOtaPrepaid && (dynamicRefundDue > 0.5);
   const refundAmount = isRefund ? dynamicRefundDue : 0;
+
+  const hasStatedActiveBal = activeStayCalc?.balanceDue !== undefined && activeStayCalc?.balanceDue !== null && !isNaN(Number(activeStayCalc.balanceDue));
+  const hasStatedFolioBal = folioData?.balanceDue !== undefined && folioData?.balanceDue !== null && !isNaN(Number(folioData.balanceDue));
 
   const statedBalanceDue = isOtaPrepaid
     ? Math.round(otaPrepaidBalanceDue)
     : (isRefund
         ? 0
-        : (activeStayCalc?.balanceDue !== undefined && activeStayCalc.balanceDue > 0
-            ? Math.round(activeStayCalc.balanceDue)
-            : (folioData?.balanceDue !== undefined && folioData.balanceDue > 0
-                ? Math.round(folioData.balanceDue)
+        : (hasStatedActiveBal
+            ? Math.max(0, Math.round(Number(activeStayCalc.balanceDue)))
+            : (hasStatedFolioBal
+                ? Math.max(0, Math.round(Number(folioData.balanceDue)))
                 : Math.max(0, Math.round(computedStayBal)))));
   const dynamicBalanceDue = Math.max(0, statedBalanceDue - (isOtaPrepaid ? 0 : extraCollected));
 
   // Gross stay tariff and Base Tariff to calculate discount on
-  const grossStayTariff = Number(effectiveRoomTariff || 0) + (isOtaPrepaid ? (Number(hotelExtrasChargeVal || 0) + Number(extensionChargeVal || 0)) : Number(effectiveStayTax || 0));
+  const totalTaxableStay = Number(effectiveRoomTariff || 0) + (isOtaPrepaid ? 0 : Number(hotelExtrasChargeVal || 0) + Number(breakfastPlanVal || 0) + Number(extensionChargeVal || 0));
+  const grossStayTariff = totalTaxableStay + (isOtaPrepaid ? (Number(hotelExtrasChargeVal || 0) + Number(extensionChargeVal || 0)) : Number(effectiveStayTax || 0));
   const baseTariff = Number(
     activeStayCalc?.baseRoomTariff ||
     folioData?.stayCalcNow?.baseRoomTariff ||
     folioData?.baseRoomTariff ||
-    folioData?.roomTaxable ||
     effectiveRoomTariff ||
     0
   );
@@ -272,7 +294,8 @@ export default function FolioSettlementModal({
     activeStayCalc?.grossTariff ||
     folioData?.stayCalcNow?.grossTariff ||
     folioData?.grossTariff ||
-    ((Number(activeStayCalc?.baseRoomTariff || folioData?.baseRoomTariff || 0)) + (Number(activeStayCalc?.breakfastCost || folioData?.breakfastCost || 0))) ||
+    ((Number(activeStayCalc?.baseRoomTariff || folioData?.baseRoomTariff || 0)) + (Number(activeStayCalc?.breakfastCost || folioData?.breakfastCost || 0)) + (Number(activeStayCalc?.extraMattressCost || folioData?.extraBedCharge || 0))) ||
+    totalTaxableStay ||
     baseTariff
   );
   const maxAllowableDiscount = Math.max(0, dynamicBalanceDue > 0 ? dynamicBalanceDue : (totalBaseTariff > 0 ? totalBaseTariff : grossStayTariff));
@@ -293,7 +316,8 @@ export default function FolioSettlementModal({
     if (isOtaPrepaid) {
       return Math.max(0, dynamicBalanceDue - discAmt);
     }
-    const discountedTaxable = Math.max(0, Number((effectiveRoomTariff - discAmt).toFixed(2)));
+    const taxableBase = totalTaxableStay > 0 ? totalTaxableStay : effectiveRoomTariff;
+    const discountedTaxable = Math.max(0, Number((taxableBase - discAmt).toFixed(2)));
     const discountedGst = Number((discountedTaxable * 0.05).toFixed(2));
     const discountedRoomStay = Number((discountedTaxable + discountedGst).toFixed(2));
     const nonRoomCharges = (Number(effectiveFnbTotal) || 0) + (Number(extraExpensesVal) || 0);
@@ -310,7 +334,7 @@ export default function FolioSettlementModal({
   const isDiscountPendingApproval = enteredDiscountAmt > 0 && discountApproval.status !== 'approved';
 
   const displayStayTax = (activeDiscountAmt > 0 && !isOtaPrepaid)
-    ? Number((Math.max(0, effectiveRoomTariff - activeDiscountAmt) * 0.05).toFixed(2))
+    ? Number((Math.max(0, (totalTaxableStay > 0 ? totalTaxableStay : effectiveRoomTariff) - activeDiscountAmt) * 0.05).toFixed(2))
     : effectiveStayTax;
 
   useEffect(() => {
@@ -737,55 +761,8 @@ export default function FolioSettlementModal({
         }
 
         try {
-          if (isCompanyPayingLater) {
-            // User requirement: if payment is pending from company then should print checkin form with all details & amount
-            const regPrintData = {
-              ...room,
-              ...folioData,
-              voucher_number: room.voucher_number || folioData.voucherNo,
-              voucherNumber: room.voucher_number || folioData.voucherNo,
-              guestName: folioData.guestName || room.guest_name,
-              mobile: folioData.mobile || room.mobile,
-              altMobile: room.alt_mobile || room.booking_alt_mobile,
-              fatherName: room.father_name,
-              dob: room.dob,
-              address: room.address,
-              email: room.email,
-              aadharNumber: room.aadhar_number,
-              docType: room.doc_type,
-              checkinTime: folioData.checkinTime || room.checkin_time,
-              approxCheckout: folioData.actualCheckout || folioData.checkoutTime || new Date(),
-              stayNights: folioData.billableDays || folioData.stayNights || room.stay_nights || 1,
-              bookingSource: 'BTC',
-              btcCompanyName: room.btc_company_name || folioData.btcCompanyName,
-              btcCompanyAddress: room.btc_address || folioData.btcCompanyAddress,
-              btcCompanyGst: room.btc_gst_number || folioData.btcCompanyGst || room.gst_number,
-              btcCompanyPan: room.btc_pan_number || folioData.btcCompanyPan,
-              btcCompanyContactPerson: room.btc_contact_person || folioData.btcCompanyContactPerson,
-              btcCompanyPhone: room.btc_contact_phone || folioData.btcCompanyPhone,
-              btcCompanyEmail: room.btc_contact_email || folioData.btcCompanyEmail,
-              btcApprovalRef: room.btc_approval_ref || folioData.btcApprovalRef,
-              companyName: room.btc_company_name || folioData.btcCompanyName,
-              gstNumber: room.btc_gst_number || folioData.gstNumber,
-              roomTariffNet: effectiveRoomTariff || folioData.roomChargesTotal || folioData.grandTariffNet || folioData.baseRoomCharge || Math.max(0, (folioData.stayCalcNow?.grandTotal ?? folioData.finalGrandTotal ?? folioData.grandTotal ?? room.total_room_charge ?? 0) - (folioData.stayCalcNow?.roomGst ?? folioData.grandGstAmount ?? folioData.taxAmount ?? 0)),
-              discountAmount: folioData.stayCalcNow?.discountAmount ?? folioData.discountAmount ?? folioData.discountAmt ?? 0,
-              discountPct: folioData.stayCalcNow?.discountPct ?? folioData.discountPct ?? 0,
-              taxAmount: folioData.stayCalcNow?.roomGst ?? folioData.grandGstAmount ?? folioData.taxAmount ?? Math.max(0, (folioData.stayCalcNow?.grandTotal ?? folioData.finalGrandTotal ?? folioData.grandTotal ?? room.total_room_charge ?? 0) - Math.round((folioData.stayCalcNow?.grandTotal ?? folioData.finalGrandTotal ?? folioData.grandTotal ?? room.total_room_charge ?? 0) / 1.05)),
-              foodTotal: folioData.foodTotal || 0,
-              barTotal: folioData.barTotal || 0,
-              extraBedCharge: folioData.extraBedsTotal || 0,
-              grandTotal: folioData.stayCalcNow?.grandTotal ?? folioData.finalGrandTotal ?? folioData.grandTotal ?? room.total_room_charge ?? 0,
-              totalPaid: folioData.advancePaid || 0,
-              balanceDue: folioData.stayCalcNow?.balanceDue ?? folioData.balanceDue ?? 0,
-              isCompanyPayingLater: true,
-              isBtcPending: true,
-              checkedInBy: room.checked_in_by || 'Front Desk',
-              checkedOutBy: currentUser ? (currentUser.full_name || currentUser.username) : 'Front Desk'
-            };
-            printGuestRegistrationA4(regPrintData, { includePhotos: false });
-          } else {
-            // User requirement: Only print separate payment receipts for each method paid (no master invoice)
-            const checkoutReceipts = [];
+          // Release official Tax Invoice and receipts for all checkouts (including BTC)
+          const checkoutReceipts = [];
             const roomNums = (room.all_group_room_numbers && room.all_group_room_numbers.length > 0)
               ? room.all_group_room_numbers.join(', ')
               : (room.room_number || folioData.roomNumber);
@@ -911,12 +888,12 @@ export default function FolioSettlementModal({
               receiptNumbers: checkoutData.receipt_numbers || checkoutData.receiptNumbers || res.receipt_numbers || res.receiptNumbers,
               receipt_no: checkoutData.finalReceiptNo || checkoutData.final_receipt_no || res.finalReceiptNo || res.final_receipt_no,
               checked_out_by: currentUser ? (currentUser.full_name || currentUser.username) : 'Cashier_1',
-              company_name: checkoutCompanyName.trim() || undefined,
-              companyName: checkoutCompanyName.trim() || undefined,
-              gst_number: checkoutGstNumber.trim().toUpperCase() || undefined,
-              gstNumber: checkoutGstNumber.trim().toUpperCase() || undefined,
-              company_address: checkoutCompanyAddress.trim() || undefined,
-              companyAddress: checkoutCompanyAddress.trim() || undefined,
+              company_name: checkoutCompanyName.trim() || room.btc_company_name || folioData.btcCompanyName || undefined,
+              companyName: checkoutCompanyName.trim() || room.btc_company_name || folioData.btcCompanyName || undefined,
+              gst_number: checkoutGstNumber.trim().toUpperCase() || room.btc_gst_number || folioData.btcCompanyGst || room.gst_number || undefined,
+              gstNumber: checkoutGstNumber.trim().toUpperCase() || room.btc_gst_number || folioData.btcCompanyGst || room.gst_number || undefined,
+              company_address: checkoutCompanyAddress.trim() || room.btc_address || folioData.btcCompanyAddress || undefined,
+              companyAddress: checkoutCompanyAddress.trim() || room.btc_address || folioData.btcCompanyAddress || undefined,
               tax_type: checkoutTaxMode === 'IGST' ? 'IGST' : 'CGST_SGST',
               taxType: checkoutTaxMode === 'IGST' ? 'IGST' : 'CGST_SGST',
               is_igst: checkoutTaxMode === 'IGST' ? 1 : 0,
@@ -976,7 +953,6 @@ export default function FolioSettlementModal({
                 });
               }, 900);
             }
-          }
         } catch (printErr) {
           console.warn('Print error during checkout settlement:', printErr);
         }
@@ -1079,6 +1055,12 @@ export default function FolioSettlementModal({
                 <strong>{formatCurrency(hotelExtrasChargeVal + extensionChargeVal)}</strong>
               </div>
             )}
+            {!isOtaPrepaid && breakfastPlanVal > 0 && (
+              <div>
+                <span className="sub-label">Breakfast Plan:</span>
+                <strong>{formatCurrency(breakfastPlanVal)}</strong>
+              </div>
+            )}
             <div>
               <span className="sub-label">Food:</span>
               <strong>{formatCurrency(effectiveFoodTotal)}</strong>
@@ -1132,11 +1114,11 @@ export default function FolioSettlementModal({
               </span>
             ) : isOtaPayAtHotel ? (
               <span>
-                💡 <strong>OTA Pay-at-Hotel Reconciliation:</strong> {formatCurrency(effectiveRoomTariff)} (Room) + {formatCurrency(displayStayTax)} (Tax){(hotelExtrasChargeVal + extensionChargeVal) > 0 ? ` + ${formatCurrency(hotelExtrasChargeVal + extensionChargeVal)} (Extras/Ext)` : ''} + {formatCurrency(effectiveFnbTotal)} (F&amp;B){extraExpensesVal > 0 ? ` + ${formatCurrency(extraExpensesVal)} (Damages/Extras)` : ''}{activeDiscountAmt > 0 ? ` - ${formatCurrency(activeDiscountAmt)} (Discount)` : ''} - {formatCurrency(effectiveAdvancePaid)} (Advance) = <strong style={{ color: isRefund ? '#15803d' : (balanceDue > 0 ? '#b91c1c' : '#15803d') }}>{isRefund ? `Refund: ${formatCurrency(refundAmount)}` : `${formatCurrency(balanceDue)} Remaining Due`}</strong>
+                💡 <strong>OTA Pay-at-Hotel Reconciliation:</strong> {formatCurrency(effectiveRoomTariff)} (Room) + {formatCurrency(displayStayTax)} (Tax){(hotelExtrasChargeVal + extensionChargeVal) > 0 ? ` + ${formatCurrency(hotelExtrasChargeVal + extensionChargeVal)} (Extras/Ext)` : ''}{breakfastPlanVal > 0 ? ` + ${formatCurrency(breakfastPlanVal)} (Breakfast)` : ''} + {formatCurrency(effectiveFnbTotal)} (F&amp;B){extraExpensesVal > 0 ? ` + ${formatCurrency(extraExpensesVal)} (Damages/Extras)` : ''}{activeDiscountAmt > 0 ? ` - ${formatCurrency(activeDiscountAmt)} (Discount)` : ''} - {formatCurrency(effectiveAdvancePaid)} (Advance) = <strong style={{ color: isRefund ? '#15803d' : (balanceDue > 0 ? '#b91c1c' : '#15803d') }}>{isRefund ? `Refund: ${formatCurrency(refundAmount)}` : (balanceDue === 0 ? '₹0.00 Fully Settled' : `${formatCurrency(balanceDue)} Remaining Due`)}</strong>
               </span>
             ) : (
               <span>
-                💡 <strong>Reconciliation:</strong> {formatCurrency(effectiveRoomTariff)} (Room) + {formatCurrency(displayStayTax)} (Tax){(hotelExtrasChargeVal + extensionChargeVal) > 0 ? ` + ${formatCurrency(hotelExtrasChargeVal + extensionChargeVal)} (Extras/Ext)` : ''} + {formatCurrency(effectiveFnbTotal)} (F&amp;B){extraExpensesVal > 0 ? ` + ${formatCurrency(extraExpensesVal)} (Damages/Extras)` : ''}{activeDiscountAmt > 0 ? ` - ${formatCurrency(activeDiscountAmt)} (Discount)` : ''} - {formatCurrency(effectiveAdvancePaid)} (Advance) = <strong style={{ color: isRefund ? '#15803d' : (balanceDue > 0 ? '#b91c1c' : '#15803d') }}>{isRefund ? `Refund: ${formatCurrency(refundAmount)}` : `${formatCurrency(balanceDue)} Remaining Due`}</strong>
+                💡 <strong>Reconciliation:</strong> {formatCurrency(effectiveRoomTariff)} (Room) + {formatCurrency(displayStayTax)} (Tax){(hotelExtrasChargeVal + extensionChargeVal) > 0 ? ` + ${formatCurrency(hotelExtrasChargeVal + extensionChargeVal)} (Extras/Ext)` : ''}{breakfastPlanVal > 0 ? ` + ${formatCurrency(breakfastPlanVal)} (Breakfast)` : ''} + {formatCurrency(effectiveFnbTotal)} (F&amp;B){extraExpensesVal > 0 ? ` + ${formatCurrency(extraExpensesVal)} (Damages/Extras)` : ''}{activeDiscountAmt > 0 ? ` - ${formatCurrency(activeDiscountAmt)} (Discount)` : ''} - {formatCurrency(effectiveAdvancePaid)} (Advance) = <strong style={{ color: isRefund ? '#15803d' : (balanceDue > 0 ? '#b91c1c' : '#15803d') }}>{isRefund ? `Refund: ${formatCurrency(refundAmount)}` : (balanceDue === 0 ? '₹0.00 Fully Settled' : `${formatCurrency(balanceDue)} Remaining Due`)}</strong>
               </span>
             )}
             {effectiveFnbTotal > 0 && (
@@ -2258,61 +2240,7 @@ export default function FolioSettlementModal({
 
         {/* Footer */}
         <div className="modal-footer" style={{ padding: '16px 26px', borderTop: '1px solid var(--border-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-          {isCompanyPayingLater ? (
-            <button
-              type="button"
-              className="filter-chip"
-              onClick={() => {
-                const regPrintData = {
-                  ...room,
-                  ...folioData,
-                  voucher_number: room.voucher_number || folioData.voucherNo,
-                  guestName: folioData.guestName || room.guest_name,
-                  mobile: folioData.mobile || room.mobile,
-                  altMobile: room.alt_mobile || room.booking_alt_mobile,
-                  fatherName: room.father_name,
-                  dob: room.dob,
-                  address: room.address,
-                  email: room.email,
-                  aadharNumber: room.aadhar_number,
-                  docType: room.doc_type,
-                  checkinTime: folioData.checkinTime || room.checkin_time,
-                  approxCheckout: folioData.actualCheckout || folioData.checkoutTime || new Date(),
-                  stayNights: folioData.billableDays || folioData.stayNights || room.stay_nights || 1,
-                  bookingSource: 'BTC',
-                  btcCompanyName: room.btc_company_name || folioData.btcCompanyName,
-                  btcCompanyAddress: room.btc_address || folioData.btcCompanyAddress,
-                  btcCompanyGst: room.btc_gst_number || folioData.btcCompanyGst || room.gst_number,
-                  btcCompanyPan: room.btc_pan_number || folioData.btcCompanyPan,
-                  btcCompanyContactPerson: room.btc_contact_person || folioData.btcCompanyContactPerson,
-                  btcCompanyPhone: room.btc_contact_phone || folioData.btcCompanyPhone,
-                  btcCompanyEmail: room.btc_contact_email || folioData.btcCompanyEmail,
-                  btcApprovalRef: room.btc_approval_ref || folioData.btcApprovalRef,
-                  companyName: room.btc_company_name || folioData.btcCompanyName,
-                  gstNumber: room.btc_gst_number || folioData.gstNumber,
-                  roomTariffNet: effectiveRoomTariff || folioData.roomChargesTotal || folioData.grandTariffNet || folioData.baseRoomCharge || Math.max(0, (folioData.finalGrandTotal || folioData.grandTotal || room.total_room_charge || 0) - (folioData.grandGstAmount || folioData.taxAmount || 0)),
-                  discountAmount: folioData.discountAmt || 0,
-                  discountPct: folioData.discountPct || 0,
-                  taxAmount: folioData.grandGstAmount || folioData.taxAmount || Math.max(0, (folioData.finalGrandTotal || folioData.grandTotal || room.total_room_charge || 0) - Math.round((folioData.finalGrandTotal || folioData.grandTotal || room.total_room_charge || 0) / 1.05)),
-                  foodTotal: folioData.foodTotal || 0,
-                  barTotal: folioData.barTotal || 0,
-                  extraBedCharge: folioData.extraBedsTotal || 0,
-                  grandTotal: folioData.finalGrandTotal || folioData.grandTotal || room.total_room_charge || 0,
-                  totalPaid: folioData.advancePaid || 0,
-                  balanceDue: folioData.balanceDue || 0,
-                  isCompanyPayingLater: true,
-                  isBtcPending: true,
-                  checkedInBy: room.checked_in_by || 'Front Desk',
-                  checkedOutBy: currentUser ? (currentUser.full_name || currentUser.username) : 'Front Desk'
-                };
-                printGuestRegistrationA4(regPrintData, { includePhotos: false });
-              }}
-              style={{ fontWeight: 800, padding: '9px 16px', fontSize: '0.88rem', background: '#faf5ff', color: '#6b21a8', border: '1.5px solid #d8b4fe' }}
-              title="Print Check-in / Registration Form with complete corporate BTC details and amount"
-            >
-              📄 Print Check-in Form (Details &amp; Amount)
-            </button>
-          ) : (
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <button
               type="button"
               className="filter-chip"
@@ -2335,6 +2263,16 @@ export default function FolioSettlementModal({
                   splitOnline,
                   splitCard,
                   splitCheque,
+                  company_name: checkoutCompanyName.trim() || room.btc_company_name || folioData.btcCompanyName || undefined,
+                  companyName: checkoutCompanyName.trim() || room.btc_company_name || folioData.btcCompanyName || undefined,
+                  gst_number: checkoutGstNumber.trim().toUpperCase() || room.btc_gst_number || folioData.btcCompanyGst || room.gst_number || undefined,
+                  gstNumber: checkoutGstNumber.trim().toUpperCase() || room.btc_gst_number || folioData.btcCompanyGst || room.gst_number || undefined,
+                  company_address: checkoutCompanyAddress.trim() || room.btc_address || folioData.btcCompanyAddress || undefined,
+                  companyAddress: checkoutCompanyAddress.trim() || room.btc_address || folioData.btcCompanyAddress || undefined,
+                  tax_type: checkoutTaxMode === 'IGST' ? 'IGST' : 'CGST_SGST',
+                  taxType: checkoutTaxMode === 'IGST' ? 'IGST' : 'CGST_SGST',
+                  is_igst: checkoutTaxMode === 'IGST' ? 1 : 0,
+                  isIgst: checkoutTaxMode === 'IGST',
                   checked_out_by: currentUser ? (currentUser.full_name || currentUser.username) : 'Cashier_1'
                 });
               }}
@@ -2343,7 +2281,62 @@ export default function FolioSettlementModal({
             >
               🧾 Print Tax Invoice (A4)
             </button>
-          )}
+            {isCompanyPayingLater && (
+              <button
+                type="button"
+                className="filter-chip"
+                onClick={() => {
+                  const regPrintData = {
+                    ...room,
+                    ...folioData,
+                    voucher_number: room.voucher_number || folioData.voucherNo,
+                    guestName: folioData.guestName || room.guest_name,
+                    mobile: folioData.mobile || room.mobile,
+                    altMobile: room.alt_mobile || room.booking_alt_mobile,
+                    fatherName: room.father_name,
+                    dob: room.dob,
+                    address: room.address,
+                    email: room.email,
+                    aadharNumber: room.aadhar_number,
+                    docType: room.doc_type,
+                    checkinTime: folioData.checkinTime || room.checkin_time,
+                    approxCheckout: folioData.actualCheckout || folioData.checkoutTime || new Date(),
+                    stayNights: folioData.billableDays || folioData.stayNights || room.stay_nights || 1,
+                    bookingSource: 'BTC',
+                    btcCompanyName: room.btc_company_name || folioData.btcCompanyName,
+                    btcCompanyAddress: room.btc_address || folioData.btcCompanyAddress,
+                    btcCompanyGst: room.btc_gst_number || folioData.btcCompanyGst || room.gst_number,
+                    btcCompanyPan: room.btc_pan_number || folioData.btcCompanyPan,
+                    btcCompanyContactPerson: room.btc_contact_person || folioData.btcCompanyContactPerson,
+                    btcCompanyPhone: room.btc_contact_phone || folioData.btcCompanyPhone,
+                    btcCompanyEmail: room.btc_contact_email || folioData.btcCompanyEmail,
+                    btcApprovalRef: room.btc_approval_ref || folioData.btcApprovalRef,
+                    companyName: room.btc_company_name || folioData.btcCompanyName,
+                    gstNumber: room.btc_gst_number || folioData.gstNumber,
+                    roomTariffNet: effectiveRoomTariff || folioData.roomChargesTotal || folioData.grandTariffNet || folioData.baseRoomCharge || Math.max(0, (folioData.finalGrandTotal || folioData.grandTotal || room.total_room_charge || 0) - (folioData.grandGstAmount || folioData.taxAmount || 0)),
+                    discountAmount: folioData.discountAmt || 0,
+                    discountPct: folioData.discountPct || 0,
+                    taxAmount: folioData.grandGstAmount || folioData.taxAmount || Math.max(0, (folioData.finalGrandTotal || folioData.grandTotal || room.total_room_charge || 0) - Math.round((folioData.finalGrandTotal || folioData.grandTotal || room.total_room_charge || 0) / 1.05)),
+                    foodTotal: folioData.foodTotal || 0,
+                    barTotal: folioData.barTotal || 0,
+                    extraBedCharge: folioData.extraBedsTotal || 0,
+                    grandTotal: folioData.finalGrandTotal || folioData.grandTotal || room.total_room_charge || 0,
+                    totalPaid: folioData.advancePaid || 0,
+                    balanceDue: folioData.balanceDue || 0,
+                    isCompanyPayingLater: true,
+                    isBtcPending: true,
+                    checkedInBy: room.checked_in_by || 'Front Desk',
+                    checkedOutBy: currentUser ? (currentUser.full_name || currentUser.username) : 'Front Desk'
+                  };
+                  printGuestRegistrationA4(regPrintData, { includePhotos: false });
+                }}
+                style={{ fontWeight: 800, padding: '9px 16px', fontSize: '0.88rem', background: '#faf5ff', color: '#6b21a8', border: '1.5px solid #d8b4fe' }}
+                title="Print Check-in / Registration Form with complete corporate BTC details and amount"
+              >
+                📄 Print Check-in Form
+              </button>
+            )}
+          </div>
           <div style={{ display: 'flex', gap: '12px' }}>
             <button type="button" className="btn-custom-cancel" onClick={onClose} style={{ padding: '10px 22px', fontSize: '0.92rem' }}>
               Cancel
@@ -2360,7 +2353,7 @@ export default function FolioSettlementModal({
                 borderRadius: 'var(--radius-md)',
                 background: isDiscountPendingApproval
                   ? 'linear-gradient(135deg, #d97706 0%, #b45309 100%)'
-                  : (isCompanyPayingLater ? '#2563eb' : ((isOtaPrepaid && balanceDue === 0) ? '#16a34a' : undefined)),
+                  : (isCompanyPayingLater ? '#2563eb' : (balanceDue === 0 ? '#16a34a' : undefined)),
                 cursor: 'pointer',
                 boxShadow: isDiscountPendingApproval ? '0 4px 14px rgba(217, 119, 6, 0.35)' : undefined
               }}
@@ -2371,11 +2364,11 @@ export default function FolioSettlementModal({
                     ? 'Finalizing...'
                     : (isCompanyPayingLater
                         ? 'Checkout (Pending BTC — ₹0 Paid)'
-                        : (isOtaPrepaid && balanceDue === 0
-                            ? 'Complete Checkout (Pre-Paid — ₹0 Due)'
+                        : (balanceDue === 0
+                            ? (isOtaPrepaid ? 'Complete Checkout (Pre-Paid — ₹0 Due)' : 'Complete Checkout (₹0.00 Due)')
                             : (isOtaPrepaid && balanceDue > 0
                                 ? `Settle F&B & Checkout (${formatCurrency(balanceDue)})`
-                                : 'Finalize Checkout & Print Bill'))))}
+                                : `Finalize Checkout & Settle (${formatCurrency(balanceDue)})`))))}
             </button>
           </div>
         </div>

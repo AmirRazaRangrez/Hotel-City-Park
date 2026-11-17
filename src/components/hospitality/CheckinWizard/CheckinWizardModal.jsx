@@ -503,11 +503,11 @@ export default function CheckinWizardModal({
         const inMs = new Date(checkinIso).getTime();
         const outMs = new Date(`${draft.checkoutDate}T${draft.checkoutTime.slice(0, 5)}`).getTime();
         const nowMs = Date.now();
-        if (outMs < nowMs) {
+        if (!isOta && outMs < nowMs) {
           showToast('Expected checkout cannot be earlier than current time.', 'red');
           return false;
         }
-        if (outMs < inMs + (9 * 60 * 60 * 1000)) {
+        if (!isOta && outMs < inMs + (9 * 60 * 60 * 1000)) {
           showToast('Expected checkout must be at least 9 hours after check-in.', 'red');
           return false;
         }

@@ -2753,10 +2753,10 @@ let _firestore = null;
 
     // Real-time synchronization with Firebase Cloud & Local Server (Zero-Lag)
     function setupFirebaseRealtime() {
-      // Polling fallback every 5 seconds via REST
+      // Gentle 60-second fallback poller (calls local API first, 0 Firebase reads when local server is up)
       setInterval(() => {
         loadBills();
-      }, 5000);
+      }, 60000);
     }
 
     // Real-Time Local & Cloud WebSocket Engine for Storeman Panel (<10ms live push without manual refresh)
@@ -2808,7 +2808,33 @@ let _firestore = null;
     // VENDOR MANAGEMENT (100% Firebase Firestore - Strictly Admin/Owner Parties)
     // -------------------------------------------------------------
     async function loadVendors() {
-      // 1. Check local storage cache
+      // 1. Primary Sync: Local SQLite Server API (Instant, Zero Firebase Reads!)
+      try {
+        const localRes = await fetch('/api/store/vendors').then(r => r.ok ? r.json() : null).catch(() => null);
+        if (localRes && localRes.success && Array.isArray(localRes.vendors)) {
+          vendors = localRes.vendors.map(v => ({
+            id: v.id,
+            name: v.name || 'Vendor',
+            phone: v.mobile || v.phone || '',
+            category: v.category || v.address || ''
+          }));
+          vendors.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+          saveVendors();
+          if (vendors.length > 0 && (!selectedVendorId || !vendors.find(x => x.id === selectedVendorId))) {
+            selectedVendorId = vendors[0].id;
+          } else if (vendors.length === 0) {
+            selectedVendorId = '';
+          }
+          updateVendorDisplay();
+          updateBillsCounter();
+          if (typeof currentRecentSubTab !== 'undefined' && currentRecentSubTab === 'parties') {
+            renderAllPartiesList();
+          }
+          return;
+        }
+      } catch (_) {}
+
+      // 2. Fallback to local storage cache
       const stored = localStorage.getItem('hcp_store_vendors');
       if (stored) {
         try { vendors = JSON.parse(stored); } catch (_) { vendors = []; }
@@ -3771,7 +3797,21 @@ let _firestore = null;
     }
 
     async function loadBills() {
-      // 1. Check local storage cache
+      // 1. Primary Sync: Local SQLite Server API (Instant, Zero Firebase Reads!)
+      try {
+        const localRes = await fetch('/api/store/bills').then(r => r.ok ? r.json() : null).catch(() => null);
+        if (localRes && localRes.success && Array.isArray(localRes.bills)) {
+          bills = localRes.bills;
+          localStorage.setItem('hcp_store_bills', JSON.stringify(bills));
+          updateCounters();
+          renderBillsList();
+          renderAllPartiesList();
+          renderHistoryList();
+          return;
+        }
+      } catch (_) {}
+
+      // 2. Fallback to local storage cache
       const stored = localStorage.getItem('hcp_store_bills');
       if (stored) {
         try { 

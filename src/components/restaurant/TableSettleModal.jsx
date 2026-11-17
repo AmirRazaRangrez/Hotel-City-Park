@@ -7,9 +7,15 @@ import OccupiedRoomPickerModal from './OccupiedRoomPickerModal';
 
 export default function TableSettleModal({ isOpen, session, onClose, onSettleSuccess, department = 'restaurant' }) {
   const { showToast, currentUser, surchargeSettings } = useApp();
-  const cardPct = surchargeSettings?.card_surcharge_pct !== undefined ? Number(surchargeSettings.card_surcharge_pct) : 2.5;
-  const upiPct = surchargeSettings?.upi_tax_pct !== undefined ? Number(surchargeSettings.upi_tax_pct) : 0.4;
-  const upiThresh = surchargeSettings?.upi_tax_threshold !== undefined ? Number(surchargeSettings.upi_tax_threshold) : 2000;
+  const cardPct = surchargeSettings?.restaurant_card_surcharge_pct !== undefined
+    ? Number(surchargeSettings.restaurant_card_surcharge_pct)
+    : (surchargeSettings?.card_surcharge_pct !== undefined ? Number(surchargeSettings.card_surcharge_pct) : 0);
+  const upiPct = surchargeSettings?.restaurant_upi_mdr_pct !== undefined
+    ? Number(surchargeSettings.restaurant_upi_mdr_pct)
+    : (surchargeSettings?.upi_tax_pct !== undefined ? Number(surchargeSettings.upi_tax_pct) : 0);
+  const upiThresh = surchargeSettings?.restaurant_upi_threshold !== undefined
+    ? Number(surchargeSettings.restaurant_upi_threshold)
+    : (surchargeSettings?.upi_tax_threshold !== undefined ? Number(surchargeSettings.upi_tax_threshold) : 0);
 
   const [paymentMode, setPaymentMode] = useState('cash'); // 'cash' | 'online' | 'card' | 'split'
   const [splitCash, setSplitCash] = useState(0);

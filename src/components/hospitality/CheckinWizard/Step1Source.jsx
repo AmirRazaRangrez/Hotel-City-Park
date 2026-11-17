@@ -1065,11 +1065,16 @@ export default function Step1Source({
                       }}
                     />
                   </div>
-                  {Number(draft.otaManualAmount) > 0 && (
-                    <div style={{ fontSize: '0.74rem', color: '#0369a1', marginTop: '4px', fontWeight: 650 }}>
-                      ✓ Includes 5% GST (Base: ₹{(Number(draft.otaManualAmount) * 0.95).toFixed(2)} + GST: ₹{(Number(draft.otaManualAmount) * 0.05).toFixed(2)})
-                    </div>
-                  )}
+                  {Number(draft.otaManualAmount) > 0 && (() => {
+                    const rawAmt = Number(draft.otaManualAmount);
+                    const baseAmt = Math.round((rawAmt / 1.05) * 100) / 100;
+                    const gstAmt = Number((rawAmt - baseAmt).toFixed(2));
+                    return (
+                      <div style={{ fontSize: '0.74rem', color: '#0369a1', marginTop: '4px', fontWeight: 650 }}>
+                        ✓ Includes 5% GST (Base: ₹{baseAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + 5% GST: ₹{gstAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* OTA Booking ID / Bill No. */}

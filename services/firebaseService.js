@@ -261,6 +261,13 @@ async function syncActiveOccupancy(room) {
   if (!roomNum) return;
 
   try {
+    const totalAdults = Number(room.adults || (Number(room.adults_male || 0) + Number(room.adults_female || 0)) || 1);
+    const totalRoomCharge = Number(room.total_room_charge || room.folio?.total || room.folio?.roomCharge || 0);
+    const totalPaid = Number(room.total_paid || room.advance_payment || room.folio?.paid || 0);
+    const advanceRcptNo = room.advance_receipt_no || room.advanceReceiptNo || room.folio?.advanceReceiptNo || null;
+    const paymentMode = room.advance_payment_mode || room.advancePaymentMode || room.folio?.paymentMode || 'Cash';
+    const mealPlan = room.meal_plan || room.mealPlan || room.folio?.mealPlan || 'without_breakfast';
+
     const data = {
       room_number: String(roomNum),
       room_id: Number(room.room_id || room.id || 0) || null,
@@ -268,12 +275,98 @@ async function syncActiveOccupancy(room) {
       guest_name: String(room.guest_name || room.name || 'Guest'),
       guest_mobile: room.guest_mobile || room.mobile || null,
       guest_email: room.guest_email || room.email || null,
+      guest_address: room.address || room.guest_address || null,
+      guest_dob: room.dob || room.guest_dob || null,
+      doc_type: room.doc_type || room.docType || 'Aadhaar Card',
+      aadhar_number: room.aadhar_number || room.aadharNumber || null,
       booking_id: Number(room.booking_id || room.bookingId || 0) || null,
+      adults: totalAdults,
+      adults_male: Number(room.adults_male ?? room.adultsMale ?? 1),
+      adults_female: Number(room.adults_female ?? room.adultsFemale ?? 0),
+      children: Number(room.children ?? 0),
+      meal_plan: mealPlan,
+      booking_source: room.booking_source || room.source || 'Walk-in',
+      ota_platform: room.ota_platform || room.otaPlatform || null,
+      is_prepaid: room.is_prepaid ? 1 : 0,
+      ota_bill_amount: Number(room.ota_bill_amount || room.otaBillAmount || 0),
+      ota_booking_id: room.ota_booking_id || room.otaBookingId || null,
+      room_rate: Number(room.room_rate || room.customTariff || 0),
+      custom_tariff: Number(room.room_rate || room.customTariff || 0),
+      total_room_charge: totalRoomCharge,
+      advance_payment: totalPaid,
+      total_paid: totalPaid,
+      advance_receipt_no: advanceRcptNo,
+      advance_payment_mode: paymentMode,
+      voucher_number: room.voucher_number || room.voucherNumber || null,
+      checked_in_by: room.checked_in_by || room.checkedInBy || 'Front Desk',
       checkin_time: room.checkin_time || room.checkinTime || new Date().toISOString(),
+      approx_checkout_time: room.approx_checkout_time || room.approxCheckoutTime || null,
       updated_at: new Date().toISOString()
     };
 
-    await withTimeout(firestore.collection('active_occupancies').doc(String(roomNum)).set(data, { merge: true }));
+    const folioSummary = room.folio || {
+      roomCharge: totalRoomCharge,
+      totalRoomCharge: totalRoomCharge,
+      tariffSubtotal: totalRoomCharge,
+      restaurant: 0,
+      bar: 0,
+      foodTotal: 0,
+      barTotal: 0,
+      extra: 0,
+      total: totalRoomCharge,
+      grandTotal: totalRoomCharge,
+      paid: totalPaid,
+      advancePaid: totalPaid,
+      pending: Math.max(0, totalRoomCharge - totalPaid),
+      balanceDue: Math.max(0, totalRoomCharge - totalPaid),
+      advanceReceiptNo: advanceRcptNo || '',
+      paymentMode: paymentMode,
+      mealPlan: mealPlan,
+      stayCalcNow: {
+        roomCharge: totalRoomCharge,
+        grandTotal: totalRoomCharge,
+        paid: totalPaid,
+        balanceDue: Math.max(0, totalRoomCharge - totalPaid),
+        refundDue: 0,
+        stayDurationStr: '1 Day',
+        chargedDays: 1
+      },
+      payments: room.payments || (totalPaid > 0 ? [{
+        id: advanceRcptNo || 'CR01',
+        receiptNo: advanceRcptNo || 'CR01',
+        receipt_no: advanceRcptNo || 'CR01',
+        mode: paymentMode,
+        payment_mode: paymentMode,
+        amount: totalPaid,
+        cashier: room.checked_in_by || room.checkedInBy || 'Front Desk',
+        cashier_name: room.checked_in_by || room.checkedInBy || 'Front Desk',
+        date: room.checkin_time || new Date().toISOString(),
+        created_at: room.checkin_time || new Date().toISOString(),
+        type: 'advance',
+        payment_type: 'advance',
+        notes: 'Paid at reception desk (Check-In Advance)'
+      }] : [])
+    };
+
+    const batch = firestore.batch();
+    batch.set(firestore.collection('active_occupancies').doc(String(roomNum)), data, { merge: true });
+    batch.set(firestore.collection('room_charges_inbox').doc('folio_' + String(roomNum)), {
+      id: 'folio_' + String(roomNum),
+      room_number: String(roomNum),
+      room_id: Number(room.room_id || room.id || 0) || null,
+      department: 'room_folio',
+      bill_no: room.voucher_number || room.voucherNumber || ('BK-' + String(roomNum)),
+      subtotal: totalRoomCharge,
+      grand_total: totalRoomCharge,
+      gst: Math.round(totalRoomCharge * 0.05),
+      settled_by: 'System',
+      status: (totalPaid >= totalRoomCharge) ? 'settled' : 'due',
+      items_summary: JSON.stringify(folioSummary),
+      created_at: room.checkin_time || new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }, { merge: true });
+
+    await withTimeout(batch.commit());
   } catch (err) {
     console.warn(`[Firebase] syncActiveOccupancy error for Room ${roomNum}:`, err.message);
   }
@@ -2076,11 +2169,13 @@ async function processCloudInboxDoc(db, doc, data, onNewPendingOrder = null) {
 let isPollingCloudOrders = false;
 async function pollPendingCloudOrders(db, onNewPendingOrder = null) {
   if (!firestore || !db || isPollingCloudOrders) return;
+  if (Date.now() < firestoreQuotaExceededUntil) return;
   isPollingCloudOrders = true;
   try {
     const snap = await withTimeout(
       firestore.collection('room_charges_inbox')
         .where('status', '==', 'pending')
+        .limit(15)
         .get(),
       4000
     );
@@ -2093,7 +2188,10 @@ async function pollPendingCloudOrders(db, onNewPendingOrder = null) {
       }
     }
   } catch (err) {
-    // Transient network blip - silent
+    if (err && (String(err.message).includes('RESOURCE_EXHAUSTED') || String(err.message).includes('Quota exceeded') || err.code === 8)) {
+      firestoreQuotaExceededUntil = Date.now() + 15 * 60 * 1000;
+      console.warn('[Firebase] Firestore read quota reached. Throttling pollPendingCloudOrders for 15 minutes.');
+    }
   } finally {
     isPollingCloudOrders = false;
   }
@@ -2104,14 +2202,68 @@ let realtimeStaffUnsubscribe = null;
 let realtimeStoreBillsUnsubscribe = null;
 let realtimeStorePaymentsUnsubscribe = null;
 
+let realtimeReconnectTimer = null;
+let realtimeBackoffMs = 15000;
+
+function handleRealtimeListenerError(listenerName, err, db, onNewPendingOrder) {
+  const errMsg = String(err?.message || '');
+  const isQuota = errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota exceeded') || err?.code === 8;
+
+  if (isQuota) {
+    firestoreQuotaExceededUntil = Date.now() + 15 * 60 * 1000; // 15-minute circuit breaker
+    console.warn(`🚨 [Firebase Realtime] ${listenerName} error: Daily quota exceeded (50k limit). Halting retries for 15 minutes.`);
+    stopRealtimeListeners();
+    if (realtimeReconnectTimer) clearTimeout(realtimeReconnectTimer);
+    realtimeReconnectTimer = setTimeout(() => {
+      realtimeReconnectTimer = null;
+      realtimeBackoffMs = 15000;
+      setupRealtimeListeners(db, onNewPendingOrder);
+    }, 15 * 60 * 1000);
+    return;
+  }
+
+  console.warn(`[Firebase Realtime] ${listenerName} listener error: ${errMsg}`);
+
+  if (listenerName === 'Room charges') {
+    try { if (realtimeUnsubscribe) realtimeUnsubscribe(); } catch (_) {}
+    realtimeUnsubscribe = null;
+  } else if (listenerName === 'Staff credentials') {
+    try { if (realtimeStaffUnsubscribe) realtimeStaffUnsubscribe(); } catch (_) {}
+    realtimeStaffUnsubscribe = null;
+  } else if (listenerName === 'Store bills') {
+    try { if (realtimeStoreBillsUnsubscribe) realtimeStoreBillsUnsubscribe(); } catch (_) {}
+    realtimeStoreBillsUnsubscribe = null;
+  } else if (listenerName === 'Store vendor payments') {
+    try { if (realtimeStorePaymentsUnsubscribe) realtimeStorePaymentsUnsubscribe(); } catch (_) {}
+    realtimeStorePaymentsUnsubscribe = null;
+  }
+
+  // Exponential backoff: 15s -> 30s -> 60s -> 120s -> max 300s (5 minutes)
+  realtimeBackoffMs = Math.min(Math.max(realtimeBackoffMs * 2, 15000), 300000);
+  console.log(`🔄 [Firebase Realtime] Auto-reconnecting listeners in ${Math.round(realtimeBackoffMs / 1000)}s...`);
+
+  if (!realtimeReconnectTimer) {
+    realtimeReconnectTimer = setTimeout(() => {
+      realtimeReconnectTimer = null;
+      setupRealtimeListeners(db, onNewPendingOrder);
+    }, realtimeBackoffMs);
+  }
+}
+
 function setupRealtimeListeners(db, onNewPendingOrder = null) {
   if (!firestore) return;
 
-  // 1. Room Charges & Folio Deletions Listener
+  if (Date.now() < firestoreQuotaExceededUntil) {
+    console.warn(`[Firebase Realtime] Throttled: Quota cooldown active for next ${Math.round((firestoreQuotaExceededUntil - Date.now()) / 1000)}s.`);
+    return;
+  }
+
+  // 1. Room Charges & Folio Deletions Listener (bounded to recent 30 documents)
   if (!realtimeUnsubscribe) {
     try {
-      const q = firestore.collection('room_charges_inbox');
+      const q = firestore.collection('room_charges_inbox').limit(30);
       realtimeUnsubscribe = q.onSnapshot(snapshot => {
+        realtimeBackoffMs = 15000;
         snapshot.docChanges().forEach(change => {
           const doc = change.doc;
           const data = doc.data() || {};
@@ -2129,7 +2281,6 @@ function setupRealtimeListeners(db, onNewPendingOrder = null) {
               const isBar = dept.includes('bar');
               const isRest = dept.includes('restaurant') || dept.includes('rest');
               if (data.bill_no) {
-                // Delete from the correct department table; fallback to both only if department is unknown
                 if (isBar) {
                   const r = db.prepare('DELETE FROM bar_orders WHERE order_number = ?').run(data.bill_no);
                   affected += r.changes;
@@ -2137,7 +2288,6 @@ function setupRealtimeListeners(db, onNewPendingOrder = null) {
                   const r = db.prepare('DELETE FROM restaurant_orders WHERE order_number = ?').run(data.bill_no);
                   affected += r.changes;
                   if (!isRest && r.changes === 0) {
-                    // Unknown dept and not found in restaurant — try bar as fallback
                     const r2 = db.prepare('DELETE FROM bar_orders WHERE order_number = ?').run(data.bill_no);
                     affected += r2.changes;
                   }
@@ -2187,32 +2337,21 @@ function setupRealtimeListeners(db, onNewPendingOrder = null) {
           }
         });
       }, err => {
-        console.warn('[Firebase] Room charges listener error:', err.message);
-        try { if (realtimeUnsubscribe) realtimeUnsubscribe(); } catch (_) {}
-        realtimeUnsubscribe = null;
-        setTimeout(() => {
-          if (firestore && !realtimeUnsubscribe) {
-            console.log('🔄 [Firebase Realtime] Auto-reconnecting room charges listener after sleep/disconnect...');
-            setupRealtimeListeners(db, onNewPendingOrder);
-          }
-        }, 3000);
+        handleRealtimeListenerError('Room charges', err, db, onNewPendingOrder);
       });
       console.log('⚡ [Firebase Realtime] Connected! Listening for live pending orders & charge cancellations.');
     } catch (err) {
-      console.warn('[Firebase] Could not setup room charges realtime listener:', err.message);
-      realtimeUnsubscribe = null;
-      setTimeout(() => {
-        if (firestore && !realtimeUnsubscribe) setupRealtimeListeners(db, onNewPendingOrder);
-      }, 5000);
+      handleRealtimeListenerError('Room charges setup', err, db, onNewPendingOrder);
     }
   }
 
-  // 2. Staff Users & Password Updates Listener (Adopt Admin changes into local SQLite)
+  // 2. Staff Users & Password Updates Listener (bounded to 50 documents)
   if (!realtimeStaffUnsubscribe) {
     try {
       const bcrypt = require('bcryptjs');
-      const staffCol = firestore.collection('staff_users');
+      const staffCol = firestore.collection('staff_users').limit(50);
       realtimeStaffUnsubscribe = staffCol.onSnapshot(snapshot => {
+        realtimeBackoffMs = 15000;
         snapshot.docChanges().forEach(change => {
           if (change.type === 'modified' || change.type === 'added') {
             const data = change.doc.data();
@@ -2221,7 +2360,7 @@ function setupRealtimeListeners(db, onNewPendingOrder = null) {
             try {
               const cleanUser = String(data.username).trim().toLowerCase();
               const existing = db.prepare('SELECT id, password, plain_password FROM staff_users WHERE LOWER(username) = ?').get(cleanUser);
-              
+
               if (data.plain_password && data.plain_password.trim().length > 0) {
                 const newPlain = data.plain_password.trim();
                 if (!existing || existing.plain_password !== newPlain) {
@@ -2248,27 +2387,20 @@ function setupRealtimeListeners(db, onNewPendingOrder = null) {
           }
         });
       }, err => {
-        console.warn('[Firebase] Staff credentials listener error:', err.message);
-        try { if (realtimeStaffUnsubscribe) realtimeStaffUnsubscribe(); } catch (_) {}
-        realtimeStaffUnsubscribe = null;
-        setTimeout(() => {
-          if (firestore && !realtimeStaffUnsubscribe) {
-            setupRealtimeListeners(db, onNewPendingOrder);
-          }
-        }, 5000);
+        handleRealtimeListenerError('Staff credentials', err, db, onNewPendingOrder);
       });
       console.log('⚡ [Firebase Realtime] Connected! Listening for live staff credential & password updates.');
     } catch (err) {
-      console.warn('[Firebase] Could not setup staff realtime listener:', err.message);
+      handleRealtimeListenerError('Staff credentials setup', err, db, onNewPendingOrder);
     }
   }
 
-  // 3. Store Purchase Bills Realtime Listener (Zero-Polling)
+  // 3. Store Purchase Bills Realtime Listener (bounded to 30 documents)
   if (!realtimeStoreBillsUnsubscribe) {
     try {
-      const qStore = firestore.collection('store_bills');
-      // seenStoreBillDocIds is at module level to survive reconnections
+      const qStore = firestore.collection('store_bills').limit(30);
       realtimeStoreBillsUnsubscribe = qStore.onSnapshot(snapshot => {
+        realtimeBackoffMs = 15000;
         snapshot.docChanges().forEach(change => {
           if (change.type === 'added') {
             const docId = String(change.doc.id || '');
@@ -2303,27 +2435,20 @@ function setupRealtimeListeners(db, onNewPendingOrder = null) {
           }
         });
       }, err => {
-        console.warn('[Firebase] Store bills listener error:', err.message);
-        try { if (realtimeStoreBillsUnsubscribe) realtimeStoreBillsUnsubscribe(); } catch (_) {}
-        realtimeStoreBillsUnsubscribe = null;
-        setTimeout(() => {
-          if (firestore && !realtimeStoreBillsUnsubscribe) {
-            setupRealtimeListeners(db, onNewPendingOrder);
-          }
-        }, 5000);
+        handleRealtimeListenerError('Store bills', err, db, onNewPendingOrder);
       });
       console.log('⚡ [Firebase Realtime] Connected! Listening for live Store Purchase Bills.');
     } catch (err) {
-      console.warn('[Firebase] Could not setup store bills listener:', err.message);
+      handleRealtimeListenerError('Store bills setup', err, db, onNewPendingOrder);
     }
   }
 
-  // 4. Store Vendor Payments Realtime Listener (Alerts Storeman Panel when Admin Pays)
+  // 4. Store Vendor Payments Realtime Listener (bounded to 30 documents)
   if (!realtimeStorePaymentsUnsubscribe) {
     try {
-      const qPayments = firestore.collection('store_vendor_payments');
-      // uses module-level seenPaymentDocIds
+      const qPayments = firestore.collection('store_vendor_payments').limit(30);
       realtimeStorePaymentsUnsubscribe = qPayments.onSnapshot(snapshot => {
+        realtimeBackoffMs = 15000;
         snapshot.docChanges().forEach(change => {
           if (change.type === 'added') {
             const docId = String(change.doc.id || '');
@@ -2358,7 +2483,6 @@ function setupRealtimeListeners(db, onNewPendingOrder = null) {
                 socketServer.broadcast('STORE_UPDATED', { type: 'payment' });
                 socketServer.broadcast('BILLS_UPDATED', { type: 'payment' });
 
-                // 🔔 Dispatch FCM Push Notification to Storeman APK only if NOT already notified!
                 if (data.notified !== true && data.status !== 'notified') {
                   try {
                     const notificationService = require('./notificationService');
@@ -2386,18 +2510,11 @@ function setupRealtimeListeners(db, onNewPendingOrder = null) {
           }
         });
       }, err => {
-        console.warn('[Firebase] Store vendor payments listener error:', err.message);
-        try { if (realtimeStorePaymentsUnsubscribe) realtimeStorePaymentsUnsubscribe(); } catch (_) {}
-        realtimeStorePaymentsUnsubscribe = null;
-        setTimeout(() => {
-          if (firestore && !realtimeStorePaymentsUnsubscribe) {
-            setupRealtimeListeners(db, onNewPendingOrder);
-          }
-        }, 5000);
+        handleRealtimeListenerError('Store vendor payments', err, db, onNewPendingOrder);
       });
       console.log('⚡ [Firebase Realtime] Connected! Listening for live Admin Store Payments.');
     } catch (err) {
-      console.warn('[Firebase] Could not setup store vendor payments listener:', err.message);
+      handleRealtimeListenerError('Store vendor payments setup', err, db, onNewPendingOrder);
     }
   }
 }
@@ -2419,44 +2536,29 @@ async function fetchApprovalStatusFromCloud(id) {
 }
 
 async function pollCloudApprovals(db) {
-  if (!db) return;
+  if (!db || !firestore) return;
+  if (Date.now() < firestoreQuotaExceededUntil) return;
   const notificationService = require('./notificationService');
   let docs = [];
 
-  if (firestore) {
-    try {
-      const snap = await withTimeout(
-        firestore.collection('room_charges_inbox')
-          .where('department', '==', 'discount_approval')
-          .get(),
-        3000
-      );
-      if (snap && !snap.empty) {
-        snap.forEach(doc => {
-          docs.push({ id: doc.id, ...doc.data() });
-        });
-      }
-    } catch (_) {}
-  }
-
-  if (docs.length === 0) {
-    // REST API fallback for listing
-    try {
-      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timer = controller ? setTimeout(() => controller.abort(), 3500) : null;
-      const res = await fetch(`${FIREBASE_REST_URL}/room_charges_inbox?pageSize=100&key=${FIREBASE_API_KEY}`, { signal: controller?.signal });
-      if (timer) clearTimeout(timer);
-      if (res.ok) {
-        const body = await res.json();
-        const rawDocs = body.documents || [];
-        for (const rd of rawDocs) {
-          const parsed = parseFirestoreDoc(rd);
-          if (parsed && parsed.department === 'discount_approval') {
-            docs.push(parsed);
-          }
-        }
-      }
-    } catch (_) {}
+  try {
+    const snap = await withTimeout(
+      firestore.collection('room_charges_inbox')
+        .where('department', '==', 'discount_approval')
+        .limit(10)
+        .get(),
+      3000
+    );
+    if (snap && !snap.empty) {
+      snap.forEach(doc => {
+        docs.push({ id: doc.id, ...doc.data() });
+      });
+    }
+  } catch (err) {
+    if (err && (String(err.message).includes('RESOURCE_EXHAUSTED') || String(err.message).includes('Quota exceeded') || err.code === 8)) {
+      firestoreQuotaExceededUntil = Date.now() + 15 * 60 * 1000;
+      console.warn('[Firebase] Quota exceeded in pollCloudApprovals. Throttling for 15 minutes.');
+    }
   }
 
   for (const data of docs) {

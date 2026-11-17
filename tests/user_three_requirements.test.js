@@ -69,7 +69,7 @@ describe('Verification of the 3 User Requirements', () => {
       expect(html).toContain('>3</span>');
     });
 
-    it('handles multiple extra mattresses and children appropriately', () => {
+    it('handles multiple extra mattresses and excludes children from pax (adults only)', () => {
       const room = {
         guest_name: 'FAMILY GUEST',
         room_number: '103',
@@ -77,12 +77,12 @@ describe('Verification of the 3 User Requirements', () => {
         adults_male: 1,
         adults_female: 0,
         extra_beds: 2, // 2 Extra mattresses -> 2 + 2 = 4 adults
-        children: 1, // 1 child -> 4 + 1 = 5 pax total
+        children: 1, // 1 child -> must NOT count child, only 4 adults
         voucher_number: '260929-702'
       };
       const html = buildFinalBillA4HTML(room, { extra_beds: 2 }, {});
       expect(html).toContain('Pax :');
-      expect(html).toContain('>5</span>');
+      expect(html).toContain('>4</span>');
     });
   });
 });

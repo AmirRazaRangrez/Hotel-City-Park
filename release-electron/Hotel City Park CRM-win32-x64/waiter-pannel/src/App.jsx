@@ -545,7 +545,7 @@ export default function App() {
     if (!currentUser || destination) return;
     const interval = setInterval(() => {
       fetchLiveData(true);
-    }, 7000);
+    }, 15000);
     return () => clearInterval(interval);
   }, [currentUser, destination, fetchLiveData]);
 

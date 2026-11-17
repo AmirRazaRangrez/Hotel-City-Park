@@ -312,21 +312,24 @@ function getNextPettyCashVoucherNumber() {
 // -------------------------------------------------------------
 function getSurchargeSettings() {
   try {
-    const cardRow = db.prepare("SELECT value FROM system_settings WHERE key = 'card_surcharge_pct'").get();
-    const upiTaxRow = db.prepare("SELECT value FROM system_settings WHERE key = 'upi_tax_pct'").get();
-    const upiThreshRow = db.prepare("SELECT value FROM system_settings WHERE key = 'upi_tax_threshold'").get();
+    const cardRow = db.prepare("SELECT value FROM system_settings WHERE key IN ('restaurant_card_surcharge_pct', 'card_surcharge_pct') ORDER BY CASE WHEN key = 'restaurant_card_surcharge_pct' THEN 0 ELSE 1 END LIMIT 1").get();
+    const upiTaxRow = db.prepare("SELECT value FROM system_settings WHERE key IN ('restaurant_upi_mdr_pct', 'upi_tax_pct') ORDER BY CASE WHEN key = 'restaurant_upi_mdr_pct' THEN 0 ELSE 1 END LIMIT 1").get();
+    const upiThreshRow = db.prepare("SELECT value FROM system_settings WHERE key IN ('restaurant_upi_threshold', 'upi_tax_threshold') ORDER BY CASE WHEN key = 'restaurant_upi_threshold' THEN 0 ELSE 1 END LIMIT 1").get();
 
     const card_surcharge_pct = (cardRow && cardRow.value !== undefined && cardRow.value !== '') ? parseFloat(cardRow.value) : 2.5;
     const upi_tax_pct = (upiTaxRow && upiTaxRow.value !== undefined && upiTaxRow.value !== '') ? parseFloat(upiTaxRow.value) : 0.4;
-    const upi_tax_threshold = (upiThreshRow && upiThreshRow.value !== undefined && upiThreshRow.value !== '') ? parseFloat(upiThreshRow.value) : 2000;
+    const upi_tax_threshold = (upiThreshRow && upiThreshRow.value !== undefined && upiThreshRow.value !== '') ? parseFloat(upiThreshRow.value) : 0;
 
     return {
       card_surcharge_pct: isNaN(card_surcharge_pct) ? 2.5 : Math.max(0, card_surcharge_pct),
       upi_tax_pct: isNaN(upi_tax_pct) ? 0.4 : Math.max(0, upi_tax_pct),
-      upi_tax_threshold: isNaN(upi_tax_threshold) ? 2000 : Math.max(0, upi_tax_threshold)
+      upi_tax_threshold: isNaN(upi_tax_threshold) ? 0 : Math.max(0, upi_tax_threshold),
+      restaurant_card_surcharge_pct: isNaN(card_surcharge_pct) ? 2.5 : Math.max(0, card_surcharge_pct),
+      restaurant_upi_mdr_pct: isNaN(upi_tax_pct) ? 0.4 : Math.max(0, upi_tax_pct),
+      restaurant_upi_threshold: isNaN(upi_tax_threshold) ? 0 : Math.max(0, upi_tax_threshold)
     };
   } catch (err) {
-    return { card_surcharge_pct: 2.5, upi_tax_pct: 0.4, upi_tax_threshold: 2000 };
+    return { card_surcharge_pct: 2.5, upi_tax_pct: 0.4, upi_tax_threshold: 0, restaurant_card_surcharge_pct: 2.5, restaurant_upi_mdr_pct: 0.4, restaurant_upi_threshold: 0 };
   }
 }
 
@@ -626,10 +629,15 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
           b.actual_checkout_time,
           b.status as booking_status,
           b.meal_plan,
+          b.extra_meal_plan,
           b.adults_male,
           b.adults_female,
           b.adults_other,
           b.children,
+          b.extra_adults,
+          b.extra_children,
+          b.extra_breakfast_charge,
+          b.ota_booked_adults,
           b.discount_pct,
           b.booking_source,
           b.ota_platform,
@@ -662,10 +670,15 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
           b.actual_checkout_time,
           b.status as booking_status,
           b.meal_plan,
+          b.extra_meal_plan,
           b.adults_male,
           b.adults_female,
           b.adults_other,
           b.children,
+          b.extra_adults,
+          b.extra_children,
+          b.extra_breakfast_charge,
+          b.ota_booked_adults,
           b.discount_pct,
           b.booking_source,
           b.ota_platform,
@@ -700,7 +713,8 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
         occupiedCount++;
         const adults = (r.adults_male || 0) + (r.adults_female || 0) + (r.adults_other || 0);
         const children = r.children || 0;
-        const pax = adults + children > 0 ? (adults + children) : 1;
+        // User Requirement: Should not show children in pax, only adults should show
+        const pax = adults > 0 ? adults : 1;
         totalPax += pax;
 
         // Extract City cleanly from address
@@ -721,17 +735,35 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
           }
         }
 
-        // Breakfast: Check meal_plan. If with_breakfast, cp, ap, map -> 'Yes', else 'No'
+        // Breakfast: Check meal_plan and extra_meal_plan
         const plan = String(r.meal_plan || '').toLowerCase();
-        const hasBreakfast = plan.includes('with_breakfast') ||
+        const primaryHasBreakfast = plan.includes('with_breakfast') ||
           plan.includes('cp') ||
           plan.includes('ap') ||
           plan.includes('map') ||
           (plan.includes('with') && !plan.includes('without'));
 
-        // Breakfast pax: strictly adults included in breakfast (minimum 1 if room is with breakfast), matching Room Folio
-        const roomBreakfastPax = hasBreakfast ? Math.max(1, adults) : 0;
+        const extraPlan = String(r.extra_meal_plan || '').toLowerCase();
+        const extraAdults = Math.max(0, Number(r.extra_adults) || 0);
+        const extraHasBreakfast = extraPlan === 'with_breakfast' || (Number(r.extra_breakfast_charge) > 0);
 
+        let roomBreakfastPax = 0;
+        if (adults > 0) {
+          if (primaryHasBreakfast) {
+            const baseAdults = Math.max(0, adults - extraAdults);
+            roomBreakfastPax += baseAdults;
+            if (extraHasBreakfast) {
+              roomBreakfastPax += extraAdults;
+            }
+          } else if (extraHasBreakfast) {
+            roomBreakfastPax += extraAdults;
+          }
+        } else {
+          // In group bookings, secondary rooms have 0 adults/children in DB
+          roomBreakfastPax = 0;
+        }
+
+        const hasBreakfast = roomBreakfastPax > 0;
         if (hasBreakfast) {
           totalBreakfastRooms++;
           totalBreakfastPax += roomBreakfastPax;
@@ -749,6 +781,11 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
           }
         }
 
+        let breakfastDisplay = 'No';
+        if (hasBreakfast) {
+          breakfastDisplay = `Yes (${roomBreakfastPax} Pax)`;
+        }
+
         return {
           room_number: r.room_number,
           room_type: r.room_type,
@@ -759,6 +796,7 @@ app.get('/api/hospitality/occupancy-chart', (req, res) => {
           discount_pct: (r.discount_pct && Number(r.discount_pct) > 0) ? Number(r.discount_pct).toFixed(2) : '',
           city: String(city || '').toUpperCase(),
           breakfast: hasBreakfast ? 'Yes' : 'No',
+          breakfast_display: breakfastDisplay,
           breakfast_pax: roomBreakfastPax,
           adults: adults,
           children: children,
@@ -2719,7 +2757,11 @@ app.post('/api/checkin', requireAuth, requireRole('manager', 'hospitality'), (re
     const doc_front = b.doc_front ?? b.docFront;
     const doc_back = b.doc_back ?? b.docBack;
     const guest_photo = b.guest_photo ?? b.guestPhoto ?? b.photo ?? '';
-    let adults_male = parseInt(b.adults_male ?? b.adultsMale ?? 1) || 0;
+    let adults_male = (b.adults_male !== undefined && b.adults_male !== null && !isNaN(parseInt(b.adults_male)))
+      ? parseInt(b.adults_male)
+      : (b.adultsMale !== undefined && b.adultsMale !== null && !isNaN(parseInt(b.adultsMale))
+        ? parseInt(b.adultsMale)
+        : ((parseInt(b.adults_female ?? b.adultsFemale) > 0) ? 0 : 1));
     let adults_female = parseInt(b.adults_female ?? b.adultsFemale ?? 0) || 0;
     let adults_other = parseInt(b.adults_other ?? b.adultsOther ?? 0) || 0;
     const cleanExtraBeds = parseInt(b.extra_beds ?? b.extraBeds ?? 0) || 0;
@@ -3198,7 +3240,7 @@ app.post('/api/checkin', requireAuth, requireRole('manager', 'hospitality'), (re
       const result = bookingStmt.run(
         r.id,
         guestId,
-        idx === 0 ? (parseInt(adults_male) || 1) : 0,
+        idx === 0 ? (adults_male !== undefined && adults_male !== null && !isNaN(parseInt(adults_male)) ? parseInt(adults_male) : (parseInt(adults_female) > 0 ? 0 : 1)) : 0,
         idx === 0 ? (parseInt(adults_female) || 0) : 0,
         idx === 0 ? (parseInt(adults_other) || 0) : 0,
         idx === 0 ? (parseInt(children) || 0) : 0,
@@ -3520,6 +3562,7 @@ app.post('/api/checkin', requireAuth, requireRole('manager', 'hospitality'), (re
             const rTotal = Number(result.totalRoomCharge || 0);
             const rPaid = Number(result.totalPaid || 0);
 
+            const rPending = Math.max(0, rTotal - rPaid);
             firebaseService.syncActiveOccupancy({
               room_number: String(roomNum),
               room_id: rId,
@@ -3527,11 +3570,76 @@ app.post('/api/checkin', requireAuth, requireRole('manager', 'hospitality'), (re
               guest_name: result.guestName,
               guest_mobile: result.mobile,
               guest_email: result.email || '',
+              aadhar_number: result.aadharNumber || '',
+              doc_type: result.docType || 'Aadhaar Card',
+              address: result.address || '',
+              dob: result.dob || '',
+              adults: (result.adultsMale || 1) + (result.adultsFemale || 0),
+              adults_male: result.adultsMale || 1,
+              adults_female: result.adultsFemale || 0,
+              children: result.children || 0,
+              meal_plan: result.mealPlan || 'without_breakfast',
               booking_id: bId,
               checkin_time: result.checkinTime,
               approx_checkout_time: result.approxCheckoutTime,
               total_room_charge: rTotal,
-              total_paid: rPaid
+              total_paid: rPaid,
+              advance_payment: rPaid,
+              advance_receipt_no: result.advanceReceiptNo || '',
+              advance_payment_mode: result.receipts?.[0]?.mode || 'Cash',
+              voucher_number: result.voucherNumber || '',
+              booking_source: result.bookingSource || 'Walk-in',
+              checked_in_by: req.user?.name || req.user?.username || 'Staff',
+              folio: {
+                roomCharge: rTotal,
+                totalRoomCharge: rTotal,
+                tariffSubtotal: rTotal,
+                tax: Math.round(rTotal * 0.05),
+                total: rTotal,
+                grandTotal: rTotal,
+                paid: rPaid,
+                pending: rPending,
+                refundDue: Math.max(0, rPaid - rTotal),
+                balanceDue: rPending,
+                stayCalcNow: {
+                  roomCharge: rTotal,
+                  grandTotal: rTotal,
+                  paid: rPaid,
+                  refundDue: Math.max(0, rPaid - rTotal),
+                  balanceDue: rPending,
+                  stayDurationStr: '1 Day',
+                  chargedDays: 1,
+                  extraHours: 0
+                },
+                advanceReceiptNo: result.advanceReceiptNo || '',
+                voucherNumber: result.voucherNumber || '',
+                paymentMode: result.receipts?.[0]?.mode || 'Cash',
+                payments: result.receipts && result.receipts.length > 0 ? result.receipts : (rPaid > 0 ? [{
+                  receiptNo: result.advanceReceiptNo || 'CR01',
+                  receipt_no: result.advanceReceiptNo || 'CR01',
+                  mode: result.receipts?.[0]?.mode || 'Cash',
+                  payment_mode: result.receipts?.[0]?.mode || 'Cash',
+                  amount: rPaid,
+                  cashier: req.user?.name || req.user?.username || 'Staff',
+                  date: result.checkinTime,
+                  type: 'advance',
+                  notes: `paid while checkin : ${result.receipts?.[0]?.mode || 'Cash'}`
+                }] : []),
+                checkinTime: result.checkinTime,
+                approxCheckout: result.approxCheckoutTime || '',
+                source: result.bookingSource || 'Walk-in',
+                checkedInBy: req.user?.name || req.user?.username || 'Staff',
+                guestName: result.guestName,
+                mobile: result.mobile,
+                email: result.email || '',
+                aadharNumber: result.aadharNumber || '',
+                docType: result.docType || 'Aadhaar Card',
+                address: result.address || '',
+                dob: result.dob || '',
+                adultsMale: result.adultsMale || 1,
+                adultsFemale: result.adultsFemale || 0,
+                roomType: rType
+              }
             }).catch(err => console.warn('[Firebase] checkin sync error:', err.message));
           });
         }
@@ -3610,6 +3718,7 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
         r.room_number,
         r.room_type,
         r.price as base_room_price,
+        r.price_single,
         g.name as guest_name,
         g.father_name,
         g.mobile,
@@ -3638,6 +3747,8 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
     `).get(id, id, id);
 
     if (!booking) return res.status(404).json({ success: false, error: 'Booking not found' });
+
+    const primaryRoom = db.prepare('SELECT * FROM rooms WHERE id = ?').get(booking.room_id) || {};
 
     const inTime = booking.checkin_time ? String(booking.checkin_time).trim() : null;
     const vNo = booking.voucher_number ? String(booking.voucher_number).trim() : null;
@@ -3726,7 +3837,7 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
 
     const totalGroupAdultsMale = isGroup
       ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.adults_male) || 0), 0)
-      : (booking.adults_male !== undefined && booking.adults_male !== null ? Number(booking.adults_male) : 1);
+      : (booking.adults_male !== undefined && booking.adults_male !== null ? Number(booking.adults_male) : (Number(booking.adults_female) > 0 ? 0 : 1));
     const totalGroupAdultsFemale = isGroup
       ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.adults_female) || 0), 0)
       : Number(booking.adults_female || 0);
@@ -3816,9 +3927,12 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
       ? Math.round((otaBillAmount / 1.05) * 100) / 100
       : 0;
 
+    const isSingleCheckout = !isGroup && (totalGroupAdultsMale + totalGroupAdultsFemale) <= 1;
     let dailyBaseRate = isGroup
       ? linkedGroupBookings.reduce((sum, gb) => sum + (Number(gb.room_rate || gb.base_room_price || 0)), 0)
-      : Number(booking.room_rate || booking.base_room_price || 0);
+      : (isSingleCheckout && Number(primaryRoom?.price_single || booking.price_single || booking.room?.price_single) > 0
+          ? Number(primaryRoom?.price_single || booking.price_single || booking.room?.price_single)
+          : Number(booking.room_rate || booking.base_room_price || 0));
 
     let baseRoomTariff = dailyBaseRate * stayDays;
     if (isBookingOta && otaBillAmount > 0) {
@@ -3830,8 +3944,8 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
 
     const hasBreakfast = linkedGroupBookings.some(gb => gb.meal_plan === 'with_breakfast') || booking.meal_plan === 'with_breakfast';
     const breakfastPax = isGroup
-      ? linkedGroupBookings.reduce((sum, gb) => sum + Math.max(1, (gb.adults_male || 0) + (gb.adults_female || 0)), 0)
-      : Math.max(1, (booking.adults_male || 1) + (booking.adults_female || 0));
+      ? linkedGroupBookings.reduce((sum, gb) => sum + Math.max(1, (Number(gb.adults_male) || 0) + (Number(gb.adults_female) || 0)), 0)
+      : Math.max(1, (Number(booking.adults_male) || 0) + (Number(booking.adults_female) || 0));
     const breakfastDailyRate = hasBreakfast ? (breakfastPax * 250) : 0;
     const breakfastCost = breakfastDailyRate * stayDays;
 
@@ -3982,6 +4096,7 @@ app.get(['/api/bookings/:id', '/api/hospitality/history/:id'], (req, res) => {
       total_group_checkout_discount: totalGroupCheckoutDiscountAmount > 0 ? totalGroupCheckoutDiscountAmount : (Number(booking.checkout_discount_amount) || 0),
       stayCalcNow,
       stayCalcDeclared,
+      tax_invoice_snapshot_json: booking.tax_invoice_snapshot_json,
       tax_invoice_snapshot: taxInvoiceSnapshot || { stayCalcNow, stayCalcDeclared },
       grossTariff: stayCalcNow.grossTariff,
       baseRoomTariff: stayCalcNow.baseRoomTariff,
@@ -5062,7 +5177,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
       const singleRate = isSinglePax && Number(gb.price_single) > 0 ? Number(gb.price_single) : 0;
       const rRate = Number(gb.room_rate || 0);
       const safeRate = (rRate > 0 && rRate < 50000)
-        ? (singleRate > 0 && rRate === Number(gb.base_room_price) ? singleRate : rRate)
+        ? (singleRate > 0 && (rRate === Number(gb.base_room_price) || isSinglePax) ? singleRate : rRate)
         : (singleRate > 0 ? singleRate : (Number(gb.base_room_price) || 2400));
       return sum + safeRate;
     }, 0);
@@ -5110,7 +5225,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     room.split_online = combinedSplitOnline;
     room.early_checkin_charge = groupEarlyCheckinCharge;
     room.early_checkin_gst = groupEarlyCheckinGst;
-    room.adults_male = isCombined ? groupAdultsMale : (room.adults_male !== undefined && room.adults_male !== null ? room.adults_male : 1);
+    room.adults_male = isCombined ? groupAdultsMale : (room.adults_male !== undefined && room.adults_male !== null ? room.adults_male : (room.adults_female > 0 ? 0 : 1));
     room.adults_female = isCombined ? groupAdultsFemale : (room.adults_female || 0);
     room.adults_other = isCombined ? groupAdultsOther : (room.adults_other || 0);
     room.children = isCombined ? groupChildren : (room.children || 0);
@@ -5400,10 +5515,11 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     const otaBillAmount = parseFloat(room.ota_bill_amount) || 0;
     const hotelExtrasBase = groupExtraBedCharge + groupExtraRoomsCharge + groupExtraBreakfastCharge + (isOta ? groupEarlyCheckinCharge : 0);
     const hotelExtrasGst = Math.round(hotelExtrasBase * 0.05 * 100) / 100;
+    const hotelExtrasGross = Math.round((hotelExtrasBase + hotelExtrasGst) * 100) / 100;
     const recordedDeskExtras = Number(room.total_room_charge || 0);
-    const hotelExtrasCharge = (isOtaPrepaid && recordedDeskExtras > 0 && Math.abs(recordedDeskExtras - hotelExtrasBase) <= (hotelExtrasGst + 5))
+    const hotelExtrasCharge = (isOtaPrepaid && recordedDeskExtras > 0 && Math.abs(recordedDeskExtras - hotelExtrasGross) <= 2)
       ? recordedDeskExtras
-      : hotelExtrasBase;
+      : hotelExtrasGross;
 
     // Dynamic Early Checkout Recalculation (enforces 1-day min, calculates extra hours via room extension rates)
     const expectedStayNights = (room.approx_checkout_time && room.checkin_time)
@@ -5435,7 +5551,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
     const effectiveGstPct = roomGstPct !== undefined && roomGstPct !== null ? roomGstPct : 5;
 
     const hasBreakfast = room.meal_plan === 'with_breakfast' || room.meal_plan === 'breakfast';
-    const breakfastPax = hasBreakfast ? Math.max(1, (groupAdultsMale || 0) + (groupAdultsFemale || 0)) : 0;
+    const breakfastPax = hasBreakfast ? Math.max(1, (Number(groupAdultsMale) || 0) + (Number(groupAdultsFemale) || 0)) : 0;
     const breakfastDailyRate = hasBreakfast ? (room.breakfast_price || 250) : 0;
 
     // Itemized Now - if booked rate was flat all-inclusive, break down taxable subtotal & GST correctly
@@ -5573,12 +5689,16 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
       effectiveBalanceDue = Math.max(0, effectiveGrandTotal - effectivePaid);
     }
 
-    const refundAmount = effectiveBalanceDue < 0 ? Math.abs(effectiveBalanceDue) : 0;
+    const refundAmount = effectiveBalanceDue < -0.50 ? Math.abs(effectiveBalanceDue) : 0;
 
     // Pre-tax room charge (taxable amount before GST: amount / 1.05)
-    const combinedPreTaxRoomCharge = (isOtaPrepaid || isOtaPayAtHotel)
-      ? Math.round((effectiveRoomCharge / 1.05) * 100) / 100
-      : targetPreTaxRoom;
+    const otaVoucherBase = Math.round((otaBillAmount / 1.05) * 100) / 100;
+    const otaVoucherGst = Math.round((otaBillAmount - otaVoucherBase) * 100) / 100;
+    const combinedPreTaxRoomCharge = isOtaPrepaid
+      ? Number((otaVoucherBase + hotelExtrasBase).toFixed(2))
+      : (isOtaPayAtHotel
+        ? Math.round((effectiveRoomCharge / 1.05) * 100) / 100
+        : targetPreTaxRoom);
 
     // Running totals
     const grandTotal = effectiveGrandTotal;
@@ -5615,7 +5735,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
       : Math.max(0, activeRoundedGrandTotal - effectivePaid);
     const activeRefundAmount = isOtaPrepaid
       ? 0
-      : (activeRoundedGrandTotal < effectivePaid ? Math.round(effectivePaid - activeRoundedGrandTotal) : 0);
+      : ((effectivePaid - activeRoundedGrandTotal) > 0.50 ? Math.round(effectivePaid - activeRoundedGrandTotal) : 0);
 
     const otaVoucherVal = Number(otaBillAmount || 0);
     const fullBookingGrandTotal = isOtaPrepaid ? (otaVoucherVal + activeRoundedGrandTotal) : activeRoundedGrandTotal;
@@ -5674,11 +5794,15 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
           roomGrossTariff,
           roomTaxable: combinedPreTaxRoomCharge,
           stayTaxable: combinedPreTaxRoomCharge,
-          stayTax: Math.max(0, effectiveRoomCharge - combinedPreTaxRoomCharge),
+          stayTax: isOtaPrepaid ? Number((otaVoucherGst + hotelExtrasGst).toFixed(2)) : Math.max(0, effectiveRoomCharge - combinedPreTaxRoomCharge),
           discountAmount: effectiveDiscountAmount,
           discountPct: combinedDiscountPct,
           roomCharge: effectiveRoomCharge,
           hotelExtrasCharge,
+          hotelExtrasBase,
+          hotelExtrasGst,
+          otaVoucherBase,
+          otaVoucherGst,
           extraBedCharge: shouldUseNowTotals ? nowExtraMattressCost : groupExtraBedCharge,
           extraMattressCost: shouldUseNowTotals ? nowExtraMattressCost : decExtraMattressCost,
           extraMattressDaily: dailyExtraBedRate,
@@ -5718,7 +5842,7 @@ app.get('/api/rooms/:id/folio', async (req, res) => {
             : effectiveRoomCharge,
           taxAmount: Math.max(0, effectiveRoomCharge - combinedPreTaxRoomCharge),
           totalGst: Math.max(0, effectiveRoomCharge - combinedPreTaxRoomCharge),
-          refundAmount,
+          refundAmount: activeRefundAmount,
           visitorsCount: (visitors || []).length,
           stayCalcNow: {
             isEarlyCheckout: Boolean(stayCalc.isEarlyCheckout),
@@ -6554,7 +6678,7 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
       } catch (_) { }
 
       const netSettle = parseFloat(settle_amount) || 0;
-      const netRefund = parseFloat(refund_amount) || 0;
+      const netRefund = parseFloat(refund_amount) > 0.50 ? parseFloat(refund_amount) : 0;
       const finalRoomCharge = recalculated_room_charge !== undefined && recalculated_room_charge !== null ? parseFloat(recalculated_room_charge) : null;
       const settleMode = (final_payment_mode || 'cash').toLowerCase();
       const isEarlyCheckout = Boolean(req.body.isEarlyCheckout || req.body.is_early_checkout);
@@ -6624,7 +6748,7 @@ app.post('/api/checkout/:id', requireAuth, requireRole('manager', 'hospitality')
       const isBtcBooking = primaryBooking.booking_source === 'BTC' || primaryBooking.btc_company_id !== null || settleMode === 'btc' || Boolean(req.body.is_btc_pending) || Boolean(req.body.isBtcPending);
       const isCompanyPaysLater = isBtcBooking && (netSettle === 0 || settleMode === 'btc' || Boolean(req.body.is_btc_pending) || Boolean(req.body.isBtcPending));
       // User requirement: on receipt, refund, use separate sequential RR number (e.g. RR-01) with ref_bill_no
-      const isRefundBooking = Boolean(isRefund || netRefund > 0);
+      const isRefundBooking = Boolean(isRefund && netRefund > 0.50 || netRefund > 0.50);
       const refBillNo = primaryBooking.voucher_number ? String(primaryBooking.voucher_number).trim().replace(/\b20(\d{6}-\d+)\b/g, '$1') : '';
       const rrReceiptNo = isRefundBooking ? getNextRefundReceiptNumber() : null;
       const refundVoucherNo = isRefundBooking ? `DEB-${getNextMonthlyVoucherNumber('DEB')}` : (refBillNo || `DEB-${getNextMonthlyVoucherNumber('DEB')}`);
@@ -7947,25 +8071,88 @@ app.post('/api/restaurant/tables/:id/cancel', requireAuth, requireRole('manager'
   }
 });
 
-// Cancel Placed Order
-app.delete('/api/restaurant/orders/:id', requireAuth, requireRole('manager', 'restaurant', 'waiter', 'bar', 'hospitality'), (req, res) => {
+// Cancel / Delete Placed or Settled Restaurant Order
+app.delete([
+  '/api/restaurant/orders/:id',
+  '/api/restaurant/settled-bills/:id',
+  '/api/owner/bills/restaurant/:id',
+  '/api/owner/orders/restaurant/:id'
+], (req, res, next) => {
+  if (req.query.admin === '1' || req.headers['x-admin-mode'] === '1' || (req.user && (req.user.role === 'manager' || req.user.role === 'admin' || req.user.can_access_manager))) {
+    req.user = req.user || { id: 1, username: 'admin', role: 'manager', can_access_manager: true };
+    return next();
+  }
+  return requireAuth(req, res, () => requireRole('manager', 'hospitality', 'restaurant', 'waiter', 'bar')(req, res, next));
+}, async (req, res) => {
   try {
     const { id } = req.params;
-    const order = db.prepare('SELECT * FROM restaurant_orders WHERE id = ? OR order_number = ?').get(id, id);
+    const cleanId = String(id).replace(/^#/, '').trim();
+    const order = db.prepare('SELECT * FROM restaurant_orders WHERE id = ? OR order_number = ?').get(cleanId, cleanId);
     if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
 
-    db.prepare("UPDATE restaurant_orders SET status = 'cancelled' WHERE id = ?").run(order.id);
+    const targetId = order.id;
 
+    // Delete associated bill logs
     try {
-      socketServer.broadcast('ORDERS_UPDATED', { orderId: order.id, status: 'cancelled' });
-      socketServer.broadcast('TABLES_UPDATED', { path: '/orders/cancel', tableNumber: order.table_number, action: 'cancel' });
+      db.prepare('DELETE FROM bill_logs WHERE order_id = ?').run(targetId);
+    } catch (_) { }
+
+    // Permanently delete order from restaurant_orders
+    db.prepare('DELETE FROM restaurant_orders WHERE id = ?').run(targetId);
+
+    // If order was linked to a table, reset or delete dynamic table
+    if (order.table_id) {
+      try {
+        const table = db.prepare('SELECT * FROM restaurant_tables WHERE id = ?').get(order.table_id);
+        if (table && (table.table_type === 'parcel' || table.table_type === 'room_service' || /^(RSCW|RSW|RS)-/i.test(String(table.table_number || '')) || String(table.table_number || '').startsWith('P-'))) {
+          db.prepare('DELETE FROM restaurant_tables WHERE id = ?').run(table.id);
+        } else if (table) {
+          db.prepare("UPDATE restaurant_tables SET status = 'available', active_cart_json = '[]', printed_cart_json = '[]', kot_count = 0, token_number = 0, order_started_at = NULL, waiter_name = '', special_notes = '', customer_name = '', customer_phone = '' WHERE id = ?").run(table.id);
+        }
+      } catch (_) { }
+    }
+
+    // Purge from Supabase & Firebase room charges inbox
+    if (typeof supabaseService !== 'undefined' && typeof supabaseService.deleteCloudRoomCharge === 'function') {
+      try {
+        await supabaseService.deleteCloudRoomCharge(order.order_number, order.id);
+      } catch (cloudErr) {
+        console.warn('[Supabase] Could not purge deleted restaurant order from cloud inbox:', cloudErr.message);
+      }
+    }
+    if (typeof firebaseService !== 'undefined' && typeof firebaseService.deleteCloudRoomCharge === 'function') {
+      try {
+        await firebaseService.deleteCloudRoomCharge(order.order_number, order.id);
+      } catch (cloudErr) {
+        console.warn('[Firebase] Could not purge deleted restaurant order from cloud inbox:', cloudErr.message);
+      }
+    }
+
+    // If attached to room, sync active room folios
+    if (order.room_id || order.booking_id || String(order.payment_mode || '').toLowerCase().includes('room') || order.room_service_for) {
+      if (typeof supabaseService !== 'undefined' && typeof supabaseService.syncAllActiveRoomsFromLocal === 'function') {
+        supabaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
+      }
+      if (typeof firebaseService !== 'undefined' && typeof firebaseService.syncAllActiveRoomsFromLocal === 'function') {
+        firebaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
+      }
+    }
+
+    // Broadcast WebSockets & cloud waiter sync
+    try {
+      if (typeof socketServer !== 'undefined' && socketServer.broadcast) {
+        socketServer.broadcast('ORDERS_UPDATED', { orderId: targetId, status: 'cancelled', deleted: true });
+        socketServer.broadcast('TABLES_UPDATED', { path: '/orders/cancel', tableNumber: order.table_number, action: 'cancel' });
+        socketServer.broadcast('FOLIO_UPDATED', { orderId: targetId, deleted: true });
+      }
       if (typeof firebaseService !== 'undefined' && typeof firebaseService.syncWaiterDataToCloud === 'function') {
         firebaseService.syncWaiterDataToCloud(db).catch(() => { });
       }
     } catch (_) { }
 
-    res.json({ success: true, message: 'Order cancelled successfully' });
+    res.json({ success: true, message: 'Restaurant order deleted successfully', deleted_id: targetId, deleted_order: order });
   } catch (error) {
+    console.error('Delete restaurant order error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8482,31 +8669,49 @@ app.get('/api/restaurant/settled-bills', (req, res) => {
   }
 });
 
-// Delete multiple settled bills (Admin only)
+// Delete multiple restaurant settled bills (Admin only)
 app.post('/api/restaurant/settled-bills/delete', (req, res, next) => {
   if (req.query.admin === '1' || req.headers['x-admin-mode'] === '1' || (req.user && (req.user.role === 'manager' || req.user.role === 'admin' || req.user.can_access_manager))) {
     req.user = req.user || { id: 1, username: 'admin', role: 'manager', can_access_manager: true };
     return next();
   }
   return requireAuth(req, res, () => requireRole('manager')(req, res, next));
-}, (req, res) => {
+}, async (req, res) => {
   try {
-    const { order_ids } = req.body;
-    if (!Array.isArray(order_ids) || order_ids.length === 0) {
-      return res.status(400).json({ success: false, error: 'No order IDs provided for deletion' });
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, error: 'No order IDs provided' });
+    }
+    const placeholders = ids.map(() => '?').join(',');
+    const orders = db.prepare(`SELECT * FROM restaurant_orders WHERE id IN (${placeholders})`).all(...ids);
+    
+    try {
+      db.prepare(`DELETE FROM bill_logs WHERE order_id IN (${placeholders})`).run(...ids);
+    } catch (_) { }
+    db.prepare(`DELETE FROM restaurant_orders WHERE id IN (${placeholders})`).run(...ids);
+
+    for (const ord of orders) {
+      if (typeof supabaseService !== 'undefined' && typeof supabaseService.deleteCloudRoomCharge === 'function') {
+        try { await supabaseService.deleteCloudRoomCharge(ord.order_number, ord.id); } catch (_) { }
+      }
+      if (typeof firebaseService !== 'undefined' && typeof firebaseService.deleteCloudRoomCharge === 'function') {
+        try { await firebaseService.deleteCloudRoomCharge(ord.order_number, ord.id); } catch (_) { }
+      }
     }
 
-    const deleteTransaction = db.transaction((ids) => {
-      const placeholders = ids.map(() => '?').join(',');
-      db.prepare(`DELETE FROM bill_logs WHERE order_id IN (${placeholders})`).run(...ids);
-      const info = db.prepare(`DELETE FROM restaurant_orders WHERE id IN (${placeholders})`).run(...ids);
-      return info.changes;
-    });
-
-    const deletedCount = deleteTransaction(order_ids);
-    res.json({ success: true, count: deletedCount });
+    if (typeof supabaseService !== 'undefined' && typeof supabaseService.syncAllActiveRoomsFromLocal === 'function') {
+      supabaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
+    }
+    if (typeof firebaseService !== 'undefined' && typeof firebaseService.syncAllActiveRoomsFromLocal === 'function') {
+      firebaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
+    }
+    if (typeof socketServer !== 'undefined' && socketServer.broadcast) {
+      socketServer.broadcast('ORDERS_UPDATED', { deletedIds: ids });
+      socketServer.broadcast('TABLES_UPDATED', { action: 'bulk_delete' });
+      socketServer.broadcast('FOLIO_UPDATED', { deletedIds: ids });
+    }
+    res.json({ success: true, deletedCount: ids.length });
   } catch (error) {
-    console.error('Delete settled bills error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -8550,9 +8755,24 @@ app.delete([
     if (items.length === 0) {
       db.prepare('DELETE FROM bill_logs WHERE order_id = ?').run(order.id);
       db.prepare('DELETE FROM restaurant_orders WHERE id = ?').run(order.id);
+      if (typeof supabaseService !== 'undefined' && typeof supabaseService.deleteCloudRoomCharge === 'function') {
+        try { await supabaseService.deleteCloudRoomCharge(order.order_number, order.id); } catch (_) { }
+      }
+      if (typeof firebaseService !== 'undefined' && typeof firebaseService.deleteCloudRoomCharge === 'function') {
+        try { await firebaseService.deleteCloudRoomCharge(order.order_number, order.id); } catch (_) { }
+      }
+      if (order.room_id || order.booking_id || String(order.payment_mode || '').toLowerCase().includes('room') || order.room_service_for) {
+        if (typeof supabaseService !== 'undefined' && typeof supabaseService.syncAllActiveRoomsFromLocal === 'function') {
+          supabaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
+        }
+        if (typeof firebaseService !== 'undefined' && typeof firebaseService.syncAllActiveRoomsFromLocal === 'function') {
+          firebaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
+        }
+      }
       if (typeof socketServer !== 'undefined' && socketServer.broadcast) {
         socketServer.broadcast('FOLIO_UPDATED', { orderId: order.id, deleted: true });
         socketServer.broadcast('TABLES_UPDATED', { orderId: order.id });
+        socketServer.broadcast('ORDERS_UPDATED', { orderId: order.id, status: 'cancelled', deleted: true });
       }
       return res.json({ success: true, message: 'Dish removed; entire empty order deleted', orderDeleted: true });
     }
@@ -8562,19 +8782,29 @@ app.delete([
       const p = Number(it.price || 0);
       return sum + (q * p);
     }, 0);
-    const gstPct = order.gst_rate || 5;
-    const newGst = Math.round(newSubtotal * (gstPct / 100));
-    const newTotal = newSubtotal + newGst;
+    const gstPct = (typeof getFnbGstRate === 'function') ? getFnbGstRate('restaurant') : (order.gst_rate || 5);
+    const newTax = Math.round(newSubtotal * (gstPct / 100));
+    const newTotal = newSubtotal + newTax;
 
     db.prepare(`
       UPDATE restaurant_orders
-      SET items_json = ?, subtotal = ?, gst = ?, total = ?
+      SET items_json = ?, subtotal = ?, tax = ?, total = ?
       WHERE id = ?
-    `).run(JSON.stringify(items), newSubtotal, newGst, newTotal, order.id);
+    `).run(JSON.stringify(items), newSubtotal, newTax, newTotal, order.id);
+
+    if (order.room_id || order.booking_id || String(order.payment_mode || '').toLowerCase().includes('room') || order.room_service_for) {
+      if (typeof supabaseService !== 'undefined' && typeof supabaseService.syncAllActiveRoomsFromLocal === 'function') {
+        supabaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
+      }
+      if (typeof firebaseService !== 'undefined' && typeof firebaseService.syncAllActiveRoomsFromLocal === 'function') {
+        firebaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
+      }
+    }
 
     if (typeof socketServer !== 'undefined' && socketServer.broadcast) {
       socketServer.broadcast('FOLIO_UPDATED', { orderId: order.id });
       socketServer.broadcast('TABLES_UPDATED', { orderId: order.id });
+      socketServer.broadcast('ORDERS_UPDATED', { orderId: order.id });
     }
 
     res.json({
@@ -8584,7 +8814,8 @@ app.delete([
         id: order.id,
         items,
         subtotal: newSubtotal,
-        gst: newGst,
+        tax: newTax,
+        gst: newTax,
         total: newTotal
       }
     });
@@ -8629,10 +8860,26 @@ app.delete([
     const removedItem = items.splice(idx, 1)[0];
 
     if (items.length === 0) {
+      db.prepare('DELETE FROM bill_logs WHERE order_id = ?').run(order.id);
       db.prepare('DELETE FROM bar_orders WHERE id = ?').run(order.id);
+      if (typeof supabaseService !== 'undefined' && typeof supabaseService.deleteCloudRoomCharge === 'function') {
+        try { await supabaseService.deleteCloudRoomCharge(order.order_number, order.id); } catch (_) { }
+      }
+      if (typeof firebaseService !== 'undefined' && typeof firebaseService.deleteCloudRoomCharge === 'function') {
+        try { await firebaseService.deleteCloudRoomCharge(order.order_number, order.id); } catch (_) { }
+      }
+      if (order.room_id || order.booking_id || String(order.payment_mode || '').toLowerCase().includes('room') || order.room_service_for) {
+        if (typeof supabaseService !== 'undefined' && typeof supabaseService.syncAllActiveRoomsFromLocal === 'function') {
+          supabaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
+        }
+        if (typeof firebaseService !== 'undefined' && typeof firebaseService.syncAllActiveRoomsFromLocal === 'function') {
+          firebaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
+        }
+      }
       if (typeof socketServer !== 'undefined' && socketServer.broadcast) {
         socketServer.broadcast('FOLIO_UPDATED', { orderId: order.id, deleted: true });
         socketServer.broadcast('BAR_UPDATED', { orderId: order.id });
+        socketServer.broadcast('ORDERS_UPDATED', { orderId: order.id, status: 'cancelled', deleted: true });
       }
       return res.json({ success: true, message: 'Item removed; entire empty order deleted', orderDeleted: true });
     }
@@ -8642,19 +8889,29 @@ app.delete([
       const p = Number(it.price || 0);
       return sum + (q * p);
     }, 0);
-    const gstPct = order.gst_rate || 5;
-    const newGst = Math.round(newSubtotal * (gstPct / 100));
-    const newTotal = newSubtotal + newGst;
+    const gstPct = (typeof getFnbGstRate === 'function') ? getFnbGstRate('bar') : (order.gst_rate || 5);
+    const newTax = Math.round(newSubtotal * (gstPct / 100));
+    const newTotal = newSubtotal + newTax;
 
     db.prepare(`
       UPDATE bar_orders
-      SET items_json = ?, subtotal = ?, gst = ?, total = ?
+      SET items_json = ?, subtotal = ?, tax = ?, total = ?
       WHERE id = ?
-    `).run(JSON.stringify(items), newSubtotal, newGst, newTotal, order.id);
+    `).run(JSON.stringify(items), newSubtotal, newTax, newTotal, order.id);
+
+    if (order.room_id || order.booking_id || String(order.payment_mode || '').toLowerCase().includes('room') || order.room_service_for) {
+      if (typeof supabaseService !== 'undefined' && typeof supabaseService.syncAllActiveRoomsFromLocal === 'function') {
+        supabaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
+      }
+      if (typeof firebaseService !== 'undefined' && typeof firebaseService.syncAllActiveRoomsFromLocal === 'function') {
+        firebaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
+      }
+    }
 
     if (typeof socketServer !== 'undefined' && socketServer.broadcast) {
       socketServer.broadcast('FOLIO_UPDATED', { orderId: order.id });
       socketServer.broadcast('BAR_UPDATED', { orderId: order.id });
+      socketServer.broadcast('ORDERS_UPDATED', { orderId: order.id });
     }
 
     res.json({
@@ -8664,7 +8921,8 @@ app.delete([
         id: order.id,
         items,
         subtotal: newSubtotal,
-        gst: newGst,
+        tax: newTax,
+        gst: newTax,
         total: newTotal
       }
     });
@@ -8674,64 +8932,7 @@ app.delete([
   }
 });
 
-app.delete([
-  '/api/restaurant/orders/:id',
-  '/api/restaurant/settled-bills/:id',
-  '/api/owner/bills/restaurant/:id',
-  '/api/owner/orders/restaurant/:id'
-], (req, res, next) => {
-  if (req.query.admin === '1' || req.headers['x-admin-mode'] === '1' || (req.user && (req.user.role === 'manager' || req.user.role === 'admin' || req.user.can_access_manager))) {
-    req.user = req.user || { id: 1, username: 'admin', role: 'manager', can_access_manager: true };
-    return next();
-  }
-  return requireAuth(req, res, () => requireRole('manager')(req, res, next));
-}, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const cleanId = String(id).replace(/^#/, '').trim();
-    const order = db.prepare('SELECT id, order_number, room_id, booking_id, total, payment_mode FROM restaurant_orders WHERE id = ? OR order_number = ?').get(cleanId, cleanId);
-
-    const deleteTransaction = db.transaction((orderId) => {
-      db.prepare('DELETE FROM bill_logs WHERE order_id = ?').run(orderId);
-      const info = db.prepare('DELETE FROM restaurant_orders WHERE id = ?').run(orderId);
-      return info.changes;
-    });
-
-    const targetId = order ? order.id : cleanId;
-    const changes = deleteTransaction(targetId);
-
-    // CRITICAL: Permanently delete/purge from Supabase room_charges_inbox so it never resurrects!
-    if (order && typeof supabaseService.deleteCloudRoomCharge === 'function') {
-      try {
-        await supabaseService.deleteCloudRoomCharge(order.order_number, order.id);
-      } catch (cloudErr) {
-        console.warn('[Supabase] Could not purge deleted order from cloud inbox:', cloudErr.message);
-      }
-    }
-    if (order && typeof firebaseService.deleteCloudRoomCharge === 'function') {
-      try {
-        await firebaseService.deleteCloudRoomCharge(order.order_number, order.id);
-      } catch (cloudErr) {
-        console.warn('[Firebase] Could not purge deleted order from cloud inbox:', cloudErr.message);
-      }
-    }
-
-    // If this bill was charged to a room folio, immediately recalculate and sync active room folios
-    if (order && (order.room_id || order.booking_id || String(order.payment_mode || '').toLowerCase().includes('room'))) {
-      if (typeof supabaseService.syncAllActiveRoomsFromLocal === 'function') {
-        supabaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
-      }
-      if (typeof firebaseService.syncAllActiveRoomsFromLocal === 'function') {
-        firebaseService.syncAllActiveRoomsFromLocal(db).catch(() => { });
-      }
-    }
-
-    res.json({ success: true, count: changes, deleted_id: targetId, deleted_order: order });
-  } catch (error) {
-    console.error('Delete single order error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
+// Redundant restaurant delete block removed (handled by unified delete handler above)
 
 // List Recent Restaurant Orders
 app.get('/api/restaurant/orders', (req, res) => {
@@ -10697,13 +10898,19 @@ app.get('/api/pos/settings', (req, res) => {
     const restGst = db.prepare("SELECT value FROM system_settings WHERE key = 'restaurant_gst_pct'").get();
     const barGst = db.prepare("SELECT value FROM system_settings WHERE key = 'bar_gst_pct'").get();
     const barPax = db.prepare("SELECT value FROM system_settings WHERE key = 'bar_pax_charge'").get();
+    const upiMdr = db.prepare("SELECT value FROM system_settings WHERE key IN ('restaurant_upi_mdr_pct', 'upi_tax_pct') ORDER BY CASE WHEN key = 'restaurant_upi_mdr_pct' THEN 0 ELSE 1 END LIMIT 1").get();
+    const cardSur = db.prepare("SELECT value FROM system_settings WHERE key IN ('restaurant_card_surcharge_pct', 'card_surcharge_pct') ORDER BY CASE WHEN key = 'restaurant_card_surcharge_pct' THEN 0 ELSE 1 END LIMIT 1").get();
 
     res.json({
       success: true,
       settings: {
         restaurant_gst_pct: restGst ? parseFloat(restGst.value) : 5,
         bar_gst_pct: barGst ? parseFloat(barGst.value) : 5,
-        bar_pax_charge: barPax ? parseFloat(barPax.value) : 0
+        bar_pax_charge: barPax ? parseFloat(barPax.value) : 0,
+        restaurant_upi_mdr_pct: upiMdr ? parseFloat(upiMdr.value) : 0,
+        restaurant_card_surcharge_pct: cardSur ? parseFloat(cardSur.value) : 0,
+        upi_tax_pct: upiMdr ? parseFloat(upiMdr.value) : 0,
+        card_surcharge_pct: cardSur ? parseFloat(cardSur.value) : 0
       }
     });
   } catch (error) {
@@ -10713,7 +10920,15 @@ app.get('/api/pos/settings', (req, res) => {
 
 app.post('/api/pos/settings', requireAuth, requireRole('manager'), (req, res) => {
   try {
-    const { restaurant_gst_pct, bar_gst_pct, bar_pax_charge } = req.body;
+    const { 
+      restaurant_gst_pct, 
+      bar_gst_pct, 
+      bar_pax_charge,
+      restaurant_upi_mdr_pct,
+      restaurant_card_surcharge_pct,
+      upi_tax_pct,
+      card_surcharge_pct
+    } = req.body;
 
     if (restaurant_gst_pct !== undefined) {
       db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('restaurant_gst_pct', ?)").run(String(restaurant_gst_pct));
@@ -10723,6 +10938,16 @@ app.post('/api/pos/settings', requireAuth, requireRole('manager'), (req, res) =>
     }
     if (bar_pax_charge !== undefined) {
       db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('bar_pax_charge', ?)").run(String(bar_pax_charge));
+    }
+    const upiVal = restaurant_upi_mdr_pct !== undefined ? restaurant_upi_mdr_pct : upi_tax_pct;
+    if (upiVal !== undefined) {
+      db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('restaurant_upi_mdr_pct', ?)").run(String(upiVal));
+      db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('upi_tax_pct', ?)").run(String(upiVal));
+    }
+    const cardVal = restaurant_card_surcharge_pct !== undefined ? restaurant_card_surcharge_pct : card_surcharge_pct;
+    if (cardVal !== undefined) {
+      db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('restaurant_card_surcharge_pct', ?)").run(String(cardVal));
+      db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('card_surcharge_pct', ?)").run(String(cardVal));
     }
 
     res.json({ success: true, message: 'Settings saved successfully' });
@@ -13021,6 +13246,8 @@ app.get('/api/hospitality/history', (req, res) => {
         b.room_id,
         r.room_number,
         r.room_type,
+        r.price,
+        r.price_single,
         b.guest_id,
         g.name as guest_name,
         g.mobile,
@@ -13031,6 +13258,7 @@ app.get('/api/hospitality/history', (req, res) => {
         b.approx_checkout_time,
         b.actual_checkout_time,
         b.room_rate,
+        b.tax_invoice_snapshot_json,
         b.discount_pct,
         b.discount_amount,
         b.checkout_discount_amount,
@@ -13252,6 +13480,12 @@ app.get('/api/hospitality/history', (req, res) => {
           status: row.booking_status,
           total_room_charge: liveRoomCharge,
           total_amount: liveRoomCharge,
+          price: row.price,
+          price_single: row.price_single,
+          room_rate: row.room_rate,
+          tax_invoice_snapshot_json: row.tax_invoice_snapshot_json,
+          tax_invoice_snapshot: row.tax_invoice_snapshot_json ? (typeof row.tax_invoice_snapshot_json === 'string' ? JSON.parse(row.tax_invoice_snapshot_json) : row.tax_invoice_snapshot_json) : null,
+          stayCalcNow: row.tax_invoice_snapshot_json ? (typeof row.tax_invoice_snapshot_json === 'string' ? JSON.parse(row.tax_invoice_snapshot_json)?.stayCalcNow : row.tax_invoice_snapshot_json?.stayCalcNow) : null,
           total_paid: Math.max(Number(row.total_paid) || 0, Number(row.payments_total_paid) || 0),
           advance_amount: Math.max(Number(row.total_paid) || 0, Number(row.payments_total_paid) || 0),
           food_total: row.food_total || 0,
@@ -13300,7 +13534,10 @@ app.get('/api/hospitality/history', (req, res) => {
           meal_plan: row.meal_plan,
           adults_male: row.adults_male || 0,
           adults_female: row.adults_female || 0,
+          adults_other: row.adults_other || 0,
           children: row.children || 0,
+          pax: (row.adults_male || 0) + (row.adults_female || 0) + (row.adults_other || 0),
+          total_adults: (row.adults_male || 0) + (row.adults_female || 0) + (row.adults_other || 0),
           extra_beds: row.extra_beds || 0,
           checked_in_by: row.checked_in_by || 'Front Desk',
           checked_out_by: row.checked_out_by || '',
@@ -13327,6 +13564,14 @@ app.get('/api/hospitality/history', (req, res) => {
           entry.room_types.push(row.room_type);
           entry.room_type = entry.room_types.join(', ');
         }
+        if (!entry.tax_invoice_snapshot_json && row.tax_invoice_snapshot_json) {
+          entry.tax_invoice_snapshot_json = row.tax_invoice_snapshot_json;
+          try {
+            entry.tax_invoice_snapshot = typeof row.tax_invoice_snapshot_json === 'string' ? JSON.parse(row.tax_invoice_snapshot_json) : row.tax_invoice_snapshot_json;
+            entry.stayCalcNow = entry.tax_invoice_snapshot?.stayCalcNow || null;
+          } catch (_) { }
+        }
+        if (!entry.room_rate && row.room_rate) entry.room_rate = row.room_rate;
         if (row.actual_checkout_time) {
           entry.actual_checkout_time = row.actual_checkout_time;
           entry.checkout_time = row.actual_checkout_time;
@@ -13371,7 +13616,10 @@ app.get('/api/hospitality/history', (req, res) => {
         }
         entry.adults_male += (row.adults_male || 0);
         entry.adults_female += (row.adults_female || 0);
+        entry.adults_other = (entry.adults_other || 0) + (row.adults_other || 0);
         entry.children += (row.children || 0);
+        entry.pax = (entry.adults_male || 0) + (entry.adults_female || 0) + (entry.adults_other || 0);
+        entry.total_adults = (entry.adults_male || 0) + (entry.adults_female || 0) + (entry.adults_other || 0);
         entry.extra_beds += (row.extra_beds || 0);
       }
     });
@@ -13494,7 +13742,16 @@ app.get('/api/manager/accounting-analysis', requireAuth, requireRole('manager', 
         b.created_at,
         b.is_early_checkin,
         b.early_checkin_charge,
-        b.extension_logs_json
+        b.extension_logs_json,
+        b.meal_plan,
+        b.extra_breakfast_charge,
+        b.extra_meal_plan,
+        b.extra_adults,
+        b.extra_children,
+        b.ota_bill_amount,
+        b.tax_invoice_snapshot_json,
+        r.breakfast_price,
+        r.breakfast_gst_pct
       FROM bookings b
       JOIN guests g ON b.guest_id = g.id
       JOIN rooms r ON b.room_id = r.id
@@ -13544,23 +13801,25 @@ app.get('/api/manager/accounting-analysis', requireAuth, requireRole('manager', 
     const rows = db.prepare(sql).all(...params);
 
     // Helper to format Tax Invoice Number (e.g. 261002-618 -> HCP618)
-    const formatTaxInvoiceNumberLocal = (val) => {
-      if (!val) return 'HCP1';
-      const str = String(val).trim();
-      if (/^HCP\d+$/i.test(str)) {
-        return str.toUpperCase();
+    const formatTaxInvoiceNumberLocal = (val, fallback = '') => {
+      const tryFormat = (target) => {
+        if (!target) return null;
+        const str = String(target).trim();
+        if (/^HCP\d+$/i.test(str)) return str.toUpperCase();
+        if (/^L\d+$/i.test(str)) return `HCP${str.slice(1)}`;
+        const match = str.match(/-(\d+)$/);
+        if (match) return `HCP${match[1]}`;
+        if (/^\d{1,4}$/.test(str)) return `HCP${str}`;
+        return null;
+      };
+
+      const primary = tryFormat(val);
+      if (primary) return primary;
+      if (fallback) {
+        const secondary = tryFormat(fallback);
+        if (secondary) return secondary;
       }
-      if (/^L\d+$/i.test(str)) {
-        return `HCP${str.slice(1)}`;
-      }
-      const match = str.match(/-(\d+)$/);
-      if (match) {
-        return `HCP${match[1]}`;
-      }
-      if (/^\d{1,4}$/.test(str)) {
-        return `HCP${str}`;
-      }
-      return str;
+      return String(val || fallback || 'HCP1').trim();
     };
 
     // Pre-fetch visitors breakfast amounts grouped by booking_id
@@ -13573,6 +13832,17 @@ app.get('/api/manager/accounting-analysis', requireAuth, requireRole('manager', 
     const visitorBreakfastMap = new Map();
     visitorsBreakfastRows.forEach(v => {
       visitorBreakfastMap.set(v.booking_id, Number(v.total_visitor_breakfast || 0));
+    });
+
+    // Pre-fetch extra expenses (damages, laundry, mini bar, etc.) base amounts grouped by booking_id
+    const extraExpensesRows = db.prepare(`
+      SELECT booking_id, SUM(amount) as total_extra_expenses 
+      FROM booking_extra_expenses 
+      GROUP BY booking_id
+    `).all();
+    const extraExpensesMap = new Map();
+    extraExpensesRows.forEach(e => {
+      extraExpensesMap.set(e.booking_id, Number(e.total_extra_expenses || 0));
     });
 
     // Group multi-room bookings by voucher number / stay session so each Bill = 1 row
@@ -13588,6 +13858,12 @@ app.get('/api/manager/accounting-analysis', requireAuth, requireRole('manager', 
       const stayDays = Math.max(1, Math.round(Math.max(0, checkoutDate.getTime() - checkinDate.getTime()) / (1000 * 60 * 60 * 24)));
 
       const isOta = (row.booking_source || '').toUpperCase() === 'OTA' || Boolean(row.ota_platform);
+      const isRowBtc = (row.booking_source || '').toUpperCase() === 'BTC' ||
+        Boolean(row.btc_company_id) ||
+        Boolean(row.btc_company_name) ||
+        Boolean(row.btc_ref_company_name) ||
+        row.booking_status === 'pending_from_company' ||
+        row.payment_status === 'pending_from_company';
 
       // Pre-checkin fees (early checkin charge) pre-tax base:
       const earlyCheckinAmt = Number(row.early_checkin_charge || 0);
@@ -13612,60 +13888,97 @@ app.get('/api/manager/accounting-analysis', requireAuth, requireRole('manager', 
         } catch (_) { }
       }
 
-      // Base room rent calculation
-      const extraMattressRow = Number(row.extra_bed_charge > 0 ? row.extra_bed_charge : ((row.extra_beds || 0) * 500));
-      const visitorBreakfastRow = (visitorBreakfastMap.get(row.booking_id) || 0) + Number(row.extra_breakfast_charge || 0);
-      const discountRow = Number(row.discount_amount || 0);
+      // Check for saved Tax Invoice Snapshot (matches official printed Tax Invoice 100%)
+      let snap = null;
+      if (row.tax_invoice_snapshot_json) {
+        try {
+          snap = typeof row.tax_invoice_snapshot_json === 'string'
+            ? JSON.parse(row.tax_invoice_snapshot_json)
+            : row.tax_invoice_snapshot_json;
+        } catch (_) {}
+      }
+      const calc = snap?.stayCalcNow || snap?.activeStayCalc || snap?.stayCalcDeclared || snap;
 
       let baseRentRow = 0;
-      if (row.room_rate && row.room_rate > 0) {
-        const rawRate = Number(row.room_rate);
-        const safeRate = (rawRate > 0 && rawRate < 50000) ? rawRate : (Number(row.price || row.base_price) || 2400);
-        baseRentRow = (safeRate * stayDays) + earlyCheckinBase + extensionBase;
-      } else if (row.total_room_charge > 0) {
-        const taxablePortion = Math.round((row.total_room_charge / 1.05) * 100) / 100;
-        baseRentRow = Math.max(0, taxablePortion - extraMattressRow - visitorBreakfastRow + discountRow);
+      let planBreakfastBase = 0;
+      let extraMattressBase = 0;
+      let discountRow = 0;
+      let checkinDiscountRow = 0;
+      let checkoutDiscountRow = 0;
+      let snapTaxAmount = null;
+      let snapGrandTotal = null;
+
+      if (calc && (calc.baseRoomTariff !== undefined || calc.roomSubtotalPreTax !== undefined)) {
+        // Use exact tax invoice figures issued to customer
+        baseRentRow = Number(calc.baseRoomTariff ?? calc.dailyBaseRate ?? row.room_rate ?? 0);
+        planBreakfastBase = Number(calc.breakfastCost ?? 0);
+        extraMattressBase = Number(calc.extraMattressCost ?? 0);
+        discountRow = Number(calc.discountAmount ?? (Number(row.discount_amount || 0) + Number(row.checkout_discount_amount || 0)));
+        checkinDiscountRow = discountRow;
+        checkoutDiscountRow = Number(row.checkout_discount_amount || 0);
+        snapTaxAmount = Number(calc.taxAmount ?? calc.roomGst ?? 0);
+        snapGrandTotal = Number(calc.grandTotal ?? calc.totalStayCost ?? 0);
+      } else {
+        // Fallback calculations for records without snapshot:
+        const isWithBreakfast = row.meal_plan === 'with_breakfast' || row.meal_plan === 'cp' || String(row.meal_plan || '').toLowerCase().includes('breakfast');
+        const paxCount = Math.max(1, (Number(row.adults_male) || 0) + (Number(row.adults_female) || 0));
+        planBreakfastBase = isWithBreakfast ? Number((paxCount * (Number(row.breakfast_price) || 250) * stayDays).toFixed(2)) : 0;
+        extraMattressBase = Number(row.extra_bed_charge > 0 ? row.extra_bed_charge : ((row.extra_beds || 0) * 600 * stayDays));
+
+        checkinDiscountRow = Number(row.discount_amount || 0);
+        checkoutDiscountRow = Number(row.checkout_discount_amount || 0);
+        discountRow = checkinDiscountRow + checkoutDiscountRow;
+
+        const isOtaRow = String(row.booking_source || '').toUpperCase() === 'OTA';
+        const otaBillRow = Number(row.ota_bill_amount || row.ota_manual_amount || 0);
+
+        if (isOtaRow && otaBillRow > 0) {
+          const otaTaxable = Math.round((otaBillRow / 1.05) * 100) / 100;
+          baseRentRow = Math.max(0, Number((otaTaxable - planBreakfastBase).toFixed(2)));
+        } else if (row.room_rate && row.room_rate > 0) {
+          const rawRate = Number(row.room_rate);
+          const safeRate = (rawRate > 0 && rawRate < 50000) ? rawRate : (Number(row.price || row.base_price) || 2400);
+          baseRentRow = Number(((safeRate * stayDays) + earlyCheckinBase + extensionBase).toFixed(2));
+        } else if (row.total_room_charge > 0) {
+          const taxablePortion = Math.round((row.total_room_charge / 1.05) * 100) / 100;
+          baseRentRow = Math.max(0, Number((taxablePortion - extraMattressBase - planBreakfastBase + discountRow).toFixed(2)));
+        }
       }
+
+      // OTA extra member breakfast (charged at desk) & visitor breakfast
+      const extraBfGross = Number(row.extra_breakfast_charge || 0);
+      const otaExtraBreakfastBase = extraBfGross > 0 ? extraBfGross : 0;
+
+      const visitorBreakfastGross = Number(visitorBreakfastMap.get(row.booking_id) || 0);
+      const visitorBreakfastBase = visitorBreakfastGross > 0 ? Math.round((visitorBreakfastGross / 1.05) * 100) / 100 : 0;
+
+      const totalBreakfastBase = Number((planBreakfastBase + otaExtraBreakfastBase + visitorBreakfastBase).toFixed(2));
+      const extraExpensesRow = extraExpensesMap.get(row.booking_id) || 0;
 
       // Name Of Company resolution:
+      // STRICT RULE: NEVER show OTA platform (MakeMyTrip, Agoda, Booking.com, OTA) in Company column.
+      // If a real corporate company is attached (BTC or from form with GST details), show company name & GST.
+      // Otherwise, default to customer's name, and GST to '-'.
       let nameOfCompany = '';
-      if (isOta) {
-        nameOfCompany = row.ota_platform ? row.ota_platform.trim() : 'OTA';
-      } else if (row.booking_company_name && row.booking_company_name.trim()) {
-        nameOfCompany = row.booking_company_name.trim();
-      } else if (row.btc_company_name && row.btc_company_name.trim()) {
-        nameOfCompany = row.btc_company_name.trim();
-      } else if (row.btc_ref_company_name && row.btc_ref_company_name.trim()) {
-        nameOfCompany = row.btc_ref_company_name.trim();
-      } else if (row.guest_company_name && row.guest_company_name.trim()) {
-        nameOfCompany = row.guest_company_name.trim();
+      let gstNoOfCompany = '';
+
+      const corporateCompanyName = (row.booking_company_name || row.btc_company_name || row.btc_ref_company_name || row.guest_company_name || '').trim();
+      const corporateGstNumber = (row.booking_gst_number || row.btc_gst_number || row.guest_gst_number || '').trim();
+      const isOtaPlatformName = /^(ota|makemytrip|mmt|goibibo|agoda|booking.?com|expedia|yatra|easemytrip)$/i.test(corporateCompanyName);
+
+      if (corporateCompanyName && !isOtaPlatformName) {
+        nameOfCompany = corporateCompanyName;
+        gstNoOfCompany = corporateGstNumber || '-';
       } else {
         nameOfCompany = (row.guest_name && row.guest_name.trim()) ? row.guest_name.trim() : '-';
+        gstNoOfCompany = '-';
       }
-
-      // GST No of Company resolution:
-      let gstNoOfCompany = '';
-      if (isOta) {
-        gstNoOfCompany = (row.booking_gst_number || row.guest_gst_number || '').trim();
-        if (!gstNoOfCompany) {
-          if (/makemytrip|mmt|goibibo/i.test(row.ota_platform || '')) {
-            gstNoOfCompany = '27AABCM6906E1ZW';
-          } else if (/booking\.?com/i.test(row.ota_platform || '')) {
-            gstNoOfCompany = '27AAGCB6887F1Z8';
-          } else if (/agoda/i.test(row.ota_platform || '')) {
-            gstNoOfCompany = '9919SGP29004OS2';
-          }
-        }
-      } else {
-        gstNoOfCompany = (row.booking_gst_number || row.btc_gst_number || row.guest_gst_number || '').trim();
-      }
-      gstNoOfCompany = gstNoOfCompany || '-';
 
       if (!billMap.has(groupKey)) {
         // Voucher No & Invoice No (HCP..) resolution:
         const voucherNo = cleanVoucher;
-        const rawReceipt = row.final_receipt_no || cleanVoucher;
-        const invoiceNo = formatTaxInvoiceNumberLocal(rawReceipt);
+        // Prioritize explicit invoice number or sequential bill number over arbitrary payment references like "UPI01"
+        const invoiceNo = formatTaxInvoiceNumberLocal(row.final_receipt_no, cleanVoucher);
 
         // Date of checkout
         const rawCheckout = row.actual_checkout_time || row.approx_checkout_time || row.checkin_time;
@@ -13686,9 +13999,20 @@ app.get('/api/manager/accounting-analysis', requireAuth, requireRole('manager', 
           invoice_number: invoiceNo,
           name_of_customer: row.guest_name || 'Guest',
           room_rent_base: baseRentRow,
-          extra_mattress_pax: extraMattressRow,
-          visitor_breakfast_base: visitorBreakfastRow,
+          extra_mattress_pax: extraMattressBase,
+          plan_breakfast_base: planBreakfastBase,
+          ota_extra_breakfast_base: otaExtraBreakfastBase,
+          visitor_breakfast_base: visitorBreakfastBase,
+          total_breakfast_base: totalBreakfastBase,
+          breakfast_base: totalBreakfastBase,
+          extra_expenses_base: extraExpensesRow,
           discount: discountRow,
+          checkin_discount: checkinDiscountRow,
+          checkout_discount: checkoutDiscountRow,
+          other_discount: checkoutDiscountRow,
+          snap_tax_amount: snapTaxAmount,
+          snap_grand_total: snapGrandTotal,
+          has_snapshot: Boolean(calc),
           name_of_customer_gst: nameOfCompany,
           name_of_company: nameOfCompany,
           gst_no_of_customer: gstNoOfCompany,
@@ -13699,7 +14023,10 @@ app.get('/api/manager/accounting-analysis', requireAuth, requireRole('manager', 
           ota_platform: row.ota_platform,
           total_room_charge: row.total_room_charge || 0,
           total_paid: row.total_paid || 0,
-          payment_status: row.booking_status,
+          payment_status: row.payment_status || row.booking_status,
+          is_btc: isRowBtc,
+          btc_company_id: row.btc_company_id || null,
+          btc_company_name: row.btc_company_name || row.btc_ref_company_name || null,
           is_igst: Boolean(row.is_igst || row.tax_type === 'IGST'),
           tax_type: row.tax_type || (row.is_igst ? 'IGST' : 'CGST_SGST')
         });
@@ -13709,12 +14036,26 @@ app.get('/api/manager/accounting-analysis', requireAuth, requireRole('manager', 
         if (!item.rooms.includes(row.room_number)) {
           item.rooms.push(row.room_number);
         }
-        item.room_rent_base += baseRentRow;
-        item.extra_mattress_pax += extraMattressRow;
-        item.visitor_breakfast_base += visitorBreakfastRow;
-        item.discount += discountRow;
+        if (!item.has_snapshot) {
+          item.room_rent_base = Number((item.room_rent_base + baseRentRow).toFixed(2));
+          item.extra_mattress_pax = Number((item.extra_mattress_pax + extraMattressBase).toFixed(2));
+          item.plan_breakfast_base = Number(((item.plan_breakfast_base || 0) + planBreakfastBase).toFixed(2));
+          item.ota_extra_breakfast_base = Number(((item.ota_extra_breakfast_base || 0) + otaExtraBreakfastBase).toFixed(2));
+          item.visitor_breakfast_base = Number(((item.visitor_breakfast_base || 0) + visitorBreakfastBase).toFixed(2));
+          item.total_breakfast_base = Number(((item.total_breakfast_base || 0) + totalBreakfastBase).toFixed(2));
+          item.breakfast_base = item.total_breakfast_base;
+          item.extra_expenses_base = Number(((item.extra_expenses_base || 0) + extraExpensesRow).toFixed(2));
+          item.discount += discountRow;
+          item.checkin_discount = (item.checkin_discount || 0) + checkinDiscountRow;
+          item.checkout_discount = (item.checkout_discount || 0) + checkoutDiscountRow;
+          item.other_discount = (item.other_discount || 0) + checkoutDiscountRow;
+        }
         item.total_room_charge += (row.total_room_charge || 0);
         item.total_paid += (row.total_paid || 0);
+        if (isRowBtc) item.is_btc = true;
+        if (!item.btc_company_name && (row.btc_company_name || row.btc_ref_company_name)) {
+          item.btc_company_name = row.btc_company_name || row.btc_ref_company_name;
+        }
         if (row.is_igst || row.tax_type === 'IGST') {
           item.is_igst = true;
           item.tax_type = 'IGST';
@@ -13735,9 +14076,15 @@ app.get('/api/manager/accounting-analysis', requireAuth, requireRole('manager', 
 
     // Calculate CGST, SGST & IGST for each bill item
     records.forEach(item => {
-      const taxable = Math.max(0, item.room_rent_base + item.extra_mattress_pax + (item.visitor_breakfast_base || 0) - item.discount);
-      const totalGst = Number((taxable * 0.05).toFixed(2));
+      const taxable = Math.max(0, Number((item.room_rent_base + item.extra_mattress_pax + (item.total_breakfast_base || item.visitor_breakfast_base || 0) + (item.extra_expenses_base || 0) - item.discount).toFixed(2)));
       const isIgstItem = Boolean(item.is_igst || item.tax_type === 'IGST');
+
+      let totalGst = 0;
+      if (item.snap_tax_amount !== null && item.snap_tax_amount > 0) {
+        totalGst = Number(item.snap_tax_amount.toFixed(2));
+      } else {
+        totalGst = Number((taxable * 0.05).toFixed(2));
+      }
 
       let cgst = 0;
       let sgst = 0;
@@ -13760,8 +14107,31 @@ app.get('/api/manager/accounting-analysis', requireAuth, requireRole('manager', 
       item.is_igst = isIgstItem;
       item.tax_type = isIgstItem ? 'IGST' : 'CGST_SGST';
       item.cgst_sgst_total = totalGst;
-      item.grand_total = Number((taxable + totalGst).toFixed(2));
+      item.grand_total = item.snap_grand_total !== null ? item.snap_grand_total : Number((taxable + totalGst).toFixed(2));
       item.rooms_str = item.rooms.join(', ');
+
+      // BTC payment rules:
+      // If BTC booking, evaluate payment status (paid, partial, unpaid)
+      if (item.is_btc) {
+        const totalPaid = Number(item.total_paid || 0);
+        const grandTotal = item.grand_total;
+        const isSettledStatus = ['settled', 'paid', 'passed', 'realized'].includes(String(item.payment_status || '').toLowerCase());
+        const isFullyPaid = isSettledStatus || totalPaid >= (grandTotal - 1);
+        const isPartiallyPaid = !isFullyPaid && totalPaid > 0;
+        const isUnpaid = !isFullyPaid && totalPaid <= 0;
+
+        item.is_unpaid_btc = isUnpaid;
+        item.is_partially_paid_btc = isPartiallyPaid;
+        item.is_fully_paid_btc = isFullyPaid;
+        item.btc_payment_status = isFullyPaid ? 'fully_paid' : (isPartiallyPaid ? 'partially_paid' : 'unpaid');
+        item.btc_paid_ratio = isFullyPaid ? 1 : (isPartiallyPaid && grandTotal > 0 ? Math.min(1, totalPaid / grandTotal) : 0);
+      } else {
+        item.is_unpaid_btc = false;
+        item.is_partially_paid_btc = false;
+        item.is_fully_paid_btc = false;
+        item.btc_payment_status = 'n_a';
+        item.btc_paid_ratio = 1;
+      }
     });
 
     // Apply tax mode filter if specified
@@ -13807,47 +14177,221 @@ app.get('/api/manager/accounting-analysis', requireAuth, requireRole('manager', 
       records = records.filter(item => filterByNumberRange(item.invoice_number, startVoucher, endVoucher) || filterByNumberRange(item.voucher_no || item.bill_no, startVoucher, endVoucher));
     }
 
+    // Food and drink charged to a room stays on the room invoice only.
+    // Card and UPI charges are never part of accounting amounts.
+    const isRoomChargedOrder = (row) => {
+      const mode = String(row.payment_mode || '').toLowerCase();
+      const type = String(row.order_type || '').toLowerCase();
+      const table = String(row.table_number || row.room_service_for || '');
+      return Boolean(row.booking_id) || mode.includes('room') || mode.includes('folio') || type === 'room' || /^RS-/i.test(table);
+    };
+    const isLiveOrder = (row) => !['cancelled', 'void', 'deleted'].includes(String(row.status || '').toLowerCase());
+    const orderTaxable = (row) => Math.max(0, Number(row.subtotal || 0) - Number(row.discount || 0));
+    const orderBillTotal = (row) => Number((orderTaxable(row) + Number(row.tax || 0)).toFixed(2));
+
+    const fnbByBooking = new Map();
+    const addRoomFnb = (row) => {
+      const bid = Number(row.booking_id || 0);
+      if (!bid || !isRoomChargedOrder(row) || !isLiveOrder(row)) return;
+      const prev = fnbByBooking.get(bid) || { taxable: 0, tax: 0 };
+      prev.taxable += orderTaxable(row);
+      prev.tax += Number(row.tax || 0);
+      fnbByBooking.set(bid, prev);
+    };
+
+    const fnbSelect = `
+      SELECT booking_id, subtotal, discount, tax, total, payment_mode, order_type, status, is_paid,
+             table_number, order_number, customer_name, waiter_name, created_at, settled_at
+      FROM restaurant_orders
+    `;
+    const barSelect = fnbSelect.replace('restaurant_orders', 'bar_orders');
+    let restaurantSource = [];
+    let barSource = [];
+    try { restaurantSource = db.prepare(fnbSelect).all(); } catch (_) { restaurantSource = []; }
+    try { barSource = db.prepare(barSelect).all(); } catch (_) { barSource = []; }
+    restaurantSource.forEach(addRoomFnb);
+    barSource.forEach(addRoomFnb);
+
+    records.forEach(item => {
+      let taxable = 0;
+      let tax = 0;
+      (item.booking_ids || []).forEach(id => {
+        const part = fnbByBooking.get(Number(id));
+        if (!part) return;
+        taxable += part.taxable;
+        tax += part.tax;
+      });
+      taxable = Number(taxable.toFixed(2));
+      tax = Number(tax.toFixed(2));
+      const fnbIgst = Boolean(item.is_igst);
+      item.department = 'hospitality';
+      item.fnb_taxable = taxable;
+      item.fnb_cgst = fnbIgst ? 0 : Number((tax / 2).toFixed(2));
+      item.fnb_sgst = fnbIgst ? 0 : Number((tax - item.fnb_cgst).toFixed(2));
+      item.fnb_igst = fnbIgst ? tax : 0;
+      item.fnb_total = Number((taxable + tax).toFixed(2));
+      item.round_off = 0;
+      item.invoice_total = Number((Number(item.grand_total || 0) + item.fnb_total).toFixed(2));
+      item.btc_status = item.is_btc ? (item.btc_payment_status || 'unpaid') : '';
+    });
+
+    const serialOf = (val) => {
+      const match = String(val || '').match(/(\d+)\s*$/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+    records.sort((a, b) => serialOf(a.invoice_number) - serialOf(b.invoice_number) || serialOf(a.bill_no) - serialOf(b.bill_no));
+
+    const inAccountingDates = (raw) => {
+      if (!raw) return !startDate && !endDate;
+      const day = String(raw).slice(0, 10);
+      if (startDate && day < String(startDate)) return false;
+      if (endDate && day > String(endDate)) return false;
+      return true;
+    };
+    const toBillRow = (row, department) => {
+      const taxable = Number(orderTaxable(row).toFixed(2));
+      const tax = Number(Number(row.tax || 0).toFixed(2));
+      const when = row.settled_at || row.created_at;
+      const dt = when ? new Date(when) : new Date();
+      const date = `${String(dt.getDate()).padStart(2, '0')}-${String(dt.getMonth() + 1).padStart(2, '0')}-${dt.getFullYear()}`;
+      const base = {
+        department,
+        date,
+        date_raw: when || '',
+        bill_no: row.order_number || '',
+        place: row.table_number || '',
+        customer_name: row.customer_name || '',
+        captain_name: row.waiter_name || '',
+        subtotal: taxable,
+        discount: Number(Number(row.discount || 0).toFixed(2)),
+        round_off: 0,
+        bill_total: orderBillTotal(row),
+        payment_mode: row.payment_mode || ''
+      };
+      if (department === 'bar') {
+        base.vat = tax;
+        return base;
+      }
+      base.cgst = Number((tax / 2).toFixed(2));
+      base.sgst = Number((tax - base.cgst).toFixed(2));
+      return base;
+    };
+    const standalone = (row) => isLiveOrder(row) && Number(row.is_paid) === 1 && !isRoomChargedOrder(row);
+    let restaurantBills = restaurantSource.filter(standalone).filter(row => inAccountingDates(row.settled_at || row.created_at)).map(row => toBillRow(row, 'restaurant'));
+    let barBills = barSource.filter(standalone).filter(row => inAccountingDates(row.settled_at || row.created_at)).map(row => toBillRow(row, 'bar'));
+    if (searchQuery) {
+      const needle = searchQuery.toLowerCase();
+      const hit = (row) => [row.bill_no, row.customer_name, row.place, row.captain_name].join(' ').toLowerCase().includes(needle);
+      restaurantBills = restaurantBills.filter(hit);
+      barBills = barBills.filter(hit);
+    }
+    if (startBill || endBill) {
+      restaurantBills = restaurantBills.filter(row => filterByNumberRange(row.bill_no, startBill, endBill));
+      barBills = barBills.filter(row => filterByNumberRange(row.bill_no, startBill, endBill));
+    }
+    restaurantBills.sort((a, b) => serialOf(a.bill_no) - serialOf(b.bill_no));
+    barBills.sort((a, b) => serialOf(a.bill_no) - serialOf(b.bill_no));
+    const sumBills = (list) => list.reduce((acc, row) => {
+      acc.count += 1;
+      acc.subtotal += row.subtotal;
+      acc.discount += row.discount;
+      acc.tax += Number(row.vat || 0) + Number(row.cgst || 0) + Number(row.sgst || 0);
+      acc.total += row.bill_total;
+      return acc;
+    }, { count: 0, subtotal: 0, discount: 0, tax: 0, total: 0 });
+    const restaurantSummary = sumBills(restaurantBills);
+    const barSummary = sumBills(barBills);
+
     // Calculate Summary Totals
     const summary = records.reduce((acc, it) => {
+      // BTC entries rule:
+      // If unpaid BTC, DO NOT ADD to calculation totals (contributes 0)
+      if (it.is_unpaid_btc) {
+        acc.unpaid_btc_count = (acc.unpaid_btc_count || 0) + 1;
+        acc.unpaid_btc_total = (acc.unpaid_btc_total || 0) + it.grand_total;
+        return acc;
+      }
+
+      // If partially paid BTC, add only the paid portion (ratio)
+      const ratio = it.is_partially_paid_btc ? (it.btc_paid_ratio || 0) : 1;
+
       acc.total_records += 1;
-      acc.total_room_rent_base += it.room_rent_base;
-      acc.total_extra_mattress += it.extra_mattress_pax;
-      acc.total_visitor_breakfast += (it.visitor_breakfast_base || 0);
-      acc.total_discount += it.discount;
-      acc.total_cgst += it.cgst;
-      acc.total_sgst += it.sgst;
-      acc.total_igst += (it.igst || 0);
-      acc.total_cgst_sgst += it.cgst_sgst_total;
-      acc.total_grand += it.grand_total;
+      acc.total_room_rent_base += (it.room_rent_base * ratio);
+      acc.total_extra_mattress += (it.extra_mattress_pax * ratio);
+      acc.total_plan_breakfast = (acc.total_plan_breakfast || 0) + ((it.plan_breakfast_base || 0) * ratio);
+      acc.total_ota_extra_breakfast = (acc.total_ota_extra_breakfast || 0) + ((it.ota_extra_breakfast_base || 0) * ratio);
+      acc.total_visitor_breakfast += ((it.visitor_breakfast_base || 0) * ratio);
+      acc.total_breakfast = (acc.total_breakfast || 0) + ((it.total_breakfast_base || 0) * ratio);
+      acc.total_extra_expenses += ((it.extra_expenses_base || 0) * ratio);
+      acc.total_discount += (it.discount * ratio);
+      acc.total_checkin_discount = (acc.total_checkin_discount || 0) + ((it.checkin_discount || 0) * ratio);
+      acc.total_checkout_discount = (acc.total_checkout_discount || 0) + ((it.checkout_discount || it.other_discount || 0) * ratio);
+      acc.total_other_discount = (acc.total_other_discount || 0) + ((it.other_discount || it.checkout_discount || 0) * ratio);
+      acc.total_cgst += (it.cgst * ratio);
+      acc.total_sgst += (it.sgst * ratio);
+      acc.total_igst += ((it.igst || 0) * ratio);
+      acc.total_cgst_sgst += (it.cgst_sgst_total * ratio);
+      acc.total_fnb_taxable = (acc.total_fnb_taxable || 0) + ((it.fnb_taxable || 0) * ratio);
+      acc.total_fnb_cgst = (acc.total_fnb_cgst || 0) + ((it.fnb_cgst || 0) * ratio);
+      acc.total_fnb_sgst = (acc.total_fnb_sgst || 0) + ((it.fnb_sgst || 0) * ratio);
+      acc.total_fnb_igst = (acc.total_fnb_igst || 0) + ((it.fnb_igst || 0) * ratio);
+      acc.total_fnb = (acc.total_fnb || 0) + ((it.fnb_total || 0) * ratio);
+      acc.total_invoice = (acc.total_invoice || 0) + (it.is_partially_paid_btc ? Number(it.total_paid || 0) : Number(it.invoice_total || it.grand_total || 0));
+      acc.total_grand += it.is_partially_paid_btc ? Number(it.total_paid || 0) : Number(it.invoice_total || it.grand_total || 0);
       return acc;
     }, {
       total_records: 0,
       total_room_rent_base: 0,
       total_extra_mattress: 0,
       total_visitor_breakfast: 0,
+      total_extra_expenses: 0,
       total_discount: 0,
       total_cgst: 0,
       total_sgst: 0,
       total_igst: 0,
       total_cgst_sgst: 0,
-      total_grand: 0
+      total_grand: 0,
+      unpaid_btc_count: 0,
+      unpaid_btc_total: 0
     });
 
     summary.total_room_rent_base = Number(summary.total_room_rent_base.toFixed(2));
     summary.total_extra_mattress = Number(summary.total_extra_mattress.toFixed(2));
     summary.total_visitor_breakfast = Number(summary.total_visitor_breakfast.toFixed(2));
+    summary.total_extra_expenses = Number(summary.total_extra_expenses.toFixed(2));
     summary.total_discount = Number(summary.total_discount.toFixed(2));
+    summary.total_checkin_discount = Number((summary.total_checkin_discount || 0).toFixed(2));
+    summary.total_checkout_discount = Number((summary.total_checkout_discount || 0).toFixed(2));
+    summary.total_other_discount = Number((summary.total_other_discount || 0).toFixed(2));
     summary.total_cgst = Number(summary.total_cgst.toFixed(2));
     summary.total_sgst = Number(summary.total_sgst.toFixed(2));
     summary.total_igst = Number((summary.total_igst || 0).toFixed(2));
     summary.total_cgst_sgst = Number(summary.total_cgst_sgst.toFixed(2));
     summary.total_grand = Number(summary.total_grand.toFixed(2));
+    summary.total_fnb_taxable = Number((summary.total_fnb_taxable || 0).toFixed(2));
+    summary.total_fnb_cgst = Number((summary.total_fnb_cgst || 0).toFixed(2));
+    summary.total_fnb_sgst = Number((summary.total_fnb_sgst || 0).toFixed(2));
+    summary.total_fnb_igst = Number((summary.total_fnb_igst || 0).toFixed(2));
+    summary.total_fnb = Number((summary.total_fnb || 0).toFixed(2));
+    summary.total_invoice = Number((summary.total_invoice || summary.total_grand || 0).toFixed(2));
+    restaurantSummary.subtotal = Number(restaurantSummary.subtotal.toFixed(2));
+    restaurantSummary.discount = Number(restaurantSummary.discount.toFixed(2));
+    restaurantSummary.tax = Number(restaurantSummary.tax.toFixed(2));
+    restaurantSummary.total = Number(restaurantSummary.total.toFixed(2));
+    barSummary.subtotal = Number(barSummary.subtotal.toFixed(2));
+    barSummary.discount = Number(barSummary.discount.toFixed(2));
+    barSummary.tax = Number(barSummary.tax.toFixed(2));
+    barSummary.total = Number(barSummary.total.toFixed(2));
 
     res.json({
       success: true,
       count: records.length,
       records,
-      summary
+      summary,
+      restaurant_bills: restaurantBills,
+      bar_bills: barBills,
+      restaurant_summary: restaurantSummary,
+      bar_summary: barSummary
     });
   } catch (err) {
     console.error('Accounting analysis fetch error:', err);
@@ -15578,7 +16122,7 @@ app.delete('/api/expenses/:id', requireAuth, requireRole('manager'), (req, res) 
 // Booking Analysis & OTA Performance Graph API
 app.get('/api/manager/booking-analysis', requireAuth, requireRole('manager', 'hospitality'), (req, res) => {
   try {
-    const { startDate, endDate, otaPlatform, source } = req.query;
+    const { startDate, endDate, otaPlatform, source, fromBillNo, toBillNo, fromInvoiceNo, toInvoiceNo, groupBy } = req.query;
 
     const todayStr = new Date().toISOString().slice(0, 10);
     const start = startDate || todayStr;
@@ -15601,56 +16145,42 @@ app.get('/api/manager/booking-analysis', requireAuth, requireRole('manager', 'ho
       }
     }
 
-    // 1. Time Series Daily Trends (grouped by date)
-    const dailyQuery = `
-      SELECT 
-        DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') as date,
-        COUNT(DISTINCT b.voucher_number) as booking_count,
-        COUNT(*) as rooms_count,
-        COALESCE(SUM(b.total_room_charge), 0) as total_revenue
-      FROM bookings b
-      WHERE b.status != 'cancelled'
-        AND DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') BETWEEN DATE(?) AND DATE(?)
-        ${platformCondition}
-      GROUP BY date
-      ORDER BY date ASC
-    `;
-    const dailyRecords = db.prepare(dailyQuery).all(...queryParams);
+    // Helper to match number / voucher range
+    const filterByNumberRange = (val, from, to) => {
+      if (!from && !to) return true;
+      if (!val) return false;
+      const strVal = String(val).trim();
 
-    // 2. Channel Distribution (Grouped by OTA channel across the date range)
-    const channelQuery = `
-      SELECT 
-        COALESCE(b.ota_platform, b.booking_source, 'Direct') as channel,
-        b.booking_source,
-        b.ota_platform,
-        COUNT(DISTINCT b.voucher_number) as booking_count,
-        COUNT(*) as rooms_count,
-        COALESCE(SUM(b.total_room_charge), 0) as total_revenue
-      FROM bookings b
-      WHERE b.status != 'cancelled'
-        AND DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') BETWEEN DATE(?) AND DATE(?)
-      GROUP BY channel
-      ORDER BY booking_count DESC
-    `;
-    const channelDistribution = db.prepare(channelQuery).all(start, end);
+      const valDigits = strVal.match(/(\d+)$/);
+      const valNum = valDigits ? parseInt(valDigits[1], 10) : null;
 
-    // 3. Aggregate totals for the active filter
-    let totalBookings = 0;
-    let totalRooms = 0;
-    let totalRevenue = 0;
-    dailyRecords.forEach(r => {
-      totalBookings += Number(r.booking_count || 0);
-      totalRooms += Number(r.rooms_count || 0);
-      totalRevenue += Number(r.total_revenue || 0);
-    });
+      const fromStr = from ? String(from).trim() : null;
+      const toStr = to ? String(to).trim() : null;
 
-    const adr = totalRooms > 0 ? Math.round(totalRevenue / totalRooms) : 0;
+      const fromNum = fromStr && /^\d+$/.test(fromStr) ? parseInt(fromStr, 10) : null;
+      const toNum = toStr && /^\d+$/.test(toStr) ? parseInt(toNum, 10) : null;
 
-    // 4. Detailed list of bookings in this filter & date range (limit 100)
+      if (valNum !== null && (fromNum !== null || toNum !== null)) {
+        if (fromNum !== null && valNum < fromNum) return false;
+        if (toNum !== null && valNum > toNum) return false;
+        return true;
+      }
+
+      if (fromStr && strVal.localeCompare(fromStr) < 0) return false;
+      if (toStr && strVal.localeCompare(toStr) > 0) return false;
+      return true;
+    };
+
+    const hasBillFilter = Boolean(fromBillNo || toBillNo || fromInvoiceNo || toInvoiceNo);
+    const startBill = fromBillNo || fromInvoiceNo;
+    const endBill = toBillNo || toInvoiceNo;
+
+    // Detailed list of all candidate bookings
     const listQuery = `
       SELECT 
         b.id,
         b.voucher_number,
+        b.final_receipt_no,
         r.room_number,
         g.name as guest_name,
         g.mobile as guest_phone,
@@ -15658,10 +16188,12 @@ app.get('/api/manager/booking-analysis', requireAuth, requireRole('manager', 'ho
         COALESCE(b.ota_platform, b.booking_source) as ota_platform,
         b.ota_booking_id,
         b.checkin_time,
+        b.created_at,
         b.approx_checkout_time,
         b.total_room_charge,
         b.payment_status,
-        b.status
+        b.status,
+        DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') as date
       FROM bookings b
       LEFT JOIN rooms r ON b.room_id = r.id
       LEFT JOIN guests g ON b.guest_id = g.id
@@ -15669,9 +16201,87 @@ app.get('/api/manager/booking-analysis', requireAuth, requireRole('manager', 'ho
         AND DATE(COALESCE(b.checkin_time, b.created_at), 'localtime') BETWEEN DATE(?) AND DATE(?)
         ${platformCondition}
       ORDER BY b.id DESC
-      LIMIT 100
     `;
-    const bookingsList = db.prepare(listQuery).all(...queryParams);
+    let rawBookings = db.prepare(listQuery).all(...queryParams);
+
+    if (hasBillFilter) {
+      rawBookings = rawBookings.filter(b => 
+        filterByNumberRange(b.voucher_number || b.final_receipt_no || b.id, startBill, endBill)
+      );
+    }
+
+    // 1. Time Series Trends from filtered bookings
+    const dailyMap = {};
+    const channelMap = {};
+    let totalBookings = 0;
+    let totalRooms = 0;
+    let totalRevenue = 0;
+    const seenVouchers = new Set();
+
+    rawBookings.forEach(b => {
+      const vKey = b.voucher_number || `BK-${b.id}`;
+      const isNewVoucher = !seenVouchers.has(vKey);
+      if (isNewVoucher) seenVouchers.add(vKey);
+
+      const dKey = b.date;
+      if (!dailyMap[dKey]) {
+        dailyMap[dKey] = {
+          date: dKey,
+          booking_count: 0,
+          rooms_count: 0,
+          total_revenue: 0,
+          vouchers: new Set()
+        };
+      }
+      if (!dailyMap[dKey].vouchers.has(vKey)) {
+        dailyMap[dKey].vouchers.add(vKey);
+        dailyMap[dKey].booking_count += 1;
+        totalBookings += 1;
+      }
+      dailyMap[dKey].rooms_count += 1;
+      totalRooms += 1;
+      const rev = Number(b.total_room_charge || 0);
+      dailyMap[dKey].total_revenue += rev;
+      totalRevenue += rev;
+
+      const ch = b.ota_platform || b.booking_source || 'Direct';
+      if (!channelMap[ch]) {
+        channelMap[ch] = {
+          channel: ch,
+          booking_source: b.booking_source,
+          ota_platform: b.ota_platform,
+          booking_count: 0,
+          rooms_count: 0,
+          total_revenue: 0,
+          vouchers: new Set()
+        };
+      }
+      if (!channelMap[ch].vouchers.has(vKey)) {
+        channelMap[ch].vouchers.add(vKey);
+        channelMap[ch].booking_count += 1;
+      }
+      channelMap[ch].rooms_count += 1;
+      channelMap[ch].total_revenue += rev;
+    });
+
+    const dailyRecords = Object.values(dailyMap).map(d => ({
+      date: d.date,
+      booking_count: d.booking_count,
+      rooms_count: d.rooms_count,
+      total_revenue: d.total_revenue
+    })).sort((a, b) => a.date.localeCompare(b.date));
+
+    const channelDistribution = Object.values(channelMap).map(c => ({
+      channel: c.channel,
+      booking_source: c.booking_source,
+      ota_platform: c.ota_platform,
+      booking_count: c.booking_count,
+      rooms_count: c.rooms_count,
+      total_revenue: c.total_revenue
+    })).sort((a, b) => b.booking_count - a.booking_count);
+
+    const adr = totalRooms > 0 ? Math.round(totalRevenue / totalRooms) : 0;
+    const bookingsList = rawBookings.slice(0, 100);
 
     res.json({
       success: true,

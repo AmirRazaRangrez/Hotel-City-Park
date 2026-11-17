@@ -120,7 +120,7 @@ async function main() {
   const crmReady = crmActive || await waitForPort(3000);
   const adminReady = adminActive || await waitForPort(8081);
 
-  let remoteUrl = 'https://delayed-eligible-gazette-related.trycloudflare.com';
+  let remoteUrl = 'https://crm.dominal.in';
   try {
     const rFile = path.join(rootDir, 'remote_url.txt');
     if (fs.existsSync(rFile)) {

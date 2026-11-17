@@ -279,11 +279,26 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
   const [isAddExpenseModalOpen, setIsAddExpenseModalOpen] = useState(false);
   const [expenseReason, setExpenseReason] = useState('');
   const [expenseReasonOpen, setExpenseReasonOpen] = useState(false);
+  const expenseDropdownRef = useRef(null);
   const [expenseCategory, setExpenseCategory] = useState('damage');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseGstPct, setExpenseGstPct] = useState(5);
   const [expenseNotes, setExpenseNotes] = useState('');
   const [isSubmittingExpense, setIsSubmittingExpense] = useState(false);
+
+  // Close extra expense dropdown when clicking outside
+  useEffect(() => {
+    if (!expenseReasonOpen) return;
+    const handleClickOutside = (e) => {
+      if (expenseDropdownRef.current && !expenseDropdownRef.current.contains(e.target)) {
+        setExpenseReasonOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [expenseReasonOpen]);
 
   // In-Room Dining & Guest Ordering Link State
   const [diningLinkData, setDiningLinkData] = useState(() => folioData?.diningLink || null);
@@ -414,7 +429,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
         ? Number(summary.roomGrossTariff ?? summary.grossTariff ?? (roomCharge + discountAmount))
         : Number(activeStayCalc.grossTariff ?? activeStayCalc.roomGrossTariff ?? summary.roomGrossTariff ?? (roomCharge + discountAmount));
       const roomTaxable = isBookingOta
-        ? Number(summary.roomTaxable ?? summary.stayTaxable ?? Math.round((roomCharge * 0.95) * 100) / 100)
+        ? Number(summary.roomTaxable ?? summary.stayTaxable ?? (roomCharge > 0 ? Math.round((roomCharge / 1.05) * 100) / 100 : 0))
         : Number(activeStayCalc.roomSubtotalPreTax ?? activeStayCalc.baseRoomTariff ?? summary.roomTaxable ?? roomCharge);
       const stayTaxable = roomTaxable;
       const stayTax = isBookingOta
@@ -838,7 +853,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
       });
     }
     const rRefund = parseFloat(folioData.room?.refund_amount || folioData.refundAmount || 0);
-    if (list.length === 0 && rRefund > 0) {
+    if (list.length === 0 && rRefund > 0.50) {
       list.push({
         id: 'checkout-refund',
         receipt_no: folioData.room?.refund_voucher_no || folioData.refund_voucher_no || 'RR-01',
@@ -1411,7 +1426,11 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
   const otaEarlyFeeVal = (folioData.bookingSource === 'OTA' && folioData.isEarlyCheckin)
     ? Number(folioData.earlyCheckinCharge !== undefined && folioData.earlyCheckinCharge !== null ? folioData.earlyCheckinCharge : (folioData.ota_early_checkin_price || 900))
     : 0;
-  const hotelExtrasChargeVal = Number(folioData.extraBedCharge || 0) + Number(folioData.extra_rooms_charge || 0) + Number(folioData.extra_breakfast_charge || 0) + otaEarlyFeeVal;
+  const hotelExtrasBaseVal = Number(folioData.extraBedCharge || 0) + Number(folioData.extra_rooms_charge || 0) + Number(folioData.extra_breakfast_charge || 0) + otaEarlyFeeVal;
+  const hotelExtrasGstVal = Math.round(hotelExtrasBaseVal * 0.05 * 100) / 100;
+  const hotelExtrasChargeVal = folioData.summary?.hotelExtrasCharge !== undefined
+    ? Number(folioData.summary.hotelExtrasCharge)
+    : Math.round((hotelExtrasBaseVal + hotelExtrasGstVal) * 100) / 100;
   const globalStayNet = isOtaPrepaid
     ? hotelExtrasChargeVal
     : Number(
@@ -1648,6 +1667,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
   };
 
   const handleOpenAddExpense = (preset = null) => {
+    setExpenseReasonOpen(false);
     if (preset) {
       setExpenseReason(preset.reason || '');
       setExpenseCategory('Room Expense');
@@ -1814,6 +1834,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
       await performDeleteExpense();
     }
   };
+  const handleDeleteExpense = handleDeleteExtraExpense;
 
   // ==========================================
   // IN-ROOM DINING LINK & RESHARE HANDLERS
@@ -2805,116 +2826,6 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
               )}
             </div>
 
-            {/* Occupancy details */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
-              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                <span>🔑 Room #{folioData.roomNumber} • <strong style={{ color: 'var(--apple-blue, #8c5d77)' }}>{folioData.roomType || folioData.room?.room_type || 'Executive Room'}</strong></span>
-                {folioData.voucherNumber && (
-                  <span style={{ fontSize: '0.74rem', color: '#047857', background: '#ecfdf5', padding: '2px 8px', borderRadius: '4px', border: '1px solid #a7f3d0', fontWeight: 800 }}>
-                    Bill #{folioData.voucherNumber}
-                  </span>
-                )}
-                {folioData.room?.checked_in_by && (
-                  <span style={{ fontSize: '0.74rem', color: '#475569', background: '#f1f5f9', padding: '2px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontWeight: 700 }}>
-                    👤 {folioData.room.checked_in_by}
-                  </span>
-                )}
-                {isMultiGroup && (
-                  <span style={{ fontSize: '0.74rem', color: '#1d4ed8', fontWeight: 800 }}>
-                    (Group: #{groupRoomsList.join(', #')})
-                  </span>
-                )}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-end', fontSize: '0.82rem', fontWeight: 700, color: '#475569' }}>
-                <div>
-                  <span>👥 {((Number(folioData.adultsMale) || 0) + (Number(folioData.adultsFemale) || 0)) || 1} Adult(s) ({folioData.adultsMale || 1} Male, {folioData.adultsFemale || 0} Female)</span>
-                  {folioData.children > 0 && <span>, {folioData.children} Child</span>}
-                  {folioData.extraBeds > 0 && (
-                    <span>
-                      {' • '}🛏️ {folioData.extraBeds} Extra Mattress{folioData.extraBeds > 1 ? 'es' : ''}
-                      {isOtaBooking && hotelChargedBeds > 0 && (
-                        <span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600 }}>
-                          {' '}({voucherIncludedBeds > 0 ? `${voucherIncludedBeds} Voucher + ` : ''}{hotelChargedBeds} Hotel Extra)
-                        </span>
-                      )}
-                    </span>
-                  )}
-                </div>
-                {isOtaBooking && (
-                  <div style={{ fontSize: '0.72rem', display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                    <span style={{ color: '#0369a1', background: '#e0f2fe', padding: '1px 6px', borderRadius: '4px', border: '1px solid #bae6fd', fontWeight: 800 }}>
-                      📦 OTA Booked: {otaBookedAdults} Adult(s){otaBookedChildren > 0 ? `, ${otaBookedChildren} Child` : ''}{voucherIncludedBeds > 0 ? `, ${voucherIncludedBeds} Bed (Voucher ₹0)` : ''}
-                    </span>
-                    {(extraAdults > 0 || extraChildren > 0 || hotelChargedBeds > 0 || Number(folioData.extraBedCharge) > 0) && (
-                      <span style={{ color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: '4px', border: '1px solid #fde68a', fontWeight: 800 }}>
-                        🏨 Hotel Extra: {extraAdults > 0 ? `+${extraAdults} Adult(s) ` : ''}{extraChildren > 0 ? `+${extraChildren} Child ` : ''}{hotelChargedBeds > 0 ? `+${hotelChargedBeds} Bed(s) ` : ''}(+₹{(Number(folioData.extraBedCharge) || (hotelChargedBeds * 500)).toLocaleString('en-IN')})
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Complete Financial & Billing Summary Row (Full Parity with APK) */}
-            <div style={{ marginTop: '10px', padding: '10px 14px', background: '#f8fafc', borderRadius: '10px', border: '1.5px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <div>
-                  <div style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Room Tariff</div>
-                  <div style={{ fontSize: '0.94rem', fontWeight: 900, color: '#0f172a' }}>
-                    {formatCurrency(summaryRoomTariff)}
-                  </div>
-                </div>
-                {(hotelExtrasChargeVal > 0 || (isOtaBooking && Number(folioData.summary?.hotelExtrasCharge || 0) > 0)) && (
-                  <div>
-                    <div style={{ fontSize: '0.66rem', color: '#854d0e', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Hotel Extras</div>
-                    <div style={{ fontSize: '0.94rem', fontWeight: 900, color: '#b45309' }}>
-                      {formatCurrency(hotelExtrasChargeVal || Number(folioData.summary?.hotelExtrasCharge || 0))}
-                    </div>
-                  </div>
-                )}
-                <div>
-                  <div style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Restaurant</div>
-                  <div style={{ fontSize: '0.94rem', fontWeight: 900, color: '#0f172a' }}>
-                    {formatCurrency(folioData.summary?.foodTotal || folioData.foodTotal || 0)}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Bar Lounge</div>
-                  <div style={{ fontSize: '0.94rem', fontWeight: 900, color: '#0f172a' }}>
-                    {formatCurrency(folioData.summary?.barTotal || folioData.barTotal || 0)}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.66rem', color: '#334155', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Total Bill</div>
-                  <div style={{ fontSize: '0.94rem', fontWeight: 900, color: '#0f172a' }}>
-                    {formatCurrency(summaryTotalBill)}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.66rem', color: '#059669', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Total Paid</div>
-                  <div style={{ fontSize: '0.94rem', fontWeight: 900, color: '#16a34a' }}>
-                    {formatCurrency(summaryTotalPaid)}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.66rem', color: '#dc2626', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Balance Due</div>
-                  <div style={{ fontSize: '0.94rem', fontWeight: 900, color: summaryBalanceDue <= 0 ? '#16a34a' : '#dc2626' }}>
-                    {summaryBalanceDue <= 0 ? '₹0 (PAID)' : formatCurrency(summaryBalanceDue)}
-                  </div>
-                </div>
-              </div>
-              {(displayAdvancePayments.length > 0 || (isOtaPrepaid && otaVoucherVal > 0)) && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '0.74rem', fontWeight: 800, background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '3px 8px', borderRadius: '6px' }}>
-                    🧾 {displayAdvancePayments[0]?.receipt_no || (folioData.otaBookingId ? `OTA-${folioData.otaBookingId}` : (folioData.voucherNumber ? `RCP-${folioData.voucherNumber}` : 'OTA-PREPAID'))}
-                  </span>
-                  <span style={{ fontSize: '0.70rem', fontWeight: 900, background: '#16a34a', color: '#ffffff', padding: '3px 7px', borderRadius: '6px' }}>
-                    REALIZED
-                  </span>
-                </div>
-              )}
-            </div>
-
             {/* Room Shift & Checkout Extension Audit Logs (Below Room Number & Occupancy Details) */}
             {Array.isArray(folioData.extensionLogs) && folioData.extensionLogs.length > 0 && (() => {
               const transferLogs = folioData.extensionLogs.filter((l) => l.type === 'room_transfer');
@@ -3291,7 +3202,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                 })}
 
                 {/* Refund Receipts (Displayed below all advance receipts) */}
-                {folioRefundPayments.map((refP, refIdx) => {
+                {folioRefundPayments.filter(refP => Math.abs(Number(refP.amount || folioData.room?.refund_amount || folioData.refundAmount || 0)) > 0.50).map((refP, refIdx) => {
                   const refNo = refP.receipt_no || refP.voucher_no || folioData.room?.refund_voucher_no || folioData.refund_voucher_no || 'RR-01';
                   const refAmount = Math.abs(Number(refP.amount || folioData.room?.refund_amount || folioData.refundAmount || 0));
                   const refMode = (refP.payment_mode || folioData.room?.refund_mode || 'Cash').toUpperCase();
@@ -3498,7 +3409,11 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
           const otaEarlyFee = (folioData.bookingSource === 'OTA' && folioData.isEarlyCheckin)
             ? Number(folioData.earlyCheckinCharge !== undefined && folioData.earlyCheckinCharge !== null ? folioData.earlyCheckinCharge : (folioData.ota_early_checkin_price || 900))
             : 0;
-          const hotelExtrasCharge = Number(folioData.extraBedCharge || 0) + Number(folioData.extra_rooms_charge || 0) + Number(folioData.extra_breakfast_charge || 0) + otaEarlyFee;
+          const hotelExtrasBase = Number(folioData.extraBedCharge || 0) + Number(folioData.extra_rooms_charge || 0) + Number(folioData.extra_breakfast_charge || 0) + otaEarlyFee;
+          const hotelExtrasGst = Math.round(hotelExtrasBase * 0.05 * 100) / 100;
+          const hotelExtrasCharge = folioData.summary?.hotelExtrasCharge !== undefined
+            ? Number(folioData.summary.hotelExtrasCharge)
+            : Math.round((hotelExtrasBase + hotelExtrasGst) * 100) / 100;
           const advancePaidVal = Number(folioData.advancePaid || 0);
 
           // Declared Stay & Tariff Parameters (available component-wide)
@@ -3545,9 +3460,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
           const entireBookingVal = isOtaPrepaidStay ? (otaVoucherVal + hotelExtrasCharge) : stayNetTotal;
           const entireCollectedVal = isOtaPrepaidStay ? (otaVoucherVal + actualDeskPaidVal) : advancePaidVal;
           const isBookingOtaStay = isOtaPrepaidStay || isOtaPayAtHotel || folioData.bookingSource === 'OTA';
-          const stayTaxable = isBookingOtaStay
-            ? Math.round(stayNetTotal * 0.95 * 100) / 100
-            : Math.round((stayNetTotal / 1.05) * 100) / 100;
+          const stayTaxable = Math.round((stayNetTotal / 1.05) * 100) / 100;
           const stayGst = Math.max(0, Number((stayNetTotal - stayTaxable).toFixed(2)));
           const stayDiscountVal = (isOtaPrepaidStay || isOtaPayAtHotel) ? 0 : decDiscountAmount;
           const stayPreTax = stayTaxable + stayDiscountVal;
@@ -4289,7 +4202,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                               </div>
                               <div style={{ fontSize: '0.74rem', color: '#15803d', marginTop: '2px' }}>
                                 Recalculated Room Rent: {formatCurrency(folioData.stayCalcNow?.roomCharge || folioData.recalculatedRoomCharge || stayNetTotal)}
-                                {folioData.refundAmount > 0 && <span style={{ color: '#b91c1c', fontWeight: 800, marginLeft: '8px' }}>• Excess Refund Due: {formatCurrency(folioData.refundAmount)}</span>}
+                                {folioData.refundAmount > 0.50 && <span style={{ color: '#b91c1c', fontWeight: 800, marginLeft: '8px' }}>• Excess Refund Due: {formatCurrency(folioData.refundAmount)}</span>}
                               </div>
                             </div>
                           )}
@@ -4777,15 +4690,21 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                             {/* Room Stay Subtotal */}
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '8px', borderTop: '1.5px solid #cbd5e1' }}>
                               <div>
-                                <span style={{ fontWeight: 850, color: '#0f172a', fontSize: '0.94rem' }}>Room Stay (Incl. GST):</span>
-                                {!isOtaPrepaidStay && (
+                                <span style={{ fontWeight: 850, color: '#0f172a', fontSize: '0.94rem' }}>
+                                  {isOtaPrepaidStay ? 'Total Stay Value (Voucher + Extras):' : 'Room Stay (Incl. GST):'}
+                                </span>
+                                {isOtaPrepaidStay ? (
+                                  <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                                    Total Taxable: {formatCurrency(Math.round((otaVoucherVal / 1.05) * 100) / 100 + hotelExtrasBase)} | Total GST: {formatCurrency(Math.round(((otaVoucherVal - Math.round((otaVoucherVal / 1.05) * 100) / 100) + hotelExtrasGst) * 100) / 100)}
+                                  </div>
+                                ) : (
                                   <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
                                     Total Taxable: {formatCurrency(nowPreTaxRoom)} | Total GST: {formatCurrency(nowTotalRoomGst)}
                                   </div>
                                 )}
                               </div>
                               <strong style={{ fontSize: '1.22rem', color: '#0f172a', fontWeight: 950 }}>
-                                {formatCurrency(nowRoomCharge)}
+                                {formatCurrency(isOtaPrepaidStay ? (otaVoucherVal + hotelExtrasCharge) : nowRoomCharge)}
                               </strong>
                             </div>
                           </div>
@@ -7427,35 +7346,37 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
               className="modal-container"
               id="add-room-expense-modal"
               style={{
-                width: '460px',
+                width: '580px',
                 maxWidth: '96vw',
-                borderRadius: '16px',
+                minHeight: '380px',
+                borderRadius: '18px',
                 background: '#ffffff',
-                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+                boxShadow: '0 25px 60px -12px rgba(0, 0, 0, 0.40)',
                 display: 'flex',
                 flexDirection: 'column',
-                overflow: 'hidden'
+                overflow: 'visible'
               }}
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
               <div
                 style={{
-                  padding: '14px 20px',
+                  padding: '16px 24px',
                   background: 'linear-gradient(135deg, #b91c1c 0%, #991b1b 100%)',
                   color: '#ffffff',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'space-between'
+                  justifyContent: 'space-between',
+                  borderRadius: '18px 18px 0 0'
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '1.4rem' }}>🛡️</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '1.5rem' }}>🛡️</span>
                   <div>
-                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 900, color: '#ffffff' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.18rem', fontWeight: 900, color: '#ffffff' }}>
                       Add Extra Expense / Damage
                     </h3>
-                    <span style={{ fontSize: '0.78rem', color: '#fecaca', fontWeight: 600 }}>
+                    <span style={{ fontSize: '0.82rem', color: '#fecaca', fontWeight: 600 }}>
                       Room #{folioData?.roomNumber} • {folioData?.guestName || 'Valued Guest'}
                     </span>
                   </div>
@@ -7466,13 +7387,13 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                   disabled={isSubmittingExpense}
                   title="Close (X)"
                   style={{
-                    width: '32px',
-                    height: '32px',
+                    width: '34px',
+                    height: '34px',
                     borderRadius: '8px',
                     background: 'rgba(255, 255, 255, 0.2)',
                     border: 'none',
                     color: '#ffffff',
-                    fontSize: '1.3rem',
+                    fontSize: '1.35rem',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
@@ -7487,101 +7408,153 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
               <form
                 onSubmit={handleSaveExtraExpense}
                 style={{
-                  padding: '18px 20px',
+                  padding: '22px 24px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '14px'
+                  gap: '16px',
+                  borderRadius: '0 0 18px 18px',
+                  overflow: 'visible'
                 }}
               >
                 {/* Reason / Item Description */}
-                <div style={{ position: 'relative' }}>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                <div style={{ position: 'relative' }} ref={expenseDropdownRef}>
+                  <label style={{ display: 'block', fontSize: '0.86rem', fontWeight: 800, color: '#334155', marginBottom: '8px' }}>
                     Reason / Item Description <span style={{ color: '#dc2626' }}>*</span>
                   </label>
-                  <input
-                    type="text"
-                    required
-                    autoFocus
-                    placeholder="Select or type a reason"
-                    value={expenseReason}
-                    onChange={(e) => {
-                      setExpenseReason(e.target.value);
-                      setExpenseReasonOpen(true);
-                    }}
-                    onFocus={() => setExpenseReasonOpen(true)}
-                    onBlur={() => setTimeout(() => setExpenseReasonOpen(false), 160)}
-                    style={{
-                      width: '100%',
-                      boxSizing: 'border-box',
-                      height: '40px',
-                      padding: '0 12px',
-                      borderRadius: '8px',
-                      border: '1.5px solid #cbd5e1',
-                      fontSize: '0.90rem',
-                      fontWeight: 650,
-                      outline: 'none',
-                      background: '#ffffff'
-                    }}
-                  />
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Select or type a reason..."
+                      value={expenseReason}
+                      onClick={() => setExpenseReasonOpen((prev) => !prev)}
+                      onChange={(e) => {
+                        setExpenseReason(e.target.value);
+                        if (!expenseReasonOpen) setExpenseReasonOpen(true);
+                      }}
+                      style={{
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        height: '46px',
+                        padding: '0 40px 0 14px',
+                        borderRadius: '10px',
+                        border: expenseReasonOpen ? '1.5px solid #dc2626' : '1.5px solid #cbd5e1',
+                        fontSize: '0.94rem',
+                        fontWeight: 650,
+                        outline: 'none',
+                        background: '#ffffff',
+                        cursor: 'pointer',
+                        transition: 'border-color 0.15s ease'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExpenseReasonOpen((prev) => !prev);
+                      }}
+                      title={expenseReasonOpen ? 'Close list' : 'Open list'}
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#64748b',
+                        fontSize: '0.90rem',
+                        cursor: 'pointer',
+                        padding: '4px 6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transform: expenseReasonOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                        transition: 'transform 0.15s ease'
+                      }}
+                    >
+                      ▼
+                    </button>
+                  </div>
                   {expenseReasonOpen && (
                     <div
                       style={{
                         position: 'absolute',
                         left: 0,
                         right: 0,
-                        top: '68px',
-                        zIndex: 30,
+                        top: 'calc(100% + 6px)',
+                        zIndex: 1000,
                         background: '#ffffff',
                         border: '1.5px solid #cbd5e1',
-                        borderRadius: '8px',
-                        boxShadow: '0 10px 24px rgba(15, 23, 42, 0.12)',
-                        overflow: 'hidden'
+                        borderRadius: '12px',
+                        boxShadow: '0 16px 32px -4px rgba(15, 23, 42, 0.22), 0 4px 12px -2px rgba(15, 23, 42, 0.10)',
+                        padding: '6px',
+                        overflow: 'visible'
                       }}
                     >
-                      {['Rental Car Service', 'Laundry', 'Mini Bar', 'Decoration Charges', 'Damage To Property']
-                        .filter((opt) => !expenseReason.trim() || opt.toLowerCase().includes(expenseReason.trim().toLowerCase()))
-                        .map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              setExpenseReason(opt);
-                              setExpenseReasonOpen(false);
-                            }}
-                            style={{
-                              display: 'block',
-                              width: '100%',
-                              textAlign: 'left',
-                              padding: '9px 12px',
-                              border: 'none',
-                              borderBottom: '1px solid #f1f5f9',
-                              background: expenseReason === opt ? '#eff6ff' : '#ffffff',
-                              color: '#0f172a',
-                              fontWeight: 700,
-                              fontSize: '0.88rem',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            {opt}
-                          </button>
-                        ))}
+                      {[
+                        { label: 'Rental Car Service', icon: '🚗' },
+                        { label: 'Laundry', icon: '👔' },
+                        { label: 'Mini Bar', icon: '🍷' },
+                        { label: 'Decoration Charges', icon: '🎉' },
+                        { label: 'Damage To Property', icon: '⚠️' }
+                      ]
+                        .filter((opt) => !expenseReason.trim() || opt.label.toLowerCase().includes(expenseReason.trim().toLowerCase()))
+                        .map((opt) => {
+                          const isSelected = expenseReason === opt.label;
+                          return (
+                            <button
+                              key={opt.label}
+                              type="button"
+                              onClick={() => {
+                                setExpenseReason(opt.label);
+                                setExpenseReasonOpen(false);
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                width: '100%',
+                                textAlign: 'left',
+                                padding: '8px 12px',
+                                border: 'none',
+                                borderRadius: '8px',
+                                marginBottom: '2px',
+                                background: isSelected ? '#fee2e2' : 'transparent',
+                                color: isSelected ? '#991b1b' : '#0f172a',
+                                fontWeight: 700,
+                                fontSize: '0.88rem',
+                                cursor: 'pointer',
+                                transition: 'background 0.12s ease'
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!isSelected) e.currentTarget.style.background = '#f8fafc';
+                              }}
+                              onMouseLeave={(e) => {
+                                if (!isSelected) e.currentTarget.style.background = 'transparent';
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{ fontSize: '1.15rem' }}>{opt.icon}</span>
+                                <span style={{ fontWeight: 750 }}>{opt.label}</span>
+                              </div>
+                              {isSelected && <span style={{ fontSize: '0.90rem', color: '#b91c1c', fontWeight: 900 }}>✓</span>}
+                            </button>
+                          );
+                        })}
                     </div>
                   )}
                 </div>
 
                 {/* Total Expense Amount (₹) */}
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <label style={{ fontSize: '0.82rem', fontWeight: 800, color: '#334155' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <label style={{ fontSize: '0.86rem', fontWeight: 800, color: '#334155' }}>
                       Total Expense Amount (₹) <span style={{ color: '#dc2626' }}>*</span>
                     </label>
-                    <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#0369a1', background: '#e0f2fe', padding: '2px 8px', borderRadius: '6px' }}>
+                    <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#0369a1', background: '#e0f2fe', padding: '3px 9px', borderRadius: '6px' }}>
                       + 5% GST Extra
                     </span>
                   </div>
                   <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                    <span style={{ position: 'absolute', left: '12px', fontWeight: 900, color: '#b91c1c', fontSize: '1.10rem' }}>₹</span>
+                    <span style={{ position: 'absolute', left: '14px', fontWeight: 900, color: '#b91c1c', fontSize: '1.20rem' }}>₹</span>
                     <input
                       type="number"
                       min="1"
@@ -7593,12 +7566,12 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                       style={{
                         width: '100%',
                         boxSizing: 'border-box',
-                        height: '42px',
-                        paddingLeft: '30px',
-                        paddingRight: '12px',
-                        borderRadius: '8px',
+                        height: '48px',
+                        paddingLeft: '34px',
+                        paddingRight: '14px',
+                        borderRadius: '10px',
                         border: '2px solid #b91c1c',
-                        fontSize: '1.10rem',
+                        fontSize: '1.15rem',
                         fontWeight: 900,
                         color: '#0f172a',
                         outline: 'none'
@@ -7612,13 +7585,13 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                   <div
                     style={{
                       background: '#f8fafc',
-                      borderRadius: '10px',
+                      borderRadius: '12px',
                       border: '1px solid #e2e8f0',
-                      padding: '10px 14px',
+                      padding: '12px 16px',
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: '4px',
-                      fontSize: '0.82rem'
+                      gap: '6px',
+                      fontSize: '0.86rem'
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b' }}>
@@ -7629,7 +7602,7 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                       <span>GST (5%):</span>
                       <strong>+ {formatCurrency(gstAmt)}</strong>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#b91c1c', borderTop: '1px dashed #cbd5e1', paddingTop: '6px', marginTop: '2px', fontSize: '0.92rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#b91c1c', borderTop: '1px dashed #cbd5e1', paddingTop: '8px', marginTop: '2px', fontSize: '0.96rem' }}>
                       <span style={{ fontWeight: 850 }}>Charge to Folio:</span>
                       <strong style={{ fontWeight: 950 }}>{formatCurrency(totalCharge)}</strong>
                     </div>
@@ -7637,19 +7610,20 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                 )}
 
                 {/* Footer Buttons */}
-                <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
                   <button
                     type="button"
                     disabled={isSubmittingExpense}
                     onClick={() => setIsAddExpenseModalOpen(false)}
                     style={{
                       flex: 1,
-                      height: '42px',
+                      height: '46px',
                       background: '#f1f5f9',
                       border: '1.5px solid #cbd5e1',
                       borderRadius: '10px',
                       fontWeight: 750,
                       color: '#475569',
+                      fontSize: '0.92rem',
                       cursor: 'pointer'
                     }}
                   >
@@ -7660,12 +7634,13 @@ export default function RoomFolioPage({ roomId, onBack, onReprintRegForm, onOpen
                     disabled={!canSubmit}
                     style={{
                       flex: 2,
-                      height: '42px',
+                      height: '46px',
                       background: canSubmit ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)' : '#cbd5e1',
                       border: 'none',
                       borderRadius: '10px',
                       fontWeight: 900,
                       color: '#ffffff',
+                      fontSize: '0.94rem',
                       cursor: canSubmit ? 'pointer' : 'not-allowed',
                       boxShadow: canSubmit ? '0 4px 12px rgba(220, 38, 38, 0.3)' : 'none',
                       display: 'flex',

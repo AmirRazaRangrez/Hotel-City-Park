@@ -1,10 +1,11 @@
 {
-  "url": "https://lender-lean-tables-patent.trycloudflare.com",
-  "adminUrl": "https://lender-lean-tables-patent.trycloudflare.com/admin/",
-  "crmUrl": "https://lender-lean-tables-patent.trycloudflare.com/hospitality",
-  "restaurantUrl": "https://lender-lean-tables-patent.trycloudflare.com/restaurant",
-  "barUrl": "https://lender-lean-tables-patent.trycloudflare.com/bar",
-  "storeUrl": "https://lender-lean-tables-patent.trycloudflare.com/storeman",
-  "downloadUrl": "https://lender-lean-tables-patent.trycloudflare.com/download.html",
-  "updatedAt": "2026-10-29T07:10:07.991Z"
+  "url": "https://crm.dominal.in",
+  "adminUrl": "https://crm.dominal.in/admin/",
+  "crmUrl": "https://crm.dominal.in/hospitality",
+  "restaurantUrl": "https://crm.dominal.in/restaurant",
+  "barUrl": "https://crm.dominal.in/bar",
+  "storeUrl": "https://crm.dominal.in/storeman",
+  "waiterUrl": "https://crm.dominal.in/waiter/",
+  "downloadUrl": "https://crm.dominal.in/download.html",
+  "updatedAt": "2026-11-17T12:00:00.000Z"
 }

@@ -74,15 +74,19 @@ export default function DocumentActionModal({
     if (invData.room) {
       const room = invData.room;
       const baseCalc = invData.calc || invData.room;
-      const activeCalc = room.tax_invoice_snapshot?.stayCalcNow || room.stayCalcNow || baseCalc?.stayCalcNow;
+      const rawSnap = room.tax_invoice_snapshot || room.tax_invoice_snapshot_json || baseCalc?.tax_invoice_snapshot;
+      const snapshot = typeof rawSnap === 'string' ? JSON.parse(rawSnap) : rawSnap;
+      const activeCalc = snapshot?.stayCalcNow || snapshot?.activeStayCalc || room.stayCalcNow || baseCalc?.stayCalcNow;
       return {
         room,
         calc: {
           ...baseCalc,
           adults_male: baseCalc.adults_male ?? room.adults_male,
           adults_female: baseCalc.adults_female ?? room.adults_female,
+          adults_other: baseCalc.adults_other ?? room.adults_other,
           adultsMale: baseCalc.adultsMale ?? room.adultsMale,
           adultsFemale: baseCalc.adultsFemale ?? room.adultsFemale,
+          adultsOther: baseCalc.adultsOther ?? room.adultsOther,
           total_adults: baseCalc.total_adults ?? room.total_adults,
           totalAdults: baseCalc.totalAdults ?? room.totalAdults,
           children: baseCalc.children ?? room.children,
@@ -115,11 +119,13 @@ export default function DocumentActionModal({
     }
     // Flat booking or room object
     const room = invData;
-    const activeCalc = room.tax_invoice_snapshot?.stayCalcNow || room.stayCalcNow;
+    const rawSnap = room.tax_invoice_snapshot || room.tax_invoice_snapshot_json;
+    const snapshot = typeof rawSnap === 'string' ? JSON.parse(rawSnap) : rawSnap;
+    const activeCalc = snapshot?.stayCalcNow || snapshot?.activeStayCalc || room.stayCalcNow;
     const calc = {
       grossTariff: activeCalc?.grossTariff || room.grossTariff || room.total_room_charge || room.room_rate,
-      roomCharge: activeCalc?.baseRoomTariff || room.total_room_charge || room.room_rate,
-      baseRoomTariff: activeCalc?.baseRoomTariff ?? room.baseRoomTariff,
+      roomCharge: activeCalc?.baseRoomTariff || room.room_rate || room.total_room_charge,
+      baseRoomTariff: activeCalc?.baseRoomTariff ?? room.baseRoomTariff ?? room.room_rate,
       extraMattressCost: activeCalc?.extraMattressCost ?? room.extraMattressCost,
       extraMattressDailyRate: activeCalc?.extraMattressDailyRate,
       breakfastCost: activeCalc?.breakfastCost ?? room.breakfastCost,
@@ -143,8 +149,10 @@ export default function DocumentActionModal({
       barOrders: room.barOrders || room.bar_orders || [],
       adults_male: room.adults_male,
       adults_female: room.adults_female,
+      adults_other: room.adults_other,
       adultsMale: room.adultsMale ?? room.adults_male,
       adultsFemale: room.adultsFemale ?? room.adults_female,
+      adultsOther: room.adultsOther ?? room.adults_other,
       total_adults: room.total_adults ?? room.totalAdults,
       totalAdults: room.totalAdults ?? room.total_adults,
       children: room.children,

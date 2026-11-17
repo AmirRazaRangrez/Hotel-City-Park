@@ -1,10 +1,11 @@
 {
-  "url": "https://struggle-opens-sam-finished.trycloudflare.com",
-  "adminUrl": "https://struggle-opens-sam-finished.trycloudflare.com/admin/",
-  "crmUrl": "https://struggle-opens-sam-finished.trycloudflare.com/hospitality",
-  "restaurantUrl": "https://struggle-opens-sam-finished.trycloudflare.com/restaurant",
-  "barUrl": "https://struggle-opens-sam-finished.trycloudflare.com/bar",
-  "storeUrl": "https://struggle-opens-sam-finished.trycloudflare.com/storeman",
-  "downloadUrl": "https://struggle-opens-sam-finished.trycloudflare.com/download.html",
-  "updatedAt": "2026-11-11T05:17:11.204Z"
+  "url": "https://crm.dominal.in",
+  "adminUrl": "https://crm.dominal.in/admin/",
+  "crmUrl": "https://crm.dominal.in/hospitality",
+  "restaurantUrl": "https://crm.dominal.in/restaurant",
+  "barUrl": "https://crm.dominal.in/bar",
+  "storeUrl": "https://crm.dominal.in/storeman",
+  "waiterUrl": "https://crm.dominal.in/waiter/",
+  "downloadUrl": "https://crm.dominal.in/download.html",
+  "updatedAt": "2026-11-17T12:00:00.000Z"
 }

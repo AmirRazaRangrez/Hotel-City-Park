@@ -694,6 +694,16 @@ export default function Step6Stay({
       hasChanges = true;
     }
 
+    // 3b. If guest count fits completely within base room capacity (no extra guests), extra beds must be 0
+    if (!isOta && currentAdults <= totalBaseAdults) {
+      allRooms.forEach(r => {
+        if (cleanMap[r.id] > 0) {
+          cleanMap[r.id] = 0;
+          hasChanges = true;
+        }
+      });
+    }
+
     const totalExtraFromMap = allRooms.reduce((sum, r) => {
       return sum + (Number(cleanMap[r.id]) || 0);
     }, 0);
@@ -796,43 +806,56 @@ export default function Step6Stay({
     if (lastIdx !== -1) {
       history.splice(lastIdx, 1);
     }
-    if (type === 'male') {
-      if (maleCount <= 0) return;
-      const nextMale = maleCount - 1;
-      const nextTotal = nextMale + femaleCount;
-      const updates = {
-        adultsMale: nextMale,
-        adultsFemale: femaleCount,
-        adultHistory: history,
-        lastAddedAdultType: history[history.length - 1] || 'male'
-      };
-      if (isOta) {
-        const nextExtra = Math.max(0, nextTotal - otaBookedAdults);
-        updates.extraAdults = nextExtra;
-        updates.hasExtraPersons = nextExtra > 0;
-      }
-      updateDraft(updates);
-    } else {
-      if (femaleCount <= 0) return;
-      const nextFemale = femaleCount - 1;
-      const nextTotal = maleCount + nextFemale;
-      const updates = {
-        adultsMale: maleCount,
-        adultsFemale: nextFemale,
-        adultHistory: history,
-        lastAddedAdultType: history[history.length - 1] || 'female'
-      };
-      if (isOta) {
-        const nextExtra = Math.max(0, nextTotal - otaBookedAdults);
-        updates.extraAdults = nextExtra;
-        updates.hasExtraPersons = nextExtra > 0;
-      }
-      updateDraft(updates);
+    const isMale = type === 'male';
+    if (isMale && maleCount <= 0) return;
+    if (!isMale && femaleCount <= 0) return;
+
+    const nextMale = isMale ? maleCount - 1 : maleCount;
+    const nextFemale = isMale ? femaleCount : femaleCount - 1;
+    const nextTotal = nextMale + nextFemale;
+    const updates = {
+      adultsMale: nextMale,
+      adultsFemale: nextFemale,
+      adultHistory: history,
+      lastAddedAdultType: history[history.length - 1] || (isMale ? 'male' : 'female')
+    };
+
+    if (isOta) {
+      const nextExtra = Math.max(0, nextTotal - otaBookedAdults);
+      updates.extraAdults = nextExtra;
+      updates.hasExtraPersons = nextExtra > 0;
     }
+
+    // Auto-clean extra mattresses if new total adults fits within base capacity or requires fewer extra beds
+    const neededExtraBeds = Math.max(isOta ? (otaBookedExtraBeds || 0) : 0, Math.max(0, nextTotal - totalBaseAdults));
+    let excessBeds = currentExtraBeds - neededExtraBeds;
+    if (excessBeds > 0) {
+      const nextRoomExtraBeds = { ...(draft.roomExtraBeds || {}) };
+      for (let i = allRooms.length - 1; i >= 0 && excessBeds > 0; i--) {
+        const rId = allRooms[i].id;
+        const cur = Number(nextRoomExtraBeds[rId]) || 0;
+        if (cur > 0) {
+          const reduceBy = Math.min(cur, excessBeds);
+          nextRoomExtraBeds[rId] = cur - reduceBy;
+          excessBeds -= reduceBy;
+        }
+      }
+      updates.roomExtraBeds = nextRoomExtraBeds;
+      updates.extraBeds = neededExtraBeds;
+      if (neededExtraBeds === 0) {
+        updates._explicitExtraBed = false;
+      }
+    }
+
+    updateDraft(updates);
   };
 
   // --- Extra Bed Modal Open / Close / Confirm Handlers (Bypassed: Rates are fixed per room from Admin Panel) ---
   const handleOpenExtraBedModal = (targetRoomId, mode = 'add', pendingType = null) => {
+    if (mode === 'add' && currentAdults < totalBaseAdults) {
+      showToast(`Please fill all base beds (${totalBaseAdults} Adults) before adding an extra mattress.`, 'warning');
+      return;
+    }
     handleDirectAddExtraBed(targetRoomId);
   };
 
@@ -925,6 +948,11 @@ export default function Step6Stay({
   const handleDirectAddExtraBed = (targetRoomId) => {
     const targetRoom = allRooms.find((r) => r.id === targetRoomId) || allRooms[0];
     if (!targetRoom) return;
+
+    if (currentAdults < totalBaseAdults) {
+      showToast(`Please fill all base beds (${totalBaseAdults} Adults) before adding an extra mattress.`, 'warning');
+      return;
+    }
 
     const roomId = targetRoom.id;
     const maxB = Number(targetRoom.max_extra_beds) || 1;
@@ -1796,21 +1824,27 @@ export default function Step6Stay({
                         <button
                           type="button"
                           onClick={() => handleDirectAddExtraBed(r.id)}
-                          disabled={rExtraCount >= rExtra}
+                          disabled={rExtraCount >= rExtra || currentAdults < totalBaseAdults}
+                          title={
+                            currentAdults < totalBaseAdults
+                              ? `Fill all base beds (${totalBaseAdults} Adults) before adding an extra mattress`
+                              : (rExtraCount >= rExtra ? `Maximum extra mattress capacity reached (${rExtra})` : `Add Extra Mattress (+₹${getRoomExtraBedRate(r)})`)
+                          }
                           style={{
                             width: '28px',
                             height: '28px',
                             borderRadius: '8px',
                             border: 'none',
-                            background: rExtraCount < rExtra ? 'linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%)' : '#e2e8f0',
-                            cursor: rExtraCount < rExtra ? 'pointer' : 'not-allowed',
+                            background: (rExtraCount < rExtra && currentAdults >= totalBaseAdults) ? 'linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%)' : '#e2e8f0',
+                            cursor: (rExtraCount < rExtra && currentAdults >= totalBaseAdults) ? 'pointer' : 'not-allowed',
                             fontWeight: 900,
                             fontSize: '1.1rem',
                             display: 'inline-flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            color: rExtraCount < rExtra ? '#ffffff' : '#94a3b8',
-                            boxShadow: rExtraCount < rExtra ? '0 2px 8px rgba(139, 92, 246, 0.35)' : 'none',
+                            color: (rExtraCount < rExtra && currentAdults >= totalBaseAdults) ? '#ffffff' : '#94a3b8',
+                            boxShadow: (rExtraCount < rExtra && currentAdults >= totalBaseAdults) ? '0 2px 8px rgba(139, 92, 246, 0.35)' : 'none',
+                            opacity: (rExtraCount < rExtra && currentAdults >= totalBaseAdults) ? 1 : 0.35,
                             transition: 'all 0.15s ease'
                           }}
                         >
@@ -2290,23 +2324,24 @@ export default function Step6Stay({
 
             {/* Breakfast Option Selector */}
             <div style={{ marginTop: '14px', background: '#ffffff', borderRadius: '12px', border: '1.5px solid #e2e8f0', padding: '12px 16px' }}>
+              {/* Primary OTA Breakfast Inclusion */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '1.1rem' }}>🍳</span>
+                  <span style={{ fontSize: '1.1rem' }}>🏨</span>
                   <span style={{ fontWeight: 800, fontSize: '0.86rem', color: '#0f172a' }}>
-                    Breakfast Option
+                    OTA Room Breakfast (Voucher Included)
                   </span>
                 </div>
-                <span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 700 }}>
-                  {draft.extraMealPlan === 'with_breakfast' ? 'With Breakfast' : 'Without Breakfast'}
+                <span style={{ fontSize: '0.74rem', color: draft.mealPlan === 'with_breakfast' ? '#15803d' : '#64748b', fontWeight: 700 }}>
+                  {draft.mealPlan === 'with_breakfast' ? '🍳 With Breakfast' : '🥣 Room Only (Without Breakfast)'}
                 </span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: otaExtraAdults > 0 ? '14px' : '0' }}>
                 <button
                   type="button"
-                  onClick={() => updateDraft({ extraMealPlan: 'without_breakfast' })}
+                  onClick={() => updateDraft({ mealPlan: 'without_breakfast' })}
                   style={{
-                    padding: '10px 14px',
+                    padding: '8px 12px',
                     borderRadius: '10px',
                     cursor: 'pointer',
                     display: 'flex',
@@ -2314,21 +2349,21 @@ export default function Step6Stay({
                     justifyContent: 'center',
                     gap: '8px',
                     fontWeight: 800,
-                    fontSize: '0.86rem',
+                    fontSize: '0.84rem',
                     transition: 'all 0.2s ease',
-                    background: draft.extraMealPlan !== 'with_breakfast' ? '#eff6ff' : '#ffffff',
-                    color: draft.extraMealPlan !== 'with_breakfast' ? '#0284c7' : '#64748b',
-                    border: draft.extraMealPlan !== 'with_breakfast' ? '2px solid #0284c7' : '1.5px solid #cbd5e1'
+                    background: draft.mealPlan !== 'with_breakfast' ? '#eff6ff' : '#ffffff',
+                    color: draft.mealPlan !== 'with_breakfast' ? '#0284c7' : '#64748b',
+                    border: draft.mealPlan !== 'with_breakfast' ? '2px solid #0284c7' : '1.5px solid #cbd5e1'
                   }}
                 >
                   <span>🥣</span>
-                  <span>Without Breakfast (₹0)</span>
+                  <span>Without Breakfast</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => updateDraft({ extraMealPlan: 'with_breakfast' })}
+                  onClick={() => updateDraft({ mealPlan: 'with_breakfast' })}
                   style={{
-                    padding: '10px 14px',
+                    padding: '8px 12px',
                     borderRadius: '10px',
                     cursor: 'pointer',
                     display: 'flex',
@@ -2336,17 +2371,80 @@ export default function Step6Stay({
                     justifyContent: 'center',
                     gap: '8px',
                     fontWeight: 800,
-                    fontSize: '0.86rem',
+                    fontSize: '0.84rem',
                     transition: 'all 0.2s ease',
-                    background: draft.extraMealPlan === 'with_breakfast' ? '#fffbeb' : '#ffffff',
-                    color: draft.extraMealPlan === 'with_breakfast' ? '#d97706' : '#64748b',
-                    border: draft.extraMealPlan === 'with_breakfast' ? '2px solid #d97706' : '1.5px solid #cbd5e1'
+                    background: draft.mealPlan === 'with_breakfast' ? '#fffbeb' : '#ffffff',
+                    color: draft.mealPlan === 'with_breakfast' ? '#d97706' : '#64748b',
+                    border: draft.mealPlan === 'with_breakfast' ? '2px solid #d97706' : '1.5px solid #cbd5e1'
                   }}
                 >
                   <span>🍳</span>
-                  <span>With Breakfast (+₹{breakfastRate} / 24 hrs)</span>
+                  <span>With Breakfast (Voucher)</span>
                 </button>
               </div>
+
+              {/* Extra Member Breakfast (Only shown if extra adults present) */}
+              {otaExtraAdults > 0 && (
+                <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '10px', marginTop: '4px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '1.05rem' }}>👥</span>
+                      <span style={{ fontWeight: 800, fontSize: '0.84rem', color: '#0369a1' }}>
+                        Hotel Extra Person Breakfast ({otaExtraAdults} Extra Guest{otaExtraAdults > 1 ? 's' : ''})
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 700 }}>
+                      {draft.extraMealPlan === 'with_breakfast' ? `+₹${breakfastRate * otaExtraAdults * nights}` : '₹0 (No Breakfast)'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => updateDraft({ extraMealPlan: 'without_breakfast' })}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '10px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        fontWeight: 800,
+                        fontSize: '0.84rem',
+                        transition: 'all 0.2s ease',
+                        background: draft.extraMealPlan !== 'with_breakfast' ? '#eff6ff' : '#ffffff',
+                        color: draft.extraMealPlan !== 'with_breakfast' ? '#0284c7' : '#64748b',
+                        border: draft.extraMealPlan !== 'with_breakfast' ? '2px solid #0284c7' : '1.5px solid #cbd5e1'
+                      }}
+                    >
+                      <span>🥣</span>
+                      <span>Without Breakfast (₹0)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateDraft({ extraMealPlan: 'with_breakfast' })}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '10px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        fontWeight: 800,
+                        fontSize: '0.84rem',
+                        transition: 'all 0.2s ease',
+                        background: draft.extraMealPlan === 'with_breakfast' ? '#fffbeb' : '#ffffff',
+                        color: draft.extraMealPlan === 'with_breakfast' ? '#d97706' : '#64748b',
+                        border: draft.extraMealPlan === 'with_breakfast' ? '2px solid #d97706' : '1.5px solid #cbd5e1'
+                      }}
+                    >
+                      <span>🍳</span>
+                      <span>With Breakfast (+₹{breakfastRate} / 24 hrs)</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2798,23 +2896,28 @@ export default function Step6Stay({
                         <button
                           type="button"
                           onClick={() => handleDirectAddExtraBed(r.id)}
-                          disabled={rExtraCount >= rExtra}
+                          disabled={rExtraCount >= rExtra || currentAdults < totalBaseAdults}
+                          title={
+                            currentAdults < totalBaseAdults
+                              ? `Fill all base beds (${totalBaseAdults} Adults) before adding an extra mattress`
+                              : (rExtraCount >= rExtra ? `Maximum extra mattress capacity reached (${rExtra})` : `Add Extra Mattress (+₹${getRoomExtraBedRate(r)})`)
+                          }
                           style={{
                             width: '28px',
                             height: '28px',
                             borderRadius: '8px',
                             border: '1px solid var(--border-color)',
                             background: 'var(--bg-surface)',
-                            cursor: rExtraCount < rExtra ? 'pointer' : 'not-allowed',
+                            cursor: (rExtraCount < rExtra && currentAdults >= totalBaseAdults) ? 'pointer' : 'not-allowed',
                             fontWeight: 900,
                             fontSize: '1.1rem',
                             display: 'inline-flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            color: rExtraCount < rExtra ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                            opacity: rExtraCount < rExtra ? 1 : 0.45,
+                            color: (rExtraCount < rExtra && currentAdults >= totalBaseAdults) ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                            opacity: (rExtraCount < rExtra && currentAdults >= totalBaseAdults) ? 1 : 0.35,
                             transition: 'all 0.15s ease',
-                            boxShadow: rExtraCount < rExtra ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
+                            boxShadow: (rExtraCount < rExtra && currentAdults >= totalBaseAdults) ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
                           }}
                         >
                           +
@@ -3230,7 +3333,8 @@ export default function Step6Stay({
 
                 <div style={{ position: 'relative', zIndex: 1, marginTop: '8px', textAlign: 'center', fontSize: '0.76rem', fontWeight: 750, color: currentAdults === 0 ? '#b45309' : currentAdults > totalMaxCapacity ? '#dc2626' : currentAdults === totalMaxCapacity ? '#15803d' : '#166534' }}>
                   {currentAdults === 0 && '⚠️ Please add at least 1 adult guest using + above'}
-                  {currentAdults > 0 && currentAdults <= totalBaseAdults && `✓ ${totalBaseAdults - currentAdults} base bed${totalBaseAdults - currentAdults > 1 ? 's' : ''} available (${currentAdults}/${totalBaseAdults} Base)`}
+                  {currentAdults > 0 && currentAdults < totalBaseAdults && `✓ ${totalBaseAdults - currentAdults} base bed${totalBaseAdults - currentAdults > 1 ? 's' : ''} available (${currentAdults}/${totalBaseAdults} Base) • Extra mattress locked until base beds are full`}
+                  {currentAdults === totalBaseAdults && `✓ All ${totalBaseAdults} base beds filled (${currentAdults}/${totalBaseAdults} Base) • Extra mattress unlocked`}
                   {currentAdults > totalBaseAdults && currentAdults < totalMaxCapacity && `✓ All ${totalBaseAdults} base beds used • ${totalMaxCapacity - currentAdults} extra mattress spot${totalMaxCapacity - currentAdults > 1 ? 's' : ''} available`}
                   {currentAdults === totalMaxCapacity && `✓ 100% Full Room Capacity (${currentAdults}/${totalMaxCapacity} Persons Allocated)`}
                   {currentAdults > totalMaxCapacity && `⚠️ Exceeds capacity by +${currentAdults - totalMaxCapacity} guest${currentAdults - totalMaxCapacity > 1 ? 's' : ''}`}
@@ -4145,14 +4249,16 @@ export default function Step6Stay({
                     <span>🏨</span> Room Tariff Subtotal ({allRooms.length} {allRooms.length > 1 ? 'Rooms' : 'Room'} × {nights === 1 ? '24 Hours' : `${nights * 24} Hours (${nights} × 24 hrs)`})
                   </div>
                   <div className="summary-row-desc">
-                    Base: ₹{roomGrossTariff.toLocaleString('en-IN')} (₹{basePrice.toLocaleString('en-IN')} for 24 hours × {nights})
+                    {isOta
+                      ? `Entered Tariff (Incl. 5% GST): ₹${roomGrossTariff.toLocaleString('en-IN')} • Base: ₹${roomNetBaseTariff.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : `Base: ₹${roomGrossTariff.toLocaleString('en-IN')} (₹${basePrice.toLocaleString('en-IN')} for 24 hours × ${nights})`}
                     {effectiveDiscountPct > 0 && (
                       <span className="discount-tag">
                         {' • '}Less {effectiveDiscountPct}% Discount (-₹{roomDiscountAmt.toLocaleString('en-IN')})
                       </span>
                     )}
                     <span className="gst-tag">
-                      {' • '}Room GST ({isOta ? otaGstRate : effectiveGstPct}%{isOta ? ' Included' : ''}): +₹{roomGstAmt.toLocaleString('en-IN')}
+                      {' • '}Room GST ({isOta ? otaGstRate : effectiveGstPct}%{isOta ? ' Included' : ''}): +₹{roomGstAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                 </div>
@@ -4161,7 +4267,7 @@ export default function Step6Stay({
                     ₹{roomTariffSubtotal.toLocaleString('en-IN')}
                   </div>
                   <div className="summary-row-breakdown">
-                    Base: ₹{roomNetBaseTariff.toLocaleString('en-IN')} + GST: ₹{roomGstAmt.toLocaleString('en-IN')}{isOta ? ' (Included)' : ''}
+                    Base: ₹{roomNetBaseTariff.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + GST: ₹{roomGstAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{isOta ? ' (Included)' : ''}
                   </div>
                 </div>
               </div>

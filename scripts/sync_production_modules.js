@@ -61,11 +61,13 @@ for (const entry of entries) {
   const destPath = path.join(targetNodeModules, name);
 
   if (entry.isDirectory()) {
-    if (!fs.existsSync(destPath)) {
+    const hasPackageJson = fs.existsSync(path.join(destPath, 'package.json'));
+    // Always sync if package does not exist, or missing package.json, or specifically better-sqlite3
+    if (!fs.existsSync(destPath) || !hasPackageJson || name === 'better-sqlite3') {
       copyDirRecursive(srcPath, destPath);
       copiedCount++;
       if (copiedCount % 20 === 0) {
-        console.log(`  ... copied ${copiedCount} missing module packages`);
+        console.log(`  ... copied ${copiedCount} module packages`);
       }
     } else if (name.startsWith('@')) {
       // For scope packages (@google-cloud, @grpc, etc.), ensure all subpackages exist
@@ -73,7 +75,8 @@ for (const entry of entries) {
       for (const sub of subEntries) {
         if (sub.isDirectory()) {
           const subDest = path.join(destPath, sub.name);
-          if (!fs.existsSync(subDest)) {
+          const subHasPkg = fs.existsSync(path.join(subDest, 'package.json'));
+          if (!fs.existsSync(subDest) || !subHasPkg) {
             copyDirRecursive(path.join(srcPath, sub.name), subDest);
             copiedCount++;
           }

@@ -1728,7 +1728,9 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                   <button
                     type="button"
                     onClick={() => {
-                      const activeCalc = detailBooking.tax_invoice_snapshot?.stayCalcNow || detailBooking.stayCalcNow;
+                      const rawSnap = detailBooking.tax_invoice_snapshot || detailBooking.tax_invoice_snapshot_json;
+                      const snapshot = typeof rawSnap === 'string' ? JSON.parse(rawSnap) : rawSnap;
+                      const activeCalc = snapshot?.stayCalcNow || snapshot?.activeStayCalc || detailBooking.stayCalcNow;
                       setDocActionModal({
                         isOpen: true,
                         type: 'invoice',
@@ -1759,8 +1761,10 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                             stayCalcDeclared: detailBooking.stayCalcDeclared || detailBooking.tax_invoice_snapshot?.stayCalcDeclared || null,
                             adults_male: detailBooking.adults_male ?? detailBooking.adultsMale,
                             adults_female: detailBooking.adults_female ?? detailBooking.adultsFemale,
+                            adults_other: detailBooking.adults_other ?? detailBooking.adultsOther ?? 0,
                             adultsMale: detailBooking.adultsMale ?? detailBooking.adults_male,
                             adultsFemale: detailBooking.adultsFemale ?? detailBooking.adults_female,
+                            adultsOther: detailBooking.adultsOther ?? detailBooking.adults_other ?? 0,
                             total_adults: detailBooking.total_adults ?? detailBooking.totalAdults,
                             totalAdults: detailBooking.totalAdults ?? detailBooking.total_adults,
                             children: detailBooking.children,
@@ -3306,24 +3310,13 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                       >
                         📑 Activities Summary
                       </button>
-                      {isDetailBtcPending ? (
-                        <button
-                          type="button"
-                          className="filter-chip"
-                          onClick={() => {
-                            showToast('⚠️ Payment is pending from company. Settle BTC payment first to release official Tax Invoice.', 'amber', 5000);
-                          }}
-                          style={{ fontWeight: 800, padding: '8px 14px', fontSize: '0.85rem', background: '#f8fafc', color: '#94a3b8', borderColor: '#cbd5e1', cursor: 'not-allowed' }}
-                          title="Tax invoice locked: Payment is pending from company. Settle BTC payment first to release Tax Invoice."
-                        >
-                          🔒 Tax Invoice (Pending Company Payment)
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="filter-chip"
-                          onClick={() => {
-                            const activeCalc = detailBooking.tax_invoice_snapshot?.stayCalcNow || detailBooking.stayCalcNow;
+                      <button
+                        type="button"
+                        className="filter-chip"
+                        onClick={() => {
+                            const rawSnap = detailBooking.tax_invoice_snapshot || detailBooking.tax_invoice_snapshot_json;
+                            const snapshot = typeof rawSnap === 'string' ? JSON.parse(rawSnap) : rawSnap;
+                            const activeCalc = snapshot?.stayCalcNow || snapshot?.activeStayCalc || detailBooking.stayCalcNow;
                             setDocActionModal({
                               isOpen: true,
                               type: 'invoice',
@@ -3354,8 +3347,10 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                                   stayCalcDeclared: detailBooking.stayCalcDeclared || detailBooking.tax_invoice_snapshot?.stayCalcDeclared || null,
                                   adults_male: detailBooking.adults_male ?? detailBooking.adultsMale,
                                   adults_female: detailBooking.adults_female ?? detailBooking.adultsFemale,
+                                  adults_other: detailBooking.adults_other ?? detailBooking.adultsOther ?? 0,
                                   adultsMale: detailBooking.adultsMale ?? detailBooking.adults_male,
                                   adultsFemale: detailBooking.adultsFemale ?? detailBooking.adults_female,
+                                  adultsOther: detailBooking.adultsOther ?? detailBooking.adults_other ?? 0,
                                   total_adults: detailBooking.total_adults ?? detailBooking.totalAdults,
                                   totalAdults: detailBooking.totalAdults ?? detailBooking.total_adults,
                                   children: detailBooking.children,
@@ -3388,7 +3383,6 @@ export default function HospitalityHistory({ onViewDetail, onChangePaymentStatus
                         >
                           🧾 Tax Invoice
                         </button>
-                      )}
                     </div>
                   );
                 })()}

@@ -11,6 +11,82 @@ import { ExpenseCategoriesMasterContent } from '../components/common/ExpenseCate
 import { blockNonNumericKeys, sanitizePhoneInput, blockNumericKeys, sanitizeNameInput } from '../utils/inputEnhancements';
 import { printAccountingAnalysisReport, exportAccountingAnalysisToExcel, exportAccountingAnalysisToCsv, generateAccountingAnalysisExcelXml } from '../services/printService';
 
+function OutletBillTable({ title, bills, summary, placeLabel, isBar }) {
+  const rows = Array.isArray(bills) ? bills : [];
+  return (
+    <div style={{ background: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: '14px', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 16px', fontWeight: 800, color: '#0f172a' }}>{title}</div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
+          <thead>
+            <tr style={{ background: '#1e293b', color: '#ffffff', textAlign: 'left' }}>
+              <th style={{ padding: '10px 12px' }}>Date</th>
+              <th style={{ padding: '10px 12px' }}>Bill number</th>
+              <th style={{ padding: '10px 12px' }}>{placeLabel}</th>
+              <th style={{ padding: '10px 12px' }}>Customer name</th>
+              <th style={{ padding: '10px 12px' }}>Captain name</th>
+              <th style={{ padding: '10px 12px', textAlign: 'right' }}>Subtotal</th>
+              <th style={{ padding: '10px 12px', textAlign: 'right' }}>Discount</th>
+              {isBar ? (
+                <th style={{ padding: '10px 12px', textAlign: 'right' }}>VAT</th>
+              ) : (
+                <>
+                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>CGST</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>SGST</th>
+                </>
+              )}
+              <th style={{ padding: '10px 12px', textAlign: 'right' }}>Round-off</th>
+              <th style={{ padding: '10px 12px', textAlign: 'right' }}>Bill total</th>
+              <th style={{ padding: '10px 12px' }}>Payment mode</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={isBar ? 10 : 11} style={{ padding: '22px', textAlign: 'center', color: '#64748b' }}>No bills in this period.</td>
+              </tr>
+            ) : rows.map((bill, idx) => (
+              <tr key={bill.bill_no || idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                <td style={{ padding: '10px 12px' }}>{bill.date}</td>
+                <td style={{ padding: '10px 12px', fontFamily: 'monospace' }}>{bill.bill_no}</td>
+                <td style={{ padding: '10px 12px' }}>{bill.place || '-'}</td>
+                <td style={{ padding: '10px 12px' }}>{bill.customer_name || '-'}</td>
+                <td style={{ padding: '10px 12px' }}>{bill.captain_name || '-'}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(bill.subtotal || 0)}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(bill.discount || 0)}</td>
+                {isBar ? (
+                  <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(bill.vat || 0)}</td>
+                ) : (
+                  <>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(bill.cgst || 0)}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(bill.sgst || 0)}</td>
+                  </>
+                )}
+                <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(bill.round_off || 0)}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>{formatCurrency(bill.bill_total || 0)}</td>
+                <td style={{ padding: '10px 12px' }}>{bill.payment_mode || '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+          {rows.length > 0 && (
+            <tfoot>
+              <tr style={{ background: '#f1f5f9', fontWeight: 800 }}>
+                <td colSpan={5} style={{ padding: '12px', textAlign: 'right' }}>TOTAL ({summary?.count || rows.length})</td>
+                <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(summary?.subtotal || 0)}</td>
+                <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(summary?.discount || 0)}</td>
+                <td colSpan={isBar ? 1 : 2} style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(summary?.tax || 0)}</td>
+                <td></td>
+                <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(summary?.total || 0)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function ManagePage({ onPrintClosingReport }) {
   const {
     currentUser,
@@ -42,9 +118,15 @@ export default function ManagePage({ onPrintClosingReport }) {
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsFromDate, setAnalyticsFromDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [analyticsToDate, setAnalyticsToDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [analyticsFromBillNo, setAnalyticsFromBillNo] = useState('');
+  const [analyticsToBillNo, setAnalyticsToBillNo] = useState('');
 
   // Accounting & Analysis state
   const [accountingRecords, setAccountingRecords] = useState([]);
+  const [restaurantBills, setRestaurantBills] = useState([]);
+  const [barBills, setBarBills] = useState([]);
+  const [restaurantSummary, setRestaurantSummary] = useState({});
+  const [barSummary, setBarSummary] = useState({});
   const [accountingSummary, setAccountingSummary] = useState({});
   const [isLoadingAccounting, setIsLoadingAccounting] = useState(false);
   const [accountingFromDate, setAccountingFromDate] = useState(() => {
@@ -303,11 +385,16 @@ export default function ManagePage({ onPrintClosingReport }) {
   }, [minCheckinAdvancePct]);
 
   // Loaders
-  const loadAnalytics = useCallback(async (fromDateStr, toDateStr) => {
+  const loadAnalytics = useCallback(async (fromDateStr, toDateStr, fromBillStr, toBillStr) => {
     try {
       const from = fromDateStr || analyticsFromDate;
       const to = toDateStr || analyticsToDate;
-      const res = await api.get(`/manager/analytics?startDate=${from}&endDate=${to}`);
+      const fBill = fromBillStr !== undefined ? fromBillStr : analyticsFromBillNo;
+      const tBill = toBillStr !== undefined ? toBillStr : analyticsToBillNo;
+      let url = `/manager/analytics?startDate=${from}&endDate=${to}`;
+      if (fBill) url += `&fromBillNo=${encodeURIComponent(fBill)}`;
+      if (tBill) url += `&toBillNo=${encodeURIComponent(tBill)}`;
+      const res = await api.get(url);
       const s = res?.stats || {};
       const an = res?.analytics || {};
       const normalized = {
@@ -453,9 +540,17 @@ export default function ManagePage({ onPrintClosingReport }) {
       const res = await api.getAccountingAnalysis(params);
       if (res && res.success) {
         setAccountingRecords(res.records || []);
+        setRestaurantBills(res.restaurant_bills || []);
+        setBarBills(res.bar_bills || []);
+        setRestaurantSummary(res.restaurant_summary || {});
+        setBarSummary(res.bar_summary || {});
         setAccountingSummary(res.summary || {});
       } else {
         setAccountingRecords([]);
+        setRestaurantBills([]);
+        setBarBills([]);
+        setRestaurantSummary({});
+        setBarSummary({});
         setAccountingSummary({});
       }
     } catch (err) {
@@ -516,7 +611,9 @@ export default function ManagePage({ onPrintClosingReport }) {
         fromVoucherNo: accountingFromVoucher,
         toVoucherNo: accountingToVoucher,
                   taxType: accountingTaxType,
-                  isIgst: isIgstSelected
+                  isIgst: isIgstSelected,
+                  restaurantBills,
+                  barBills
                 });
 
       // 2. Prepare email subject and summary body
@@ -524,12 +621,15 @@ export default function ManagePage({ onPrintClosingReport }) {
       const netTotal = Number(accountingSummary.total_grand || accountingSummary.total_room_rent_base || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
       const roomRent = Number(accountingSummary.total_room_rent_base || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
       const extraMattress = Number(accountingSummary.total_extra_mattress || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
-      const extraBreakfast = Number(accountingSummary.total_visitor_breakfast || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+      const planBreakfast = Number(accountingSummary.total_plan_breakfast || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+      const otaExtraBreakfast = Number(accountingSummary.total_ota_extra_breakfast || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+      const visitorBreakfast = Number(accountingSummary.total_visitor_breakfast || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+      const totalBreakfast = Number(accountingSummary.total_breakfast || accountingSummary.total_visitor_breakfast || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
       const discount = Number(accountingSummary.total_discount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
       const totalTax = Number(accountingSummary.total_cgst_sgst || ((accountingSummary.total_cgst || 0) + (accountingSummary.total_sgst || 0))).toLocaleString('en-IN', { minimumFractionDigits: 2 });
 
       const subject = `Hotel City Park - Accounting & Analysis Audit (${fromDt} to ${toDt})`;
-      const body = `Hello,\n\nPlease find attached the Accounting & Analysis Audit Excel report for the period ${fromDt} to ${toDt}.\n\n--- Financial Summary ---\n• Total Invoices / Bills: ${totalBills}\n• Room Rent (Base): ₹${roomRent}\n• Extra Mattress (PAX): ₹${extraMattress}\n• Visitors Extra Breakfast: ₹${extraBreakfast}\n• Discounts Applied: -₹${discount}\n• CGST & SGST (5%): ₹${totalTax}\n• Net Payable Total: ₹${netTotal}\n\n(The Excel file "${filename}" has been downloaded to your computer — please attach it to this email and click Send)\n\nBest regards,\nHotel City Park Management Suite\nSolapur`;
+      const body = `Hello,\n\nPlease find attached the Accounting & Analysis Audit Excel report for the period ${fromDt} to ${toDt}.\n\n--- Financial Summary ---\n• Total Invoices / Bills: ${totalBills}\n• Room Rent (Base): ₹${roomRent}\n• Extra Mattress (PAX): ₹${extraMattress}\n• Breakfast Plan (Base): ₹${planBreakfast}\n• OTA Extra Member Breakfast: ₹${otaExtraBreakfast}\n• Visitors Breakfast: ₹${visitorBreakfast}\n• Total Breakfast (Base): ₹${totalBreakfast}\n• Discounts Applied: -₹${discount}\n• CGST & SGST (5%): ₹${totalTax}\n• Net Payable Total: ₹${netTotal}\n\n(The Excel file "${filename}" has been downloaded to your computer — please attach it to this email and click Send)\n\nBest regards,\nHotel City Park Management Suite\nSolapur`;
 
       // 3. Open Gmail web composer if Gmail or default mail client
       if (targetEmail.toLowerCase().includes('@gmail.com')) {
@@ -1695,7 +1795,42 @@ export default function ManagePage({ onPrintClosingReport }) {
                 </div>
               </div>
 
-              {/* Quick Presets */}
+              {/* Bill No / Invoice No Range Filter */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#64748b' }}>Bill / Inv:</span>
+                <input
+                  type="text"
+                  placeholder="From Bill #"
+                  value={analyticsFromBillNo}
+                  onChange={(e) => setAnalyticsFromBillNo(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') loadAnalytics(analyticsFromDate, analyticsToDate, e.target.value, analyticsToBillNo);
+                  }}
+                  style={{ width: '105px', height: '34px', fontSize: '0.80rem', padding: '0 8px', borderRadius: '7px', border: '1.5px solid #cbd5e1', fontWeight: 600, color: '#0f172a' }}
+                />
+                <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>-</span>
+                <input
+                  type="text"
+                  placeholder="To Bill #"
+                  value={analyticsToBillNo}
+                  onChange={(e) => setAnalyticsToBillNo(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') loadAnalytics(analyticsFromDate, analyticsToDate, analyticsFromBillNo, e.target.value);
+                  }}
+                  style={{ width: '105px', height: '34px', fontSize: '0.80rem', padding: '0 8px', borderRadius: '7px', border: '1.5px solid #cbd5e1', fontWeight: 600, color: '#0f172a' }}
+                />
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => loadAnalytics(analyticsFromDate, analyticsToDate, analyticsFromBillNo, analyticsToBillNo)}
+                  style={{ height: '34px', padding: '0 10px', fontSize: '0.78rem', fontWeight: 800 }}
+                  title="Filter analytics by bill/invoice number range"
+                >
+                  Apply
+                </button>
+              </div>
+
+              {/* Quick Presets: Day, Week, Month, Year */}
               <button
                 type="button"
                 className="btn-secondary"
@@ -1703,29 +1838,12 @@ export default function ManagePage({ onPrintClosingReport }) {
                   const today = new Date().toISOString().slice(0, 10);
                   setAnalyticsFromDate(today);
                   setAnalyticsToDate(today);
-                  loadAnalytics(today, today);
+                  loadAnalytics(today, today, analyticsFromBillNo, analyticsToBillNo);
                 }}
                 style={{ fontWeight: 800, height: '38px', padding: '0 12px', fontSize: '0.82rem' }}
                 title="View today's financial audit"
               >
-                Today
-              </button>
-
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => {
-                  const y = new Date();
-                  y.setDate(y.getDate() - 1);
-                  const yStr = y.toISOString().slice(0, 10);
-                  setAnalyticsFromDate(yStr);
-                  setAnalyticsToDate(yStr);
-                  loadAnalytics(yStr, yStr);
-                }}
-                style={{ fontWeight: 800, height: '38px', padding: '0 12px', fontSize: '0.82rem' }}
-                title="View yesterday's audit"
-              >
-                Yesterday
+                Day
               </button>
 
               <button
@@ -1739,12 +1857,12 @@ export default function ManagePage({ onPrintClosingReport }) {
                   const eStr = end.toISOString().slice(0, 10);
                   setAnalyticsFromDate(sStr);
                   setAnalyticsToDate(eStr);
-                  loadAnalytics(sStr, eStr);
+                  loadAnalytics(sStr, eStr, analyticsFromBillNo, analyticsToBillNo);
                 }}
                 style={{ fontWeight: 800, height: '38px', padding: '0 12px', fontSize: '0.82rem' }}
-                title="View last 7 days audit"
+                title="View last 7 days (Week) audit"
               >
-                Last 7 Days
+                Week
               </button>
 
               <button
@@ -1756,12 +1874,29 @@ export default function ManagePage({ onPrintClosingReport }) {
                   const eStr = now.toISOString().slice(0, 10);
                   setAnalyticsFromDate(sStr);
                   setAnalyticsToDate(eStr);
-                  loadAnalytics(sStr, eStr);
+                  loadAnalytics(sStr, eStr, analyticsFromBillNo, analyticsToBillNo);
                 }}
                 style={{ fontWeight: 800, height: '38px', padding: '0 12px', fontSize: '0.82rem' }}
                 title="View this month's audit"
               >
-                This Month
+                Month
+              </button>
+
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  const now = new Date();
+                  const sStr = new Date(now.getFullYear(), 0, 1).toISOString().slice(0, 10);
+                  const eStr = now.toISOString().slice(0, 10);
+                  setAnalyticsFromDate(sStr);
+                  setAnalyticsToDate(eStr);
+                  loadAnalytics(sStr, eStr, analyticsFromBillNo, analyticsToBillNo);
+                }}
+                style={{ fontWeight: 800, height: '38px', padding: '0 12px', fontSize: '0.82rem' }}
+                title="View annual (Year) audit"
+              >
+                Year
               </button>
 
               {/* Option to calculate IGST vs CGST+SGST in Daily Closing */}
@@ -2913,6 +3048,8 @@ export default function ManagePage({ onPrintClosingReport }) {
                 className="btn-secondary"
                 id="btn-accounting-download-excel"
                 onClick={() => exportAccountingAnalysisToExcel(accountingRecords, accountingSummary, {
+                  restaurantBills,
+                  barBills,
                   fromDate: accountingFromDate,
                   toDate: accountingToDate,
                   fromBillNo: accountingFromBill,
@@ -2931,7 +3068,7 @@ export default function ManagePage({ onPrintClosingReport }) {
                 type="button"
                 className="btn-secondary"
                 id="btn-accounting-download-csv"
-                onClick={() => exportAccountingAnalysisToCsv(accountingRecords, accountingSummary, { taxType: accountingTaxType, isIgst: isIgstSelected })}
+                onClick={() => exportAccountingAnalysisToCsv(accountingRecords, accountingSummary, { taxType: accountingTaxType, isIgst: isIgstSelected, restaurantBills, barBills })}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 750, fontSize: '0.84rem', padding: '8px 14px', borderRadius: '10px' }}
                 title="Download CSV spreadsheet"
               >
@@ -3276,11 +3413,45 @@ export default function ManagePage({ onPrintClosingReport }) {
             </div>
 
             <div style={{ background: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: '12px', padding: '14px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#d97706', textTransform: 'uppercase' }}>Visitors extra Breakfast (Base)</div>
+              <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#d97706', textTransform: 'uppercase' }}>Total Breakfast (Base)</div>
               <div style={{ fontSize: '1.45rem', fontWeight: 900, color: '#b45309', margin: '4px 0 2px' }}>
-                {formatCurrency(accountingSummary.total_visitor_breakfast || 0)}
+                {formatCurrency(accountingSummary.total_breakfast ?? accountingSummary.total_visitor_breakfast ?? 0)}
               </div>
-              <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Extra Breakfast Base</div>
+              <div style={{ fontSize: '0.68rem', color: '#64748b', display: 'flex', gap: '5px', flexWrap: 'wrap', lineHeight: 1.2 }}>
+                <span>Plan: <strong>{formatCurrency(accountingSummary.total_plan_breakfast || 0)}</strong></span>
+                <span>•</span>
+                <span>OTA Extra: <strong style={{ color: '#d97706' }}>{formatCurrency(accountingSummary.total_ota_extra_breakfast || 0)}</strong></span>
+                {(accountingSummary.total_visitor_breakfast || 0) > 0 && (
+                  <>
+                    <span>•</span>
+                    <span>Visitors: <strong>{formatCurrency(accountingSummary.total_visitor_breakfast || 0)}</strong></span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div style={{ background: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: '12px', padding: '14px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#ea580c', textTransform: 'uppercase' }}>Extra Expenses (Base)</div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 900, color: '#c2410c', margin: '4px 0 2px' }}>
+                {formatCurrency(accountingSummary.total_extra_expenses || 0)}
+              </div>
+              <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Damages &amp; Sundry Base</div>
+            </div>
+
+            <div style={{ background: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: '12px', padding: '14px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#dc2626', textTransform: 'uppercase' }}>Total Discount</div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 900, color: '#b91c1c', margin: '4px 0 2px' }}>
+                {formatCurrency(accountingSummary.total_discount || 0)}
+              </div>
+              <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Check-in &amp; C/O Discount</div>
+            </div>
+
+            <div style={{ background: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: '12px', padding: '14px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#be123c', textTransform: 'uppercase' }}>Other Discount (C/O)</div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 900, color: '#e11d48', margin: '4px 0 2px' }}>
+                {formatCurrency(accountingSummary.total_other_discount || accountingSummary.total_checkout_discount || 0)}
+              </div>
+              <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Checkout Discounts</div>
             </div>
 
             <div style={{ background: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: '12px', padding: '14px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
@@ -3307,20 +3478,33 @@ export default function ManagePage({ onPrintClosingReport }) {
           {/* Audit Table with the 13 Columns */}
           <div style={{ background: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
             <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 280px)', width: '100%' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }} id="table-accounting-analysis">
+              <table style={{ width: '100%', minWidth: '1750px', borderCollapse: 'collapse', fontSize: '0.84rem' }} id="table-accounting-analysis">
                 <thead>
                   <tr style={{ background: '#1e293b', color: '#ffffff', textAlign: 'left' }}>
                     <th style={{ padding: '11px 12px', fontWeight: 750, whiteSpace: 'nowrap' }}>C/O</th>
                     <th style={{ padding: '11px 12px', fontWeight: 750, whiteSpace: 'nowrap' }}>Bill No</th>
                     <th style={{ padding: '11px 12px', fontWeight: 750, whiteSpace: 'nowrap' }}>Invoice number</th>
-                    <th style={{ padding: '11px 14px', fontWeight: 750 }}>Name of customer</th>
+                    <th style={{ padding: '11px 14px', fontWeight: 750, minWidth: '190px', whiteSpace: 'nowrap' }}>Name of customer</th>
                     <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>Room rent (base)</th>
                     <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>Extra mattress (PAX)(base)</th>
-                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>Visitors extra Breakfast (Base)</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }} title="Breakfast plan included in room stay">Breakfast Plan (Base)</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }} title="Extra member breakfast charged at desk for OTA bookings">OTA Extra Breakfast (Base)</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }} title="Breakfast for external visitors">Visitors extra Breakfast (Base)</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>Expenses (Base)</th>
                     <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>Discount</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>Other Discount</th>
                     <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>CGST</th>
                     <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>SGST</th>
                     <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>IGST</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>F&amp;B taxable</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>F&amp;B CGST</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>F&amp;B SGST</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>F&amp;B IGST</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>F&amp;B total</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>Round-off</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'right', whiteSpace: 'nowrap' }}>Invoice total</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, whiteSpace: 'nowrap' }}>Room</th>
+                    <th style={{ padding: '11px 12px', fontWeight: 750, whiteSpace: 'nowrap' }}>BTC status</th>
                     <th style={{ padding: '11px 14px', fontWeight: 750 }}>Name Of Company</th>
                     <th style={{ padding: '11px 12px', fontWeight: 750, textAlign: 'center', whiteSpace: 'nowrap' }}>GST No of Company</th>
                   </tr>
@@ -3328,14 +3512,14 @@ export default function ManagePage({ onPrintClosingReport }) {
                 <tbody>
                   {isLoadingAccounting ? (
                     <tr>
-                      <td colSpan={13} style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
+                      <td colSpan={15} style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
                         <div style={{ display: 'inline-block', width: '26px', height: '26px', border: '3px solid #cbd5e1', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '8px' }}></div>
                         <div style={{ fontWeight: 600 }}>Loading accounting &amp; analysis records...</div>
                       </td>
                     </tr>
                   ) : accountingRecords.length === 0 ? (
                     <tr>
-                      <td colSpan={13} style={{ padding: '44px 20px', textAlign: 'center', color: '#64748b' }}>
+                      <td colSpan={15} style={{ padding: '44px 20px', textAlign: 'center', color: '#64748b' }}>
                         <div style={{ fontSize: '2rem', marginBottom: '8px' }}>📑</div>
                         <div style={{ fontWeight: 750, fontSize: '0.96rem', color: '#334155' }}>No Accounting Records Found</div>
                         <div style={{ fontSize: '0.82rem', marginTop: '4px' }}>Try widening your date range or clearing the filter inputs.</div>
@@ -3344,99 +3528,186 @@ export default function ManagePage({ onPrintClosingReport }) {
                   ) : (
                     accountingRecords.map((r, idx) => {
                       const isEven = idx % 2 === 0;
+                      const isUnpaidBtc = Boolean(r.is_unpaid_btc || (r.is_btc && (!r.total_paid || r.total_paid <= 0)));
+                      const isPartialBtc = Boolean(r.is_partially_paid_btc);
+                      const rowColor = isUnpaidBtc ? '#dc2626' : undefined;
+                      const rowBg = isUnpaidBtc ? '#fef2f2' : (isEven ? '#ffffff' : '#f8fafc');
+
                       return (
                         <tr
                           key={r.id || idx}
                           style={{
-                            backgroundColor: isEven ? '#ffffff' : '#f8fafc',
-                            borderBottom: '1px solid #e2e8f0',
+                            backgroundColor: rowBg,
+                            color: rowColor,
+                            fontWeight: isUnpaidBtc ? 700 : undefined,
+                            borderBottom: isUnpaidBtc ? '1.5px solid #fecaca' : '1px solid #e2e8f0',
                             transition: 'background-color 0.15s ease'
                           }}
-                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f1f5f9'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = isEven ? '#ffffff' : '#f8fafc'; }}
+                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isUnpaidBtc ? '#fee2e2' : '#f1f5f9'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = rowBg; }}
                         >
                           {/* 1. Date of checkout */}
-                          <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', fontWeight: 600, color: '#334155' }}>
+                          <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', fontWeight: 600, color: isUnpaidBtc ? '#dc2626' : '#334155' }}>
                             {r.date_of_checkout}
                           </td>
 
                           {/* 2. Bill No */}
                           <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                            <span style={{ background: '#f1f5f9', color: '#0f172a', padding: '3px 8px', borderRadius: '6px', fontWeight: 750, fontFamily: 'monospace', fontSize: '0.82rem', border: '1px solid #cbd5e1' }}>
+                            <span style={{ background: isUnpaidBtc ? '#fee2e2' : '#f1f5f9', color: isUnpaidBtc ? '#b91c1c' : '#0f172a', padding: '3px 8px', borderRadius: '6px', fontWeight: 750, fontFamily: 'monospace', fontSize: '0.82rem', border: isUnpaidBtc ? '1px solid #f87171' : '1px solid #cbd5e1' }}>
                               {r.voucher_no || r.bill_no || '-'}
                             </span>
                           </td>
 
                           {/* 3. Invoice number (HCP..) */}
                           <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                            <span style={{ color: '#1e3a8a', fontWeight: 750, fontFamily: 'monospace', fontSize: '0.82rem' }}>
-                              {formatTaxInvoiceNumber(r.invoice_number || r.voucher_no || r.bill_no)}
+                            <span style={{ color: isUnpaidBtc ? '#dc2626' : '#1e3a8a', fontWeight: 750, fontFamily: 'monospace', fontSize: '0.82rem' }}>
+                              {formatTaxInvoiceNumber(r.invoice_number, r.voucher_no || r.bill_no)}
                             </span>
                           </td>
 
                           {/* 4. Name of customer */}
-                          <td style={{ padding: '10px 14px' }}>
-                            <div style={{ fontWeight: 750, color: '#0f172a' }}>{r.name_of_customer || 'Guest'}</div>
-                            {r.rooms_str && (
-                              <span style={{ fontSize: '0.72rem', color: '#64748b' }}>Room: {r.rooms_str}</span>
-                            )}
+                          <td style={{ padding: '10px 14px', minWidth: '190px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <span style={{ fontWeight: 750, color: isUnpaidBtc ? '#b91c1c' : '#0f172a', fontSize: '0.86rem', letterSpacing: '0.2px' }}>
+                                  {r.name_of_customer || 'Guest'}
+                                </span>
+                                {isUnpaidBtc && (
+                                  <span style={{
+                                    background: '#fee2e2',
+                                    color: '#b91c1c',
+                                    border: '1px solid #f87171',
+                                    padding: '2px 7px',
+                                    borderRadius: '5px',
+                                    fontSize: '0.68rem',
+                                    fontWeight: 800,
+                                    whiteSpace: 'nowrap',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    lineHeight: '1.2',
+                                    boxShadow: '0 1px 2px rgba(185, 28, 28, 0.08)'
+                                  }}>
+                                    BTC UNPAID (₹0 Paid)
+                                  </span>
+                                )}
+                                {isPartialBtc && (
+                                  <span style={{
+                                    background: '#fef3c7',
+                                    color: '#b45309',
+                                    border: '1px solid #fcd34d',
+                                    padding: '2px 7px',
+                                    borderRadius: '5px',
+                                    fontSize: '0.68rem',
+                                    fontWeight: 800,
+                                    whiteSpace: 'nowrap',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    lineHeight: '1.2',
+                                    boxShadow: '0 1px 2px rgba(180, 83, 9, 0.08)'
+                                  }}>
+                                    BTC PARTIAL (₹{r.total_paid} / ₹{r.grand_total})
+                                  </span>
+                                )}
+                              </div>
+                              {r.rooms_str && (
+                                <span style={{
+                                  fontSize: '0.71rem',
+                                  fontWeight: 650,
+                                  color: isUnpaidBtc ? '#991b1b' : '#475569',
+                                  background: isUnpaidBtc ? 'rgba(254, 202, 202, 0.5)' : '#f1f5f9',
+                                  border: isUnpaidBtc ? '1px solid #fca5a5' : '1px solid #e2e8f0',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  whiteSpace: 'nowrap',
+                                  marginTop: '1px'
+                                }}>
+                                  Room: {r.rooms_str}
+                                </span>
+                              )}
+                            </div>
                           </td>
 
                           {/* 5. Room rent (base) */}
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, fontFamily: 'monospace', color: '#0f172a' }}>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, fontFamily: 'monospace', color: isUnpaidBtc ? '#dc2626' : '#0f172a' }}>
                             {formatCurrency(r.room_rent_base)}
                           </td>
 
                           {/* 6. Extra mattress (PAX)(base) */}
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: r.extra_mattress_pax > 0 ? '#7c3aed' : '#64748b' }}>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: isUnpaidBtc ? '#dc2626' : (r.extra_mattress_pax > 0 ? '#7c3aed' : '#64748b') }}>
                             {formatCurrency(r.extra_mattress_pax)}
                           </td>
 
-                          {/* 7. Visitors extra Breakfast (Base) */}
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: (r.visitor_breakfast_base || 0) > 0 ? '#b45309' : '#64748b' }}>
+                          {/* 7. Breakfast Plan (Base) */}
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: isUnpaidBtc ? '#dc2626' : ((r.plan_breakfast_base || 0) > 0 ? '#b45309' : '#64748b') }}>
+                            {formatCurrency(r.plan_breakfast_base || 0)}
+                          </td>
+
+                          {/* 8. OTA Extra Breakfast (Base) */}
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: (r.ota_extra_breakfast_base || 0) > 0 ? 700 : 400, color: isUnpaidBtc ? '#dc2626' : ((r.ota_extra_breakfast_base || 0) > 0 ? '#d97706' : '#64748b') }}>
+                            {formatCurrency(r.ota_extra_breakfast_base || 0)}
+                          </td>
+
+                          {/* 9. Visitors Breakfast (Base) */}
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: isUnpaidBtc ? '#dc2626' : ((r.visitor_breakfast_base || 0) > 0 ? '#b45309' : '#64748b') }}>
                             {formatCurrency(r.visitor_breakfast_base || 0)}
                           </td>
 
-                          {/* 8. Discount */}
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: r.discount > 0 ? '#dc2626' : '#64748b' }}>
-                            {formatCurrency(r.discount)}
+                          {/* 8. Expenses (Base) */}
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: isUnpaidBtc ? '#dc2626' : ((r.extra_expenses_base || 0) > 0 ? '#ea580c' : '#64748b') }}>
+                            {formatCurrency(r.extra_expenses_base || 0)}
                           </td>
 
-                          {/* 9. CGST */}
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#059669' }}>
+                          {/* 9. Discount (Check-in Trade Discount) */}
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: isUnpaidBtc ? '#dc2626' : ((r.checkin_discount !== undefined ? r.checkin_discount : (r.discount - (r.other_discount || 0))) > 0 ? '#dc2626' : '#64748b') }}>
+                            {formatCurrency(r.checkin_discount !== undefined ? r.checkin_discount : (r.discount - (r.other_discount || 0)))}
+                          </td>
+
+                          {/* 10. Other Discount (Checkout Discount) */}
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: isUnpaidBtc ? '#dc2626' : ((r.other_discount || r.checkout_discount || 0) > 0 ? '#be123c' : '#64748b') }}>
+                            {formatCurrency(r.other_discount || r.checkout_discount || 0)}
+                          </td>
+
+                          {/* 11. CGST */}
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: isUnpaidBtc ? '#dc2626' : '#059669' }}>
                             {formatCurrency(r.cgst || 0)}
                           </td>
 
-                          {/* 10. SGST */}
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#059669' }}>
+                          {/* 12. SGST */}
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: isUnpaidBtc ? '#dc2626' : '#059669' }}>
                             {formatCurrency(r.sgst || 0)}
                           </td>
 
-                          {/* 11. IGST - Always displayed in dedicated column */}
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: (r.igst || 0) > 0 ? '#0284c7' : '#64748b' }}>
+                          {/* 13. IGST - Always displayed in dedicated column */}
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: isUnpaidBtc ? '#dc2626' : ((r.igst || 0) > 0 ? '#0284c7' : '#64748b') }}>
                             {formatCurrency(r.igst || 0)}
                           </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(r.fnb_taxable || 0)}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(r.fnb_cgst || 0)}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(r.fnb_sgst || 0)}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(r.fnb_igst || 0)}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{formatCurrency(r.fnb_total || 0)}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(r.round_off || 0)}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>{formatCurrency(r.invoice_total || r.grand_total || 0)}</td>
+                          <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{r.rooms_str || '-'}</td>
+                          <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{r.btc_status || '-'}</td>
 
-                          {/* 12. Name Of Company */}
+                          {/* 14. Name Of Company (Strictly Customer Name if not Corporate, Never OTA) */}
                           <td style={{ padding: '10px 14px' }}>
-                            <span style={{ fontWeight: 650, color: '#0f172a' }}>
-                              {r.name_of_company || r.name_of_customer_gst || '-'}
+                            <span style={{ fontWeight: 650, color: isUnpaidBtc ? '#dc2626' : '#0f172a' }}>
+                              {r.name_of_company || r.name_of_customer_gst || r.name_of_customer || '-'}
                             </span>
-                            {r.booking_source === 'OTA' && (
-                              <span style={{ marginLeft: '6px', fontSize: '0.66rem', background: '#e0f2fe', color: '#0369a1', padding: '1px 5px', borderRadius: '4px', fontWeight: 750 }}>
-                                OTA
-                              </span>
-                            )}
                           </td>
 
-                          {/* 13. GST No of Company */}
+                          {/* 15. GST No of Company */}
                           <td style={{ padding: '10px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                             {(r.gst_no_of_company || r.gst_no_of_customer) && (r.gst_no_of_company || r.gst_no_of_customer) !== '-' ? (
-                              <span style={{ fontFamily: 'monospace', background: '#f8fafc', border: '1px solid #cbd5e1', padding: '2px 7px', borderRadius: '5px', fontSize: '0.78rem', fontWeight: 700, color: '#0f172a' }}>
+                              <span style={{ fontFamily: 'monospace', background: isUnpaidBtc ? '#fee2e2' : '#f8fafc', border: isUnpaidBtc ? '1px solid #f87171' : '1px solid #cbd5e1', padding: '2px 7px', borderRadius: '5px', fontSize: '0.78rem', fontWeight: 700, color: isUnpaidBtc ? '#b91c1c' : '#0f172a' }}>
                                 {r.gst_no_of_company || r.gst_no_of_customer}
                               </span>
                             ) : (
-                              <span style={{ color: '#94a3b8', fontWeight: 600 }}>-</span>
+                              <span style={{ color: isUnpaidBtc ? '#ef4444' : '#94a3b8', fontWeight: 600 }}>-</span>
                             )}
                           </td>
                         </tr>
@@ -3459,10 +3730,22 @@ export default function ManagePage({ onPrintClosingReport }) {
                         {formatCurrency(accountingSummary.total_extra_mattress || 0)}
                       </td>
                       <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'monospace', fontSize: '0.9rem', color: '#b45309' }}>
+                        {formatCurrency(accountingSummary.total_plan_breakfast || 0)}
+                      </td>
+                      <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'monospace', fontSize: '0.9rem', color: '#d97706', fontWeight: 800 }}>
+                        {formatCurrency(accountingSummary.total_ota_extra_breakfast || 0)}
+                      </td>
+                      <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'monospace', fontSize: '0.9rem', color: '#b45309' }}>
                         {formatCurrency(accountingSummary.total_visitor_breakfast || 0)}
                       </td>
+                      <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'monospace', fontSize: '0.9rem', color: '#ea580c' }}>
+                        {formatCurrency(accountingSummary.total_extra_expenses || 0)}
+                      </td>
                       <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'monospace', fontSize: '0.9rem', color: '#dc2626' }}>
-                        {formatCurrency(accountingSummary.total_discount || 0)}
+                        {formatCurrency(accountingSummary.total_checkin_discount || (accountingSummary.total_discount - (accountingSummary.total_other_discount || 0)))}
+                      </td>
+                      <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'monospace', fontSize: '0.9rem', color: '#be123c' }}>
+                        {formatCurrency(accountingSummary.total_other_discount || accountingSummary.total_checkout_discount || 0)}
                       </td>
                       <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'monospace', fontSize: '0.9rem', color: '#059669' }}>
                         {formatCurrency(accountingSummary.total_cgst || 0)}
@@ -3473,6 +3756,15 @@ export default function ManagePage({ onPrintClosingReport }) {
                       <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'monospace', fontSize: '0.9rem', color: '#0284c7', fontWeight: 800 }}>
                         {formatCurrency(accountingSummary.total_igst || 0)}
                       </td>
+                      <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(accountingSummary.total_fnb_taxable || 0)}</td>
+                      <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(accountingSummary.total_fnb_cgst || 0)}</td>
+                      <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(accountingSummary.total_fnb_sgst || 0)}</td>
+                      <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(accountingSummary.total_fnb_igst || 0)}</td>
+                      <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(accountingSummary.total_fnb || 0)}</td>
+                      <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(0)}</td>
+                      <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(accountingSummary.total_invoice || accountingSummary.total_grand || 0)}</td>
+                      <td></td>
+                      <td></td>
                       <td colSpan={2} style={{ padding: '12px 14px', textAlign: 'right', color: '#0f172a', fontSize: '0.92rem' }}>
                         Net Payable: <strong>{formatCurrency(accountingSummary.total_grand || 0)}</strong>
                       </td>
@@ -3482,6 +3774,21 @@ export default function ManagePage({ onPrintClosingReport }) {
               </table>
             </div>
           </div>
+          <OutletBillTable
+            title="Restaurant bills"
+            bills={restaurantBills}
+            summary={restaurantSummary}
+            placeLabel="Table or parcel"
+            taxLabel="GST"
+          />
+          <OutletBillTable
+            title="Bar bills"
+            bills={barBills}
+            summary={barSummary}
+            placeLabel="Seat or table"
+            taxLabel="VAT"
+            isBar
+          />
         </div>
       )}
 

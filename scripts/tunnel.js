@@ -104,7 +104,14 @@ function saveRemoteUrl(url) {
 }
 
 function startTunnel() {
-  console.log('🌐 Starting Cloudflare Worldwide Tunnel on port 3000...');
+  const { namedTunnelReady, startNamedTunnel, PUBLIC_URL } = require('../services/namedTunnel');
+  if (namedTunnelReady(rootDir)) {
+    console.log('🌐 Starting fixed Cloudflare door ' + PUBLIC_URL);
+    saveRemoteUrl(PUBLIC_URL);
+    return startNamedTunnel(rootDir);
+  }
+  console.warn('Fixed door crm.dominal.in is not set up yet. Run scripts\\setup_named_tunnel.ps1 once.');
+  console.log('🌐 Starting a temporary Cloudflare tunnel on port 3000 until that setup is done...');
   const proc = spawn(cloudflaredPath, ['tunnel', '--url', 'http://localhost:3000'], {
     cwd: rootDir,
     windowsHide: true

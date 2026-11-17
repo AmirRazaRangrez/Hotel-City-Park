@@ -22,7 +22,7 @@ describe('Extra Bed Capacity & Direct Add Verification', () => {
   it('2. handleDirectAddExtraBed must exist and directly increment room extra beds with declared rate', () => {
     expect(content).toContain('const handleDirectAddExtraBed = (targetRoomId) => {');
     const fnStart = content.indexOf('const handleDirectAddExtraBed =');
-    const fnBody = content.slice(fnStart, fnStart + 1200);
+    const fnBody = content.slice(fnStart, fnStart + 2000);
     expect(fnBody).toContain('getRoomExtraBedRate(targetRoom)');
     expect(fnBody).toContain('roomExtraBeds: updatedRoomExtraBeds');
     expect(fnBody).toContain('roomExtraBedRates: updatedRoomExtraBedRates');

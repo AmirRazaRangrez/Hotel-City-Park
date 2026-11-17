@@ -568,9 +568,9 @@ export async function fetchApprovals(forceFresh = false): Promise<{ pending: any
         };
 
         if (st === 'PENDING') {
-          pending.push(item);
+          pendingList.push(item);
         } else {
-          history.push(item);
+          historyList.push(item);
         }
       }
 
@@ -1132,11 +1132,52 @@ export async function fetchStayDetails(id: any): Promise<any | null> {
 
     const foodTotal = restaurantOrders.reduce((sum: number, o: any) => sum + Number(o.total || 0), 0);
     const barTotal = barOrders.reduce((sum: number, o: any) => sum + Number(o.total || 0), 0);
-    const roomCharge = Number(meta.roomCharge ?? meta.totalRoomCharge ?? 0);
-    const grandTotal = Number(meta.grandTotal ?? (roomCharge + foodTotal + barTotal));
-    const advancePaid = Number(meta.paid ?? meta.advancePaid ?? occ?.advance_payment ?? 0);
-    const balanceDue = Number(meta.pending ?? Math.max(0, grandTotal - advancePaid));
-    const rawPayments = Array.isArray(meta.payments) && meta.payments.length > 0 ? meta.payments : (occ?.payments || []);
+    const roomCharge = Number(
+      meta.roomCharge ??
+      meta.totalRoomCharge ??
+      occ?.total_room_charge ??
+      occ?.room_rate ??
+      occ?.custom_tariff ??
+      0
+    );
+    const fallbackTotal = roomCharge > 0
+      ? (roomCharge + foodTotal + barTotal)
+      : Number(occ?.total_room_charge ?? occ?.total_paid ?? occ?.advance_payment ?? 0);
+    const grandTotal = Number(meta.grandTotal ?? meta.total ?? fallbackTotal);
+    const advancePaid = Number(meta.paid ?? meta.advancePaid ?? occ?.advance_payment ?? occ?.total_paid ?? 0);
+    const balanceDue = Number(meta.pending ?? meta.balanceDue ?? Math.max(0, grandTotal - advancePaid));
+    const refundDue = (grandTotal > 0 && advancePaid > grandTotal)
+      ? Number(meta.refundDue || (advancePaid - grandTotal))
+      : 0;
+
+    const rcptNo = meta.advanceReceiptNo || occ?.advance_receipt_no || (occ?.booking_id ? ('CR' + occ.booking_id) : 'CR01');
+    const pMode = meta.paymentMode || occ?.advance_payment_mode || 'Cash';
+
+    let rawPayments = Array.isArray(meta.payments) && meta.payments.length > 0
+      ? meta.payments
+      : (Array.isArray(occ?.payments) && occ.payments.length > 0 ? occ.payments : []);
+
+    if (rawPayments.length === 0 && advancePaid > 0) {
+      rawPayments = [{
+        id: rcptNo,
+        receiptNo: rcptNo,
+        receipt_no: rcptNo,
+        amount: advancePaid,
+        base_amount: advancePaid,
+        mode: pMode,
+        payment_mode: pMode,
+        cashier: meta.checkedInBy || occ?.checked_in_by || 'Front Desk Staff',
+        cashier_name: meta.checkedInBy || occ?.checked_in_by || 'Front Desk Staff',
+        date: occ?.checkin_time || meta.checkinTime || new Date().toISOString(),
+        created_at: occ?.checkin_time || meta.checkinTime || new Date().toISOString(),
+        notes: 'Paid at reception desk (Check-In Advance)',
+        type: 'advance',
+        payment_type: 'advance',
+        split_cash: String(pMode).toLowerCase() === 'cash' ? advancePaid : 0,
+        split_online: (String(pMode).toLowerCase() === 'upi' || String(pMode).toLowerCase() === 'online') ? advancePaid : 0,
+        split_card: (String(pMode).toLowerCase() === 'card' || String(pMode).toLowerCase() === 'pos') ? advancePaid : 0
+      }];
+    }
 
     return {
       room: {
@@ -1158,14 +1199,14 @@ export async function fetchStayDetails(id: any): Promise<any | null> {
         meal_plan: meta.mealPlan || occ?.meal_plan || 'without_breakfast',
         checkin_time: occ?.checkin_time || meta.checkinTime,
         approx_checkout_time: meta.approxCheckout || occ?.approx_checkout_time || '',
-        total_room_charge: roomCharge,
+        total_room_charge: roomCharge > 0 ? roomCharge : Number(occ?.total_room_charge || occ?.room_rate || 0),
         room_rate: Number(meta.roomRate || meta.staffRoomRate || occ?.room_rate || occ?.custom_tariff || 0),
         custom_tariff: Number(meta.customTariff || meta.roomRate || occ?.custom_tariff || 0),
         total_paid: advancePaid,
         advance_payment: advancePaid,
-        voucher_number: meta.voucherNumber || '',
-        advance_receipt_no: meta.advanceReceiptNo || '',
-        advance_payment_mode: meta.paymentMode || occ?.advance_payment_mode || 'Cash',
+        voucher_number: meta.voucherNumber || occ?.voucher_number || '',
+        advance_receipt_no: meta.advanceReceiptNo || occ?.advance_receipt_no || '',
+        advance_payment_mode: pMode,
         booking_source: meta.source || meta.bookingSource || occ?.booking_source || 'Walk-in',
         ota_platform: meta.otaPlatform || meta.ota_platform || occ?.ota_platform || null,
         otaPlatform: meta.otaPlatform || meta.ota_platform || occ?.ota_platform || null,
@@ -1188,8 +1229,16 @@ export async function fetchStayDetails(id: any): Promise<any | null> {
         grandTotal,
         advancePaid,
         balanceDue,
-        refundDue: Number(meta.refundDue || Math.max(0, advancePaid - grandTotal)),
-        stayCalcNow: meta.stayCalcNow
+        refundDue,
+        stayCalcNow: meta.stayCalcNow || {
+          roomCharge,
+          grandTotal,
+          paid: advancePaid,
+          balanceDue,
+          refundDue: 0,
+          stayDurationStr: '1 Day',
+          chargedDays: 1
+        }
       }
     };
   } catch (e) {

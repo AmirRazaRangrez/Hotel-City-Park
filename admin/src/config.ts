@@ -1,6 +1,4 @@
-export const CLOUD_TUNNEL_URL: string = 'https://struggle-opens-sam-finished.trycloudflare.com';
-
-const FIREBASE_TUNNEL_ENDPOINT = 'https://firestore.googleapis.com/v1/projects/hotelcitypark-crm/databases/(default)/documents/room_charges_inbox/cloud_tunnel_url?key=AIzaSyCtZnkdk1_q8rWrISnD8P2Rhi-jcPn1QTI';
+export const CLOUD_TUNNEL_URL: string = 'https://crm.dominal.in';
 
 const detectServerUrl = (): string => {
   if (typeof window !== 'undefined' && window.location) {
@@ -27,7 +25,7 @@ const detectServerUrl = (): string => {
 
 export const SERVER_URL: string = detectServerUrl();
 
-// Fetch latest active HTTPS tunnel from Firebase cloud sync
+// The public CRM address is fixed. Do not read Firestore to discover it.
 export const fetchCloudTunnelUrl = async (): Promise<string> => {
   if (typeof window !== 'undefined' && window.location) {
     const host = window.location.hostname;
@@ -35,33 +33,8 @@ export const fetchCloudTunnelUrl = async (): Promise<string> => {
       return 'http://localhost:3000';
     }
   }
-
-  try {
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), 4000) : null;
-    const res = await fetch(FIREBASE_TUNNEL_ENDPOINT, { signal: controller?.signal });
-    if (timer) clearTimeout(timer);
-    if (res.ok) {
-      const doc = await res.json();
-      const fresh = doc?.fields?.items_summary?.stringValue?.replace(/\/+$/, '');
-      if (fresh && fresh.startsWith('https://')) {
-        try {
-          if (typeof window !== 'undefined' && window.localStorage) {
-            window.localStorage.setItem('hcp_cached_tunnel_url', fresh);
-          }
-        } catch (_) {}
-        return fresh;
-      }
-    }
-  } catch (_) {}
-
   return CLOUD_TUNNEL_URL;
 };
-
-// Eagerly resolve active cloud tunnel in background on web load
-if (typeof window !== 'undefined' && window.location?.protocol === 'https:') {
-  fetchCloudTunnelUrl().catch(() => {});
-}
 
 // The owner app signs in by itself with this CRM staff account (must be a manager account).
 // Change these two lines to the manager username/password you use to log in to the CRM.

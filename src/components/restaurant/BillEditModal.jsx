@@ -13,9 +13,15 @@ export default function BillEditModal({
   onReprint
 }) {
   const { showToast, surchargeSettings } = useApp();
-  const cardPct = surchargeSettings?.card_surcharge_pct !== undefined ? Number(surchargeSettings.card_surcharge_pct) : 2.5;
-  const upiPct = surchargeSettings?.upi_tax_pct !== undefined ? Number(surchargeSettings.upi_tax_pct) : 0.4;
-  const upiThresh = surchargeSettings?.upi_tax_threshold !== undefined ? Number(surchargeSettings.upi_tax_threshold) : 2000;
+  const cardPct = surchargeSettings?.restaurant_card_surcharge_pct !== undefined
+    ? Number(surchargeSettings.restaurant_card_surcharge_pct)
+    : (surchargeSettings?.card_surcharge_pct !== undefined ? Number(surchargeSettings.card_surcharge_pct) : 0);
+  const upiPct = surchargeSettings?.restaurant_upi_mdr_pct !== undefined
+    ? Number(surchargeSettings.restaurant_upi_mdr_pct)
+    : (surchargeSettings?.upi_tax_pct !== undefined ? Number(surchargeSettings.upi_tax_pct) : 0);
+  const upiThresh = surchargeSettings?.restaurant_upi_threshold !== undefined
+    ? Number(surchargeSettings.restaurant_upi_threshold)
+    : (surchargeSettings?.upi_tax_threshold !== undefined ? Number(surchargeSettings.upi_tax_threshold) : 0);
 
   const [items, setItems] = useState([]);
   const [paymentMode, setPaymentMode] = useState('cash');
@@ -380,7 +386,7 @@ export default function BillEditModal({
 
         {/* Modal Body */}
         <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          
+
           {/* 1. Add Items Search Bar */}
           <div style={{ background: 'var(--bg-surface-secondary, #f8fafc)', padding: '12px 16px', borderRadius: '14px', border: '1.5px dashed var(--border-color, #cbd5e1)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>

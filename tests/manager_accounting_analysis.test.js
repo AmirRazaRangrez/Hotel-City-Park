@@ -182,52 +182,34 @@ describe('Manager Accounting & Analysis Audit Table, Filters, Print & Excel', ()
   });
 
   it('9. Verifies Name Of Company and GST No of Company rules (OTA vs Company vs BTC vs Hyphen)', () => {
-    // Helper replicating server logic
+    // Helper replicating updated server logic: NEVER show OTA platform in company column
     const resolveCompanyAndGst = (row) => {
-      const isOta = (row.booking_source || '').toUpperCase() === 'OTA' || Boolean(row.ota_platform);
+      const corporateCompanyName = (row.booking_company_name || row.company_name || row.btc_company_name || row.btc_ref_company_name || row.guest_company_name || '').trim();
+      const corporateGstNumber = (row.booking_gst_number || row.gst_number || row.btc_gst_number || row.guest_gst_number || '').trim();
+      const isOtaPlatformName = /^(ota|makemytrip|mmt|goibibo|agoda|booking\.?com|expedia|yatra|easemytrip)$/i.test(corporateCompanyName);
+
       let nameOfCompany = '';
-      if (isOta) {
-        nameOfCompany = row.ota_platform ? row.ota_platform.trim() : 'OTA';
-      } else if (row.booking_company_name && row.booking_company_name.trim()) {
-        nameOfCompany = row.booking_company_name.trim();
-      } else if (row.company_name && row.company_name.trim()) {
-        nameOfCompany = row.company_name.trim();
-      } else if (row.btc_company_name && row.btc_company_name.trim()) {
-        nameOfCompany = row.btc_company_name.trim();
-      } else if (row.guest_company_name && row.guest_company_name.trim()) {
-        nameOfCompany = row.guest_company_name.trim();
+      let gstNoOfCompany = '';
+
+      if (corporateCompanyName && !isOtaPlatformName) {
+        nameOfCompany = corporateCompanyName;
+        gstNoOfCompany = corporateGstNumber || '-';
       } else {
         nameOfCompany = (row.guest_name && row.guest_name.trim()) ? row.guest_name.trim() : '-';
+        gstNoOfCompany = '-';
       }
-
-      let gstNoOfCompany = '';
-      if (isOta) {
-        gstNoOfCompany = (row.booking_gst_number || row.guest_gst_number || '').trim();
-        if (!gstNoOfCompany) {
-          if (/makemytrip|mmt|goibibo/i.test(row.ota_platform || '')) {
-            gstNoOfCompany = '27AABCM6906E1ZW';
-          } else if (/booking\.?com/i.test(row.ota_platform || '')) {
-            gstNoOfCompany = '27AAGCB6887F1Z8';
-          } else if (/agoda/i.test(row.ota_platform || '')) {
-            gstNoOfCompany = '9919SGP29004OS2';
-          }
-        }
-      } else {
-        gstNoOfCompany = (row.booking_gst_number || row.gst_number || row.btc_gst_number || row.guest_gst_number || '').trim();
-      }
-      gstNoOfCompany = gstNoOfCompany || '-';
 
       return { nameOfCompany, gstNoOfCompany };
     };
 
-    // Test rule 1: OTA booking
+    // Test rule 1: OTA booking without corporate GST defaults to Customer Name, NEVER OTA platform
     const otaRes = resolveCompanyAndGst({
       booking_source: 'OTA',
       ota_platform: 'MakeMyTrip',
       guest_name: 'Amit Patel'
     });
-    expect(otaRes.nameOfCompany).toBe('MakeMyTrip');
-    expect(otaRes.gstNoOfCompany).toBe('27AABCM6906E1ZW');
+    expect(otaRes.nameOfCompany).toBe('Amit Patel');
+    expect(otaRes.gstNoOfCompany).toBe('-');
 
     // Test rule 2: Corporate details entered in stage 4 or booking
     const corpRes = resolveCompanyAndGst({

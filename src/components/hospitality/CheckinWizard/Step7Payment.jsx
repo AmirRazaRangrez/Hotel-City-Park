@@ -442,7 +442,7 @@ export default function Step7Payment({
           className="unified-pay-grid"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gridTemplateColumns: isBtc ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)',
             gap: '14px',
             marginBottom: '16px'
           }}
